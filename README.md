@@ -43,6 +43,19 @@ galileo> simplify(cos(y)^2 + sin(y)^2)
 1
 ```
 
+Or with Docker, on Intel or Apple Silicon:
+
+```
+docker run -it --rm cascala/galileo                          # interactive prompt
+docker run --rm -v "$PWD:/work" cascala/galileo file.gg      # run a file
+```
+
+To publish the image for both architectures:
+
+```
+docker buildx build --platform linux/amd64,linux/arm64 -t cascala/galileo:0.3.0 -t cascala/galileo:latest --push .
+```
+
 Type `help` for the list of commands, and `help(name)` for one of them. A statement ending
 in `;` runs without printing its result.
 
