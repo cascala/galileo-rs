@@ -539,13 +539,29 @@ fn type_name(v: &Expr) -> String {
     }
 }
 
+thread_local!(static RAND_STATE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+
+/// Seed the generator behind rand(); hosts without a clock (WebAssembly) call this
+pub fn seed_random(seed: u64) {
+    RAND_STATE.with(|s| s.set(seed | 1));
+}
+
+fn clock_seed() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        0x9e37_79b9_7f4a_7c15
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1
+    }
+}
+
 fn rand_f64() -> f64 {
-    use std::cell::Cell;
-    thread_local!(static S: Cell<u64> = const { Cell::new(0) });
-    S.with(|s| {
+    RAND_STATE.with(|s| {
         let mut x = s.get();
         if x == 0 {
-            x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
+            x = clock_seed();
         }
         x ^= x << 13;
         x ^= x >> 7;

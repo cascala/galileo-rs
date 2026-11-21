@@ -78,6 +78,22 @@ a header line `execute <length>`, `complete <cursor> <length>` or `inspect <curs
 then the code; each reply is one line of JSON with MIME bundles (text, LaTeX, Markdown, SVG,
 Plotly). [iGalileo](https://github.com/cascala/igalileo) wraps it in a small Python ipykernel.
 
+## WebAssembly
+
+The same engine runs in a browser. It has no dependencies and builds straight to WebAssembly
+(about 800 KB, no imports):
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown --lib
+# target/wasm32-unknown-unknown/release/galileo_rs.wasm
+```
+
+`src/wasm.rs` exports a small C ABI (`galileo_alloc`, `galileo_execute`, `galileo_complete`,
+`galileo_inspect`, `galileo_reset`, `galileo_seed`) whose replies are the same JSON as the
+`--kernel` protocol. iGalileo's JupyterLite site and the Galileo playground use it.
+`ls`, `cd` and `load` have no file system in the browser and report an error there.
+
 ## Language changes from the Scala version
 
 * Inside a matrix, `[a -b]` has two elements (as in Matlab); `[a - b]` and `[a-b]` are one.
@@ -103,6 +119,7 @@ Plotly). [iGalileo](https://github.com/cascala/igalileo) wraps it in a small Pyt
 | `src/plot.rs` | Figures: text, SVG and Plotly JSON |
 | `src/latex.rs`, `src/display.rs` | LaTeX and notebook MIME bundles |
 | `src/kernel.rs` | `galileo --kernel` protocol |
+| `src/wasm.rs` | WebAssembly entry points for the browser |
 
 ## Parity with the Scala version
 

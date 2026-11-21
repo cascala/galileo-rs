@@ -19,6 +19,8 @@ pub mod ode;
 pub mod commands;
 pub mod display;
 pub mod kernel;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
 
 pub use eval::{Output, Session};
 pub use expr::Expr;
