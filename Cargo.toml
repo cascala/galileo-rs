@@ -1,0 +1,16 @@
+[package]
+name = "galileo-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Galileo computer algebra system, in Rust"
+license = "Apache-2.0"
+repository = "https://github.com/cascala/galileo-rs"
+
+[lib]
+name = "galileo_rs"
+
+[[bin]]
+name = "galileo"
+path = "src/bin/galileo.rs"
+
+[dependencies]

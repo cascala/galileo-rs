@@ -1,0 +1,619 @@
+//! Evaluating parsed statements against a session (variables, `ans`).
+
+use crate::build::{self, *};
+use crate::calc;
+use crate::expr::{Const, Expr, Func};
+use crate::linalg::{self, Mat};
+use crate::num::Number;
+use crate::parser::{parse, Node, Op, Stmt};
+use crate::print::show;
+use std::collections::BTreeMap;
+
+pub type R<T> = Result<T, String>;
+
+/// What a statement produced
+#[derive(Clone, Debug, PartialEq)]
+pub enum Output {
+    Value(Expr),
+    /// assignments of several names, e.g. [L,U,P] = lu(A)
+    Assigned(Vec<(String, Expr)>),
+    Text(String),
+    Nothing,
+    Exit,
+}
+
+impl Output {
+    pub fn render(&self) -> String {
+        match self {
+            Output::Value(e) => show(e),
+            Output::Assigned(v) => {
+                v.iter().map(|(n, e)| format!("{} =\n{}", n, show(e))).collect::<Vec<_>>().join("\n")
+            }
+            Output::Text(s) => s.clone(),
+            Output::Nothing | Output::Exit => String::new(),
+        }
+    }
+}
+
+pub struct Session {
+    vars: BTreeMap<String, Expr>,
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn builtins() -> BTreeMap<String, Expr> {
+    let mut v = BTreeMap::new();
+    v.insert("pi".into(), Expr::Const(Const::Pi));
+    v.insert("e".into(), Expr::Const(Const::E));
+    v.insert("i".into(), Expr::Const(Const::I));
+    v.insert("j".into(), Expr::Const(Const::I));
+    v.insert("true".into(), Expr::Bool(true));
+    v.insert("false".into(), Expr::Bool(false));
+    v
+}
+
+impl Session {
+    pub fn new() -> Session {
+        Session { vars: builtins() }
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Expr> {
+        self.vars.get(name)
+    }
+    pub fn set(&mut self, name: &str, v: Expr) {
+        self.vars.insert(name.to_string(), v);
+    }
+
+    /// Run source text; one output (or error) per statement
+    pub fn run(&mut self, src: &str) -> Vec<R<Output>> {
+        match parse(src) {
+            Err(e) => vec![Err(format!("parse error: {}", e))],
+            Ok(stmts) => {
+                let mut out = vec![];
+                for s in stmts {
+                    let r = self.exec(&s);
+                    let stop = matches!(r, Ok(Output::Exit));
+                    out.push(r);
+                    if stop {
+                        break;
+                    }
+                }
+                out
+            }
+        }
+    }
+
+    /// Run source text and render it like the REPL does
+    pub fn run_to_string(&mut self, src: &str) -> String {
+        self.run(src)
+            .into_iter()
+            .map(|r| match r {
+                Ok(o) => o.render(),
+                Err(e) => format!("Error: {}", e),
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn exec(&mut self, s: &Stmt) -> R<Output> {
+        match s {
+            Stmt::Expr(n) => {
+                let v = self.eval(n)?;
+                self.set("ans", v.clone());
+                Ok(Output::Value(v))
+            }
+            Stmt::Assign(name, n) => {
+                let v = self.eval(n)?;
+                self.set(name, v.clone());
+                Ok(Output::Value(v))
+            }
+            Stmt::MultiAssign(names, n) => {
+                let vals = match n {
+                    Node::Call(f, args) if f == "lu" && args.len() == 1 => {
+                        let m = self.matrix_arg(&args[0], "lu")?;
+                        let (l, u, p) = linalg::lu(&m)?;
+                        match names.len() {
+                            // two outputs: A = L*U with L = P^T * L
+                            2 => vec![Expr::Matrix(linalg::matmul(&linalg::transpose(&p), &l)?), Expr::Matrix(u)],
+                            3 => vec![Expr::Matrix(l), Expr::Matrix(u), Expr::Matrix(p)],
+                            _ => return Err("lu returns 2 or 3 values".into()),
+                        }
+                    }
+                    _ => return Err("only lu(...) returns several values".into()),
+                };
+                let pairs: Vec<(String, Expr)> = names.iter().cloned().zip(vals).collect();
+                for (n, v) in &pairs {
+                    self.set(n, v.clone());
+                }
+                Ok(Output::Assigned(pairs))
+            }
+            Stmt::Command(c, arg) => self.command(c, arg.as_deref()),
+        }
+    }
+
+    fn command(&mut self, c: &str, arg: Option<&str>) -> R<Output> {
+        match c {
+            "who" | "whos" => {
+                let b = builtins();
+                let lines: Vec<String> = self
+                    .vars
+                    .iter()
+                    .filter(|(k, v)| b.get(*k) != Some(v))
+                    .map(|(k, v)| format!("{}:\t{}", k, type_name(v)))
+                    .collect();
+                Ok(Output::Text(format!("Defined variables:\n{}", lines.join("\n"))))
+            }
+            "clear" => {
+                self.vars = builtins();
+                Ok(Output::Nothing)
+            }
+            "exit" | "quit" => Ok(Output::Exit),
+            "pwd" => Ok(Output::Text(std::env::current_dir().map_err(|e| e.to_string())?.display().to_string())),
+            "ls" => {
+                let mut names: Vec<String> = std::fs::read_dir(".")
+                    .map_err(|e| e.to_string())?
+                    .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+                    .collect();
+                names.sort();
+                Ok(Output::Text(names.join("\n")))
+            }
+            "cd" => {
+                let dir = arg.ok_or("cd needs a directory")?;
+                std::env::set_current_dir(dir).map_err(|e| format!("cd {}: {}", dir, e))?;
+                Ok(Output::Nothing)
+            }
+            "load" => {
+                let file = arg.ok_or("load needs a file name")?;
+                let src = std::fs::read_to_string(file).map_err(|e| format!("load {}: {}", file, e))?;
+                let mut last = Output::Nothing;
+                for r in self.run(&src) {
+                    last = r?;
+                }
+                Ok(last)
+            }
+            "help" => Ok(Output::Text(crate::help::help(arg))),
+            _ => Err(format!("unknown command {}", c)),
+        }
+    }
+
+    fn matrix_arg(&mut self, n: &Node, f: &str) -> R<Mat> {
+        match self.eval(n)? {
+            Expr::Matrix(m) => Ok(m),
+            other => Err(format!("{} needs a matrix, got {}", f, show(&other))),
+        }
+    }
+
+    pub fn eval(&mut self, n: &Node) -> R<Expr> {
+        let v = match n {
+            Node::Num(s) => Expr::Num(Number::parse(s).ok_or_else(|| format!("bad number {}", s))?),
+            Node::Str(s) => Expr::Str(s.clone()),
+            Node::Ident(name) => self.vars.get(name).cloned().unwrap_or_else(|| Expr::Sym(name.clone())),
+            Node::Neg(a) => {
+                let a = self.eval(a)?;
+                arith(Op::Mul, Expr::int(-1), a)?
+            }
+            Node::Bin(op, a, b) => {
+                let a = self.eval(a)?;
+                // short-circuit boolean operators
+                match op {
+                    Op::And if !truthy(&a)? => return Ok(Expr::Bool(false)),
+                    Op::Or if truthy(&a)? => return Ok(Expr::Bool(true)),
+                    Op::And | Op::Or => return Ok(Expr::Bool(truthy(&self.eval(b)?)?)),
+                    _ => {}
+                }
+                let b = self.eval(b)?;
+                arith(*op, a, b)?
+            }
+            Node::Range(a, step, b) => {
+                let a = self.eval(a)?;
+                let s = match step {
+                    Some(s) => self.eval(s)?,
+                    None => Expr::one(),
+                };
+                let b = self.eval(b)?;
+                range(&a, &s, &b)?
+            }
+            Node::Matrix(rows) => {
+                let mut out: Vec<Vec<Expr>> = vec![];
+                for r in rows {
+                    // a row may contain row vectors / matrices that are concatenated
+                    let mut parts: Vec<Mat> = vec![];
+                    for x in r {
+                        match self.eval(x)? {
+                            Expr::Matrix(m) => parts.push(m),
+                            v if v.is_scalar() => parts.push(vec![vec![v]]),
+                            v => return Err(format!("{} can't be a matrix element", show(&v))),
+                        }
+                    }
+                    let h = parts[0].len();
+                    if parts.iter().any(|p| p.len() != h) {
+                        return Err("matrix blocks in a row must have the same height".into());
+                    }
+                    for k in 0..h {
+                        out.push(parts.iter().flat_map(|p| p[k].clone()).collect());
+                    }
+                }
+                if out.iter().any(|r| r.len() != out[0].len()) {
+                    return Err("not all rows have the same size".into());
+                }
+                // [x] is just x
+                if out.len() == 1 && out[0].len() == 1 {
+                    out.pop().unwrap().pop().unwrap()
+                } else {
+                    Expr::Matrix(out)
+                }
+            }
+            Node::Transpose(a) => match self.eval(a)? {
+                Expr::Matrix(m) => Expr::Matrix(linalg::transpose(&m)),
+                v => v,
+            },
+            Node::Index(a, idx) => {
+                let m = self.matrix_arg(a, "indexing")?;
+                let mut ix = vec![];
+                for i in idx {
+                    let v = self.eval(i)?;
+                    ix.push(v.num().and_then(|n| n.as_int()).filter(|&k| k >= 0).ok_or("indices must be non-negative integers")? as usize);
+                }
+                let (r, c) = linalg::dims(&m);
+                let oob = || "index out of bounds".to_string();
+                match ix.as_slice() {
+                    [i] if r == 1 => m[0].get(*i).cloned().ok_or_else(oob)?,
+                    [i] if c == 1 => m.get(*i).map(|row| row[0].clone()).ok_or_else(oob)?,
+                    [i] => Expr::Matrix(vec![m.get(*i).cloned().ok_or_else(oob)?]),
+                    [i, j] => m.get(*i).and_then(|row| row.get(*j)).cloned().ok_or_else(oob)?,
+                    _ => return Err("use one or two indices".into()),
+                }
+            }
+            Node::Call(f, args) => self.call(f, args)?,
+        };
+        check(&v)?;
+        Ok(v)
+    }
+
+    fn call(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        let arity = |n: usize| -> R<()> {
+            if args.len() == n { Ok(()) } else { Err(format!("{} takes {} argument{}", f, n, if n == 1 { "" } else { "s" })) }
+        };
+        if let Some(func) = Func::from_name(f) {
+            arity(1)?;
+            let a = self.eval(&args[0])?;
+            return elementwise(&a, &|x| build::func(func, x.clone()));
+        }
+        match f {
+            "exp" | "sqrt" => {
+                arity(1)?;
+                let a = self.eval(&args[0])?;
+                let g = if f == "exp" { build::exp } else { build::sqrt };
+                elementwise(&a, &|x| g(x.clone()))
+            }
+            "deriv" | "diff" => {
+                arity(2)?;
+                let y = self.eval(&args[0])?;
+                let x = match &args[1] {
+                    Node::Ident(n) => n.clone(),
+                    _ => return Err("deriv(y, x): x must be a variable name".into()),
+                };
+                Ok(calc::deriv(&y, &x))
+            }
+            "simplify" | "expand" | "factor" | "eval" | "complexity" | "info" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(format!("{} takes 1 argument", f));
+                }
+                let a = self.eval(&args[0])?;
+                Ok(match f {
+                    "simplify" => calc::simplify(&a),
+                    "expand" => calc::expand(&a),
+                    "factor" => calc::factor(&a),
+                    "eval" => calc::evalf(&a),
+                    "complexity" => Expr::int(a.size() as i128),
+                    _ => Expr::Str(structure(&a)),
+                })
+            }
+            "subs" => {
+                arity(3)?;
+                let e = self.eval(&args[0])?;
+                let x = match &args[1] {
+                    Node::Ident(n) => n.clone(),
+                    _ => return Err("subs(expr, x, value): x must be a variable name".into()),
+                };
+                let v = self.eval(&args[2])?;
+                Ok(calc::subst(&e, &x, &v))
+            }
+            "and" | "or" | "xor" => {
+                arity(2)?;
+                let a = truthy(&self.eval(&args[0])?)?;
+                let b = truthy(&self.eval(&args[1])?)?;
+                Ok(Expr::Bool(match f {
+                    "and" => a && b,
+                    "or" => a || b,
+                    _ => a ^ b,
+                }))
+            }
+            "not" => {
+                arity(1)?;
+                Ok(Expr::Bool(!truthy(&self.eval(&args[0])?)?))
+            }
+            "inv" => {
+                arity(1)?;
+                match self.eval(&args[0])? {
+                    Expr::Matrix(m) => Ok(Expr::Matrix(linalg::inverse(&m)?)),
+                    v if v.is_scalar() => arith(Op::Pow, v, Expr::int(-1)),
+                    _ => Err("inv needs a matrix".into()),
+                }
+            }
+            "det" => {
+                arity(1)?;
+                let m = self.matrix_arg(&args[0], "det")?;
+                linalg::det(&m)
+            }
+            "transpose" => {
+                arity(1)?;
+                let m = self.matrix_arg(&args[0], "transpose")?;
+                Ok(Expr::Matrix(linalg::transpose(&m)))
+            }
+            "lu" => Err("use [L,U] = lu(A) or [L,U,P] = lu(A)".into()),
+            "norm" => {
+                let m = self.matrix_arg(args.first().ok_or("norm takes a matrix")?, "norm")?;
+                let p = match args.get(1) {
+                    None => "2".to_string(),
+                    Some(Node::Ident(s)) => s.clone(),
+                    Some(Node::Str(s)) => s.clone(),
+                    Some(n) => show(&self.eval(n)?),
+                };
+                linalg::norm(&m, &p)
+            }
+            "eye" | "ones" | "zeros" | "rand" => {
+                if args.is_empty() {
+                    return Ok(match f {
+                        "zeros" => Expr::zero(),
+                        "rand" => Expr::float(rand_f64()),
+                        _ => Expr::one(),
+                    });
+                }
+                let n = self.size_arg(&args[0])?;
+                let m = match args.get(1) {
+                    Some(a) => self.size_arg(a)?,
+                    None => n,
+                };
+                Ok(Expr::Matrix(match f {
+                    "eye" => linalg::identity(n, m),
+                    "ones" => linalg::filled(n, m, Expr::one()),
+                    "zeros" => linalg::filled(n, m, Expr::zero()),
+                    _ => (0..n).map(|_| (0..m).map(|_| Expr::float(rand_f64())).collect()).collect(),
+                }))
+            }
+            "linspace" | "logspace" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(format!("{}(a, b[, n])", f));
+                }
+                let a = self.eval(&args[0])?;
+                let b = self.eval(&args[1])?;
+                let n = match args.get(2) {
+                    Some(x) => self.size_arg(x)?,
+                    None => if f == "linspace" { 100 } else { 50 },
+                };
+                let (a, b) = (calc::evalf(&a), calc::evalf(&b));
+                let (Some(a), Some(b)) = (a.num(), b.num()) else { return Err(format!("{} needs numbers", f)) };
+                let (a, b) = (a.to_f64(), b.to_f64());
+                let row: Vec<Expr> = (0..n)
+                    .map(|k| {
+                        let t = if n > 1 { a + (b - a) * k as f64 / (n - 1) as f64 } else { a };
+                        Expr::float(if f == "linspace" { t } else { 10f64.powf(t) })
+                    })
+                    .collect();
+                Ok(Expr::Matrix(vec![row]))
+            }
+            "max" | "min" => {
+                let mut vals = vec![];
+                for a in args {
+                    match self.eval(a)? {
+                        Expr::Matrix(m) => vals.extend(m.into_iter().flatten()),
+                        v => vals.push(v),
+                    }
+                }
+                let mut best: Option<(f64, Expr)> = None;
+                for v in vals {
+                    let x = calc::evalf(&v).num().ok_or_else(|| format!("{} needs numbers", f))?.to_f64();
+                    if best.as_ref().is_none_or(|(b, _)| if f == "max" { x > *b } else { x < *b }) {
+                        best = Some((x, v));
+                    }
+                }
+                best.map(|b| b.1).ok_or_else(|| format!("{} needs arguments", f))
+            }
+            _ => Err(format!("unknown function {}", f)),
+        }
+    }
+
+    fn size_arg(&mut self, n: &Node) -> R<usize> {
+        let v = self.eval(n)?;
+        v.num()
+            .filter(|n| n.is_integer() && !n.is_negative())
+            .map(|n| n.to_f64() as usize)
+            .ok_or_else(|| format!("{} is not a valid size", show(&v)))
+    }
+}
+
+fn type_name(v: &Expr) -> String {
+    match v {
+        Expr::Num(_) => "Scalar".into(),
+        Expr::Bool(_) => "Boolean".into(),
+        Expr::Matrix(m) => format!("Matrix:{}(r),{}(c)", m.len(), m.first().map_or(0, |r| r.len())),
+        Expr::Sym(_) => "Variable".into(),
+        Expr::Str(_) => "String".into(),
+        _ => "Expression".into(),
+    }
+}
+
+fn rand_f64() -> f64 {
+    use std::cell::Cell;
+    thread_local!(static S: Cell<u64> = Cell::new(0));
+    S.with(|s| {
+        let mut x = s.get();
+        if x == 0 {
+            x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
+        }
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        s.set(x);
+        (x >> 11) as f64 / (1u64 << 53) as f64
+    })
+}
+
+fn truthy(e: &Expr) -> R<bool> {
+    match e {
+        Expr::Bool(b) => Ok(*b),
+        Expr::Num(n) => Ok(!n.is_zero()),
+        other => Err(format!("{} is not a boolean", show(other))),
+    }
+}
+
+fn elementwise(a: &Expr, f: &dyn Fn(&Expr) -> Expr) -> R<Expr> {
+    match a {
+        Expr::Matrix(m) => Ok(Expr::Matrix(linalg::map(m, f))),
+        v if v.is_scalar() => Ok(f(v)),
+        v => Err(format!("can't apply a function to {}", show(v))),
+    }
+}
+
+/// Arithmetic on scalars and matrices
+pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
+    use Expr::Matrix as M;
+    for v in [&a, &b] {
+        if matches!(v, Expr::Bool(_) | Expr::Str(_)) {
+            return Err(format!("can't do arithmetic with {}", show(v)));
+        }
+    }
+    Ok(match (op, a, b) {
+        (Op::Add, M(x), M(y)) => M(linalg::zip(&x, &y, "sum", |p, q| add2(p.clone(), q.clone()))?),
+        (Op::Sub, M(x), M(y)) => M(linalg::zip(&x, &y, "difference", |p, q| sub(p.clone(), q.clone()))?),
+        (Op::Add, M(x), s) | (Op::Add, s, M(x)) => M(linalg::map(&x, |p| add2(p.clone(), s.clone()))),
+        (Op::Sub, M(x), s) => M(linalg::map(&x, |p| sub(p.clone(), s.clone()))),
+        (Op::Sub, s, M(x)) => M(linalg::map(&x, |p| sub(s.clone(), p.clone()))),
+        (Op::Mul, M(x), M(y)) => M(linalg::matmul(&x, &y)?),
+        (Op::Mul, M(x), s) => M(linalg::map(&x, |p| mul2(p.clone(), s.clone()))),
+        (Op::Mul, s, M(x)) => M(linalg::map(&x, |p| mul2(s.clone(), p.clone()))),
+        (Op::Div, M(x), M(y)) => M(linalg::matmul(&x, &linalg::inverse(&y)?)?),
+        (Op::Div, M(x), s) => M(linalg::map(&x, |p| div(p.clone(), s.clone()))),
+        (Op::Div, _, M(_)) => return Err("can't divide by a matrix; use inv(A)".into()),
+        (Op::Solve, M(x), M(y)) => M(linalg::solve(&x, &y)?),
+        (Op::Solve, ..) => return Err("A\\b needs two matrices".into()),
+        (Op::Pow, M(x), s) => {
+            let n = s.num().and_then(|n| n.as_int()).ok_or("matrix powers must be integers")?;
+            let base = if n < 0 { linalg::inverse(&x)? } else { x.clone() };
+            let (r, c) = linalg::dims(&x);
+            if r != c {
+                return Err("only square matrices have powers".into());
+            }
+            let mut acc = linalg::identity(r, r);
+            for _ in 0..n.abs() {
+                acc = linalg::matmul(&acc, &base)?;
+            }
+            M(acc)
+        }
+        (Op::Pow, _, M(_)) => return Err("matrix exponents are not supported".into()),
+        (Op::Add, x, y) => add2(x, y),
+        (Op::Sub, x, y) => sub(x, y),
+        (Op::Mul, x, y) => mul2(x, y),
+        (Op::Div, x, y) => div(x, y),
+        (Op::Pow, x, y) => pow(x, y),
+        (Op::And | Op::Or, ..) => unreachable!(),
+    })
+}
+
+/// Reject division by an exact zero anywhere in the result
+fn check(e: &Expr) -> R<()> {
+    match e {
+        Expr::Pow(b, p) if b.is_zero() && b.num().unwrap().is_exact() && p.num().is_some_and(|n| n.is_negative()) => {
+            Err("division by zero".into())
+        }
+        Expr::Add(v) | Expr::Mul(v) => v.iter().try_for_each(check),
+        Expr::Pow(a, b) => check(a).and(check(b)),
+        Expr::Func(_, a) => check(a),
+        Expr::Matrix(m) => m.iter().flatten().try_for_each(check),
+        _ => Ok(()),
+    }
+}
+
+/// a:step:b as a row vector; exact when the inputs are exact
+fn range(a: &Expr, s: &Expr, b: &Expr) -> R<Expr> {
+    let (Some(an), Some(sn), Some(bn)) = (a.num(), s.num(), b.num()) else {
+        return Err("ranges need numbers".into());
+    };
+    if sn.is_zero() {
+        return Err("range step can't be zero".into());
+    }
+    let count = (bn.sub(an).to_f64() / sn.to_f64() + 1e-10).floor();
+    if count < 0.0 {
+        return Ok(Expr::Matrix(vec![vec![]]));
+    }
+    if count > 1e7 {
+        return Err("range is too long".into());
+    }
+    // decimal steps like 0:0.1:0.5 give 0.3, not 0.30000000000000004
+    let decimals = |n: Number| -> Option<u32> {
+        let s = format!("{}", n.to_f64());
+        if s.contains('e') { None } else { Some(s.split('.').nth(1).map_or(0, |f| f.len()) as u32) }
+    };
+    let scale = match (an.is_exact() && sn.is_exact(), decimals(an), decimals(sn)) {
+        (false, Some(x), Some(y)) if x.max(y) <= 12 => Some(10f64.powi(x.max(y) as i32)),
+        _ => None,
+    };
+    let row = (0..=count as i128)
+        .map(|k| match scale {
+            Some(sc) => {
+                let v = ((an.to_f64() * sc).round() + k as f64 * (sn.to_f64() * sc).round()) / sc;
+                Expr::float(v)
+            }
+            None => Expr::Num(an.add(sn.mul(Number::int(k)))),
+        })
+        .collect();
+    Ok(Expr::Matrix(vec![row]))
+}
+
+/// info(e): the expression tree
+fn structure(e: &Expr) -> String {
+    use Expr::*;
+    let list = |v: &[Expr]| v.iter().map(structure).collect::<Vec<_>>().join(", ");
+    match e {
+        Num(n) => format!("Number({})", n),
+        Sym(s) => format!("Symbol({})", s),
+        Const(_) => format!("Constant({})", show(e)),
+        Add(v) => format!("Add({})", list(v)),
+        Mul(v) => format!("Mul({})", list(v)),
+        Pow(a, b) => format!("Pow({}, {})", structure(a), structure(b)),
+        Func(f, a) => format!("{}({})", f.name(), structure(a)),
+        Matrix(m) => format!("Matrix({}x{})", m.len(), m.first().map_or(0, |r| r.len())),
+        Bool(b) => format!("Bool({})", b),
+        Str(s) => format!("String({})", s),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn run(s: &str) -> String {
+        Session::new().run_to_string(s)
+    }
+    #[test]
+    fn basics() {
+        assert_eq!(run("1+10+u+1"), "u+12");
+        assert_eq!(run("8*y*u*y*u*y^5*y*u*u^6*r*y*7*y"), "56*r*u^9*y^10");
+        assert_eq!(run("4*va-5*va"), "-va");
+        assert_eq!(run("1/3+2/6"), "2/3");
+        assert_eq!(run("a=1;b=2;c=a+b"), "1\n2\n3");
+        assert_eq!(run("j^3"), "-i");
+        assert_eq!(run("log(e^5*e^4)"), "9");
+        assert_eq!(run("1/0"), "Error: division by zero");
+        assert_eq!(run("(1&&0)||true"), "true");
+        assert_eq!(run("A=[4 5 6;6 5 4;7 8 7];norm(inv(A)*A-eye(3),1)").lines().last().unwrap(), "0");
+        assert_eq!(run("deriv(x^3,x)"), "3*x^2");
+        assert_eq!(run("0.1:0.1:0.3").split('\t').count(), 3);
+        assert_eq!(run("1:3"), "1\t2\t3");
+    }
+}
