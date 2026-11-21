@@ -27,6 +27,9 @@ pub const ENTRIES: &[Entry] = &[
     e!("log", "Functions", "log(x)", "Natural logarithm.", "log(e)"),
     e!("sqrt", "Functions", "sqrt(x)", "Square root; sqrt(-1) is the imaginary unit i.", "sqrt(16)"),
     e!("abs", "Functions", "abs(x)", "Absolute value.", "abs(-3)"),
+    e!("sinh", "Functions", "sinh(x), cosh(x), tanh(x), asinh(x), acosh(x), atanh(x)", "Hyperbolic functions and their inverses.", "deriv(tanh(x), x)"),
+    e!("atan2", "Functions", "atan2(y, x)", "Angle of the point (x, y), in (-pi, pi].", "atan2(1.0, -1.0)"),
+    e!("functions", "Functions", "a(t), A(r), f(x, y)", "A call to an unknown one-letter name (optionally with digits or a subscript, like a_1) is an undefined function. deriv uses the chain rule: deriv(a(t)^2, t) is 2*a(t)*a'(t). Partial derivatives of functions of several variables are written f_,1 (first argument) and so on.", "deriv(a(t)^2, t)"),
     e!("max", "Functions", "max(a, b, ...), min(a, b, ...)", "Largest or smallest of numbers (matrix entries count individually).", "max(1, 2/3, pi)"),
     e!("simplify", "Algebra", "simplify(expr)", "Combines fractions, cancels common factors and applies sin^2 + cos^2 = 1, keeping the simplest form.", "simplify(sin(y)^2 + cos(y)^2)"),
     e!("expand", "Algebra", "expand(expr)", "Multiplies out products and powers.", "expand((a+b)^2)"),
@@ -47,6 +50,27 @@ pub const ENTRIES: &[Entry] = &[
     e!("range", "Matrices", "a:b or a:step:b", "Row vector from a to b. Exact for exact numbers.", "0:1/4:1"),
     e!("linspace", "Matrices", "linspace(a, b) or linspace(a, b, n)", "Row vector of n evenly spaced values from a to b (default 100).", "linspace(0, 1, 5)"),
     e!("logspace", "Matrices", "logspace(a, b) or logspace(a, b, n)", "Row vector of n values from 10^a to 10^b (default 50).", "logspace(0, 2, 3)"),
+    e!("index", "Matrices", "A[i], A[i, j], g[a, b], christoffel(g)[a, b, c]", "Indexing starts at 0. Works on matrices, metrics and tensor components.", "christoffel(metric.generate(polar))[1, 0, 1]"),
+    e!("odesolve", "Calculus", "odesolve([f1 f2], [y1 y2], t, [y1_0 y2_0], t0, t1 (, steps))", "Integrates dy/dt = f(t, y) numerically (Runge-Kutta) from t0 to t1 and returns y(t1): a number for one unknown, a row otherwise.", "odesolve([v, -x], [x v], t, [1 0], 0, pi)"),
+    e!("odeplot", "Calculus", "odeplot([f1 f2], [y1 y2], t, [y1_0 y2_0], t0, t1, [X Y] (, steps))", "Integrates dy/dt = f(t, y) numerically and plots the path given by X, Y (and Z for 3D), expressions in t and the unknowns.", "odeplot([v, -x], [x v], t, [1 0], 0, 2*pi, [x v])"),
+    e!("plot", "Plotting", "plot(f1, f2, ..., x, from, to) or plot(f, x)", "Plots one or more expressions of x. The range defaults to -10 .. 10.", "plot(sin(x), cos(x), x, 0, 2*pi)"),
+    e!("parametric", "Plotting", "parametric(fx, fy, t, from, to)", "Plots the curve (fx(t), fy(t)), with equal scales on both axes.", "parametric(cos(3*t), sin(2*t), t, 0, 2*pi)"),
+    e!("plot3d", "Plotting", "plot3d(f, x, a, b, y, c, d)", "Plots the surface z = f(x, y) over a <= x <= b, c <= y <= d.", "plot3d(sin(x)*cos(y), x, -pi, pi, y, -pi, pi)"),
+    e!("surface", "Plotting", "surface(fx, fy, fz, u, a, b, v, c, d)", "Plots a parametric surface.", "surface(sin(u)*cos(v), sin(u)*sin(v), cos(u), u, 0, pi, v, 0, 2*pi)"),
+    e!("parametric3d", "Plotting", "parametric3d(fx, fy, fz, t, from, to)", "Plots a curve in space.", "parametric3d(cos(t), sin(t), t/(2*pi), t, 0, 6*pi)"),
+    e!("show", "Plotting", "show(p1, p2, ...)", "Overlays plots: all 2D, or all 3D. Plots are values, so p = plot(...) stores one.", "show(plot(sin(x), x, 0, pi), plot(cos(x), x, 0, pi))"),
+    e!("metric", "Differential geometry", "metric([x1 x2 ...], [g11 g12 ...; ...]) or metric.generate(name)", "A metric with the given coordinates and components g_ab. Coordinates stay symbolic even if a variable of that name has a value. metric.generate gives a ready-made one: minkowski, euclidean, polar, spherical, two-sphere, three-sphere, torus, hyperbolic, schwarzschild.", "g = metric([r phi], [1 0; 0 r^2])"),
+    e!("inducedmetric", "Differential geometry", "inducedmetric([x y z], [u v])", "The metric induced by flat space on the surface (or curve, or hypersurface) x(u, v), y(u, v), z(u, v): the first fundamental form.", "inducedmetric([sin(u)*cos(v) sin(u)*sin(v) cos(u)], [u v])"),
+    e!("inverse", "Differential geometry", "inverse(g)", "Inverse metric g^ab.", "inverse(metric.generate(polar))"),
+    e!("christoffel", "Differential geometry", "christoffel(g), christoffelfirst(g)", "Christoffel symbols of the second kind Gamma^a_bc (christoffelsecond is the same), or of the first kind Gamma_abc. Pick one with christoffel(g)[a, b, c].", "christoffel(metric.generate(two-sphere))"),
+    e!("riemannsecond", "Differential geometry", "riemannsecond(g), riemannfirst(g)", "Riemann curvature tensor R^a_bcd (second) or R_abcd (first).", "riemannsecond(metric.generate(two-sphere))"),
+    e!("riccitensor", "Differential geometry", "riccitensor(g), ricciscalar(g)", "Ricci tensor R_ab and Ricci scalar R.", "ricciscalar(metric.generate(two-sphere))"),
+    e!("einsteintensor", "Differential geometry", "einsteintensor(g), einsteinscalar(g)", "Einstein tensor G_ab = R_ab - R g_ab / 2, and its trace.", "einsteintensor(metric.generate(schwarzschild))"),
+    e!("weyltensor", "Differential geometry", "weyltensor(g), schoutentensor(g)", "Weyl conformal tensor C_abcd and Schouten tensor P_ab (3 or more dimensions).", "weyltensor(metric.generate(three-sphere))"),
+    e!("gausscurvature", "Differential geometry", "gausscurvature(g)", "Gaussian curvature of a 2D metric.", "gausscurvature(metric.generate(two-sphere))"),
+    e!("kretschmann", "Differential geometry", "kretschmann(g)", "Kretschmann scalar R_abcd R^abcd.", "kretschmann(metric.generate(schwarzschild))"),
+    e!("geodesics", "Differential geometry", "geodesics(g)", "The geodesic equations of a metric, with ' for d/ds.", "geodesics(metric.generate(two-sphere))"),
+    e!("geodesic", "Differential geometry", "geodesic(g, x0, v0, s1 (, [X Y (Z)] (, steps)))", "Integrates geodesics from position x0 with velocity v0 (one row per geodesic) up to parameter s1 and plots them, mapped through X, Y (, Z), expressions in the coordinates. Other variables in the metric need values first.", "geodesic(metric.generate(two-sphere), [pi/2 0], [1 1], 6, [sin(theta)*cos(phi) sin(theta)*sin(phi) cos(theta)])"),
 ];
 
 const ALIASES: &[(&str, &str)] = &[
@@ -61,7 +85,37 @@ const ALIASES: &[(&str, &str)] = &[
     ("not", "and"),
     ("zeros", "ones"),
     ("diff", "deriv"),
+    ("cosh", "sinh"),
+    ("tanh", "sinh"),
+    ("asinh", "sinh"),
+    ("acosh", "sinh"),
+    ("atanh", "sinh"),
+    ("christoffelfirst", "christoffel"),
+    ("christoffelsecond", "christoffel"),
+    ("riemannfirst", "riemannsecond"),
+    ("riemann", "riemannsecond"),
+    ("ricciscalar", "riccitensor"),
+    ("einsteinscalar", "einsteintensor"),
+    ("schoutentensor", "weyltensor"),
+    ("metric.generate", "metric"),
 ];
+
+/// all names help knows about, for completion
+pub fn names() -> Vec<&'static str> {
+    let mut v: Vec<&str> = ENTRIES.iter().map(|e| e.name).chain(ALIASES.iter().map(|a| a.0)).collect();
+    v.retain(|n| !matches!(*n, "functions" | "index" | "range"));
+    v.sort();
+    v.dedup();
+    v
+}
+
+pub fn plain(e: &Entry) -> String {
+    format!("{}\n  {}\n  Example: {}", e.usage, e.description, e.example)
+}
+
+pub fn markdown(e: &Entry) -> String {
+    format!("**`{}`**\n\n{}\n\nExample: `{}`", e.usage, e.description, e.example)
+}
 
 pub fn entry(name: &str) -> Option<&'static Entry> {
     let n = name.trim();
@@ -87,10 +141,10 @@ pub fn help(name: Option<&str>) -> String {
             for (t, es) in topics() {
                 s += &format!("  {}: {}\n", t, es.iter().map(|e| e.name).collect::<Vec<_>>().join(", "));
             }
-            s + "Operators: + - * / ^ \\ && ||. Constants: pi, e, i (or j)."
+            s + "Operators: + - * / ^ \\ && ||. Constants: pi, e, i (or j). End a line with ; to hide its result."
         }
         Some(n) => match entry(n) {
-            Some(e) => format!("{}\n  {}\n  Example: {}", e.usage, e.description, e.example),
+            Some(e) => plain(e),
             None => {
                 let close: Vec<&str> =
                     ENTRIES.iter().map(|e| e.name).filter(|c| c.starts_with(&n[..n.len().min(2)])).collect();

@@ -36,7 +36,9 @@ impl Output {
 }
 
 pub struct Session {
-    vars: BTreeMap<String, Expr>,
+    pub(crate) vars: BTreeMap<String, Expr>,
+    /// names that evaluate to themselves for now (plot variables, coordinates)
+    pub(crate) hidden: Vec<String>,
 }
 
 impl Default for Session {
@@ -58,7 +60,13 @@ fn builtins() -> BTreeMap<String, Expr> {
 
 impl Session {
     pub fn new() -> Session {
-        Session { vars: builtins() }
+        Session { vars: builtins(), hidden: vec![] }
+    }
+
+    /// names the user defined
+    pub fn variable_names(&self) -> Vec<String> {
+        let b = builtins();
+        self.vars.iter().filter(|(k, v)| b.get(*k) != Some(v)).map(|(k, _)| k.clone()).collect()
     }
 
     pub fn get(&self, name: &str) -> Option<&Expr> {
@@ -78,6 +86,26 @@ impl Session {
                     let r = self.exec(&s);
                     let stop = matches!(r, Ok(Output::Exit));
                     out.push(r);
+                    if stop {
+                        break;
+                    }
+                }
+                out
+            }
+        }
+    }
+
+    /// Run source text; each result comes with whether it should be hidden
+    /// (the statement ended in `;`). Stops at the first error.
+    pub fn run_quiet(&mut self, src: &str) -> Vec<(R<Output>, bool)> {
+        match crate::parser::parse_quiet(src) {
+            Err(e) => vec![(Err(format!("parse error: {}", e)), false)],
+            Ok(stmts) => {
+                let mut out = vec![];
+                for (s, quiet) in stmts {
+                    let r = self.exec(&s);
+                    let stop = matches!(r, Ok(Output::Exit) | Err(_));
+                    out.push((r, quiet));
                     if stop {
                         break;
                     }
@@ -192,7 +220,7 @@ impl Session {
         let v = match n {
             Node::Num(s) => Expr::Num(Number::parse(s).ok_or_else(|| format!("bad number {}", s))?),
             Node::Str(s) => Expr::Str(s.clone()),
-            Node::Ident(name) => self.vars.get(name).cloned().unwrap_or_else(|| Expr::Sym(name.clone())),
+            Node::Ident(name) => self.lookup(name),
             Node::Neg(a) => {
                 let a = self.eval(a)?;
                 arith(Op::Mul, Expr::int(-1), a)?
@@ -253,12 +281,20 @@ impl Session {
                 v => v,
             },
             Node::Index(a, idx) => {
-                let m = self.matrix_arg(a, "indexing")?;
+                let target = self.eval(a)?;
                 let mut ix = vec![];
                 for i in idx {
                     let v = self.eval(i)?;
+                    let v = if v.num().is_some_and(|n| !n.is_exact() && n.is_integer()) { Expr::int(v.num().unwrap().to_f64() as i128) } else { v };
                     ix.push(v.num().and_then(|n| n.as_int()).filter(|&k| k >= 0).ok_or("indices must be non-negative integers")? as usize);
                 }
+                let m = match target {
+                    Expr::Matrix(m) => m,
+                    Expr::Obj(o) => return crate::commands::index_obj(&o, &ix),
+                    // a scalar is a 1x1 matrix: x[0] and x[0,0] are x
+                    v if v.is_scalar() && ix.iter().all(|&k| k == 0) && ix.len() <= 2 => return Ok(v),
+                    v => return Err(format!("{} can't be indexed", show(&v))),
+                };
                 let (r, c) = linalg::dims(&m);
                 let oob = || "index out of bounds".to_string();
                 match ix.as_slice() {
@@ -293,11 +329,11 @@ impl Session {
             }
             "deriv" | "diff" => {
                 arity(2)?;
-                let y = self.eval(&args[0])?;
                 let x = match &args[1] {
                     Node::Ident(n) => n.clone(),
                     _ => return Err("deriv(y, x): x must be a variable name".into()),
                 };
+                let y = self.eval_hidden(&args[0], std::slice::from_ref(&x))?;
                 Ok(calc::deriv(&y, &x))
             }
             "simplify" | "expand" | "factor" | "eval" | "complexity" | "info" => {
@@ -341,7 +377,10 @@ impl Session {
             "inv" => {
                 arity(1)?;
                 match self.eval(&args[0])? {
-                    Expr::Matrix(m) => Ok(Expr::Matrix(linalg::inverse(&m)?)),
+                    Expr::Matrix(m) => {
+                        let inv = linalg::inverse(&m)?;
+                        Ok(Expr::Matrix(inv.iter().map(|r| r.iter().map(crate::ratfun::tidy).collect()).collect()))
+                    }
                     v if v.is_scalar() => arith(Op::Pow, v, Expr::int(-1)),
                     _ => Err("inv needs a matrix".into()),
                 }
@@ -425,8 +464,58 @@ impl Session {
                 }
                 best.map(|b| b.1).ok_or_else(|| format!("{} needs arguments", f))
             }
-            _ => Err(format!("unknown function {}", f)),
+            _ => self.command_call(f, args),
         }
+    }
+
+    /// Value of a variable; stored expressions pick up values assigned later
+    /// (K = gausscurvature(t); R = 2; K uses R = 2)
+    pub(crate) fn lookup(&self, name: &str) -> Expr {
+        if self.hidden.iter().any(|h| h == name) {
+            return Expr::Sym(name.to_string());
+        }
+        match self.vars.get(name) {
+            None => Expr::Sym(name.to_string()),
+            Some(v @ (Expr::Obj(_) | Expr::Bool(_) | Expr::Str(_))) => v.clone(),
+            Some(v) => self.resolve(v, &mut vec![name.to_string()]),
+        }
+    }
+
+    /// Substitute the values of bound symbols (but not hidden ones, nor the
+    /// names in `stack`, which guards against x = x + 1 loops)
+    pub(crate) fn resolve(&self, e: &Expr, stack: &mut Vec<String>) -> Expr {
+        match e {
+            Expr::Sym(s) => {
+                if stack.contains(s) || self.hidden.contains(s) {
+                    return e.clone();
+                }
+                match self.vars.get(s) {
+                    Some(v) if v.is_scalar() && v != e => {
+                        stack.push(s.clone());
+                        let r = self.resolve(v, stack);
+                        stack.pop();
+                        r
+                    }
+                    _ => e.clone(),
+                }
+            }
+            Expr::Num(_) | Expr::Const(_) | Expr::Bool(_) | Expr::Str(_) | Expr::Obj(_) => e.clone(),
+            _ => {
+                if e.symbols().iter().all(|s| !self.vars.contains_key(s) || self.hidden.contains(s) || stack.contains(s)) {
+                    return e.clone();
+                }
+                e.map_children(&mut |c| self.resolve(c, stack))
+            }
+        }
+    }
+
+    /// Evaluate with some names temporarily unbound
+    pub(crate) fn eval_hidden(&mut self, n: &Node, names: &[String]) -> R<Expr> {
+        let k = self.hidden.len();
+        self.hidden.extend(names.iter().cloned());
+        let r = self.eval(n);
+        self.hidden.truncate(k);
+        r
     }
 
     fn size_arg(&mut self, n: &Node) -> R<usize> {
@@ -445,13 +534,14 @@ fn type_name(v: &Expr) -> String {
         Expr::Matrix(m) => format!("Matrix:{}(r),{}(c)", m.len(), m.first().map_or(0, |r| r.len())),
         Expr::Sym(_) => "Variable".into(),
         Expr::Str(_) => "String".into(),
+        Expr::Obj(o) => o.kind().into(),
         _ => "Expression".into(),
     }
 }
 
 fn rand_f64() -> f64 {
     use std::cell::Cell;
-    thread_local!(static S: Cell<u64> = Cell::new(0));
+    thread_local!(static S: Cell<u64> = const { Cell::new(0) });
     S.with(|s| {
         let mut x = s.get();
         if x == 0 {
@@ -591,6 +681,8 @@ fn structure(e: &Expr) -> String {
         Matrix(m) => format!("Matrix({}x{})", m.len(), m.first().map_or(0, |r| r.len())),
         Bool(b) => format!("Bool({})", b),
         Str(s) => format!("String({})", s),
+        Apply(f, v) => format!("Function {}({})", f, list(v)),
+        Obj(o) => o.kind().to_string(),
     }
 }
 

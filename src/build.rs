@@ -253,23 +253,13 @@ pub fn func(f: Func, x: Expr) -> Expr {
     if let Num(n) = x {
         if !n.is_exact() {
             let v = n.to_f64();
-            let r = match f {
-                Sin => v.sin(),
-                Cos => v.cos(),
-                Tan => v.tan(),
-                Asin => v.asin(),
-                Acos => v.acos(),
-                Atan => v.atan(),
-                Log => v.ln(),
-                Abs => v.abs(),
-            };
-            return Expr::float(r);
+            return Expr::float(f.apply(v));
         }
     }
     let negated = x.is_negative_term();
     match f {
-        Sin | Tan | Asin | Atan if negated => return neg(func(f, neg(x))),
-        Cos | Abs if negated => return func(f, neg(x)),
+        Sin | Tan | Asin | Atan | Sinh | Tanh | Asinh | Atanh if negated => return neg(func(f, neg(x))),
+        Cos | Abs | Cosh if negated => return func(f, neg(x)),
         _ => {}
     }
     match f {
@@ -291,6 +281,9 @@ pub fn func(f: Func, x: Expr) -> Expr {
                 return Expr::one();
             }
         }
+        Sinh | Tanh | Asinh | Atanh if x.is_zero() => return Expr::zero(),
+        Cosh if x.is_zero() => return Expr::one(),
+        Acosh if x.is_one() => return Expr::zero(),
         Tan => {
             if x.is_zero() {
                 return Expr::zero();
@@ -358,6 +351,7 @@ pub fn func(f: Func, x: Expr) -> Expr {
                 return x;
             }
         }
+        _ => {}
     }
     Expr::Func(f, Box::new(x))
 }

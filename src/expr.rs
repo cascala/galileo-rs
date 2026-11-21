@@ -7,6 +7,7 @@
 
 use crate::num::Number;
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Const {
@@ -25,6 +26,12 @@ pub enum Func {
     Atan,
     Log,
     Abs,
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
 }
 
 impl Func {
@@ -38,6 +45,31 @@ impl Func {
             Func::Atan => "atan",
             Func::Log => "log",
             Func::Abs => "abs",
+            Func::Sinh => "sinh",
+            Func::Cosh => "cosh",
+            Func::Tanh => "tanh",
+            Func::Asinh => "asinh",
+            Func::Acosh => "acosh",
+            Func::Atanh => "atanh",
+        }
+    }
+    /// numeric value
+    pub fn apply(self, v: f64) -> f64 {
+        match self {
+            Func::Sin => v.sin(),
+            Func::Cos => v.cos(),
+            Func::Tan => v.tan(),
+            Func::Asin => v.asin(),
+            Func::Acos => v.acos(),
+            Func::Atan => v.atan(),
+            Func::Log => v.ln(),
+            Func::Abs => v.abs(),
+            Func::Sinh => v.sinh(),
+            Func::Cosh => v.cosh(),
+            Func::Tanh => v.tanh(),
+            Func::Asinh => v.asinh(),
+            Func::Acosh => v.acosh(),
+            Func::Atanh => v.atanh(),
         }
     }
     pub fn from_name(s: &str) -> Option<Func> {
@@ -50,6 +82,12 @@ impl Func {
             "atan" => Func::Atan,
             "log" => Func::Log,
             "abs" => Func::Abs,
+            "sinh" => Func::Sinh,
+            "cosh" => Func::Cosh,
+            "tanh" => Func::Tanh,
+            "asinh" => Func::Asinh,
+            "acosh" => Func::Acosh,
+            "atanh" => Func::Atanh,
             _ => return None,
         })
     }
@@ -64,9 +102,45 @@ pub enum Expr {
     Mul(Vec<Expr>),
     Pow(Box<Expr>, Box<Expr>),
     Func(Func, Box<Expr>),
+    /// an undefined function such as a(t), or a derivative of one, a'(t)
+    Apply(String, Vec<Expr>),
     Matrix(Vec<Vec<Expr>>),
     Bool(bool),
     Str(String),
+    /// figures, metrics and other displayable results
+    Obj(Rc<Obj>),
+}
+
+/// Results that are not algebraic expressions
+#[derive(Clone, Debug, PartialEq)]
+pub enum Obj {
+    Figure(crate::plot::Figure),
+    Figure3D(crate::plot::Figure3D),
+    Metric(crate::geometry::Metric),
+    Components(crate::geometry::Components),
+    Equations(crate::geometry::Equations),
+}
+
+impl Obj {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Obj::Figure(_) => "Figure",
+            Obj::Figure3D(_) => "Figure3D",
+            Obj::Metric(_) => "Metric",
+            Obj::Components(_) => "Components",
+            Obj::Equations(_) => "Equations",
+        }
+    }
+    /// Plain text rendering
+    pub fn text(&self) -> String {
+        match self {
+            Obj::Figure(f) => f.ascii(),
+            Obj::Figure3D(f) => f.text(),
+            Obj::Metric(m) => m.text(),
+            Obj::Components(c) => c.text(),
+            Obj::Equations(e) => e.text(),
+        }
+    }
 }
 
 use Expr::*;
@@ -104,7 +178,7 @@ impl Expr {
         matches!(self, Matrix(_))
     }
     pub fn is_scalar(&self) -> bool {
-        !matches!(self, Matrix(_) | Bool(_) | Str(_))
+        !matches!(self, Matrix(_) | Bool(_) | Str(_) | Obj(_))
     }
 
     /// Split a term into its numeric coefficient and the rest: `3*x*y` -> (3, x*y)
@@ -146,6 +220,7 @@ impl Expr {
             Add(v) | Mul(v) => v.iter().any(|e| e.contains_sym(name)),
             Pow(a, b) => a.contains_sym(name) || b.contains_sym(name),
             Func(_, a) => a.contains_sym(name),
+            Apply(_, v) => v.iter().any(|e| e.contains_sym(name)),
             Matrix(rows) => rows.iter().flatten().any(|e| e.contains_sym(name)),
             _ => false,
         }
@@ -162,6 +237,7 @@ impl Expr {
                     go(b, out)
                 }
                 Func(_, a) => go(a, out),
+                Apply(_, v) => v.iter().for_each(|x| go(x, out)),
                 Matrix(rows) => rows.iter().flatten().for_each(|x| go(x, out)),
                 _ => {}
             }
@@ -179,6 +255,7 @@ impl Expr {
             Add(v) | Mul(v) => 1 + v.iter().map(|e| e.size()).sum::<usize>(),
             Pow(a, b) => 1 + a.size() + b.size(),
             Func(_, a) => 1 + a.size(),
+            Apply(_, v) => 1 + v.iter().map(|e| e.size()).sum::<usize>(),
             Matrix(rows) => rows.iter().flatten().map(|e| e.size()).sum(),
             _ => 1,
         }
@@ -188,11 +265,12 @@ impl Expr {
     pub fn map_children(&self, f: &mut dyn FnMut(&Expr) -> Expr) -> Expr {
         use crate::build::*;
         match self {
-            Add(v) => add(v.iter().map(|x| f(x)).collect()),
-            Mul(v) => mul(v.iter().map(|x| f(x)).collect()),
+            Add(v) => add(v.iter().map(&mut *f).collect()),
+            Mul(v) => mul(v.iter().map(&mut *f).collect()),
             Pow(a, b) => pow(f(a), f(b)),
             Func(g, a) => func(*g, f(a)),
-            Matrix(rows) => Matrix(rows.iter().map(|r| r.iter().map(|x| f(x)).collect()).collect()),
+            Apply(g, v) => Apply(g.clone(), v.iter().map(&mut *f).collect()),
+            Matrix(rows) => Matrix(rows.iter().map(|r| r.iter().map(&mut *f).collect()).collect()),
             _ => self.clone(),
         }
     }
@@ -203,13 +281,14 @@ fn rank(e: &Expr) -> u8 {
         Num(_) => 0,
         Const(_) => 1,
         Sym(_) => 2,
-        Func(..) => 3,
+        Func(..) | Apply(..) => 3,
         Mul(_) => 4,
         Add(_) => 5,
         Pow(..) => 6, // compared by base before rank is consulted
         Matrix(_) => 7,
         Bool(_) => 8,
         Str(_) => 9,
+        Obj(_) => 10,
     }
 }
 
@@ -230,6 +309,9 @@ pub fn cmp(a: &Expr, b: &Expr) -> Ordering {
         (Const(x), Const(y)) => x.cmp(y),
         (Sym(x), Sym(y)) => x.cmp(y),
         (Func(f, x), Func(g, y)) => cmp(x, y).then(f.cmp(g)),
+        (Apply(f, x), Apply(g, y)) => f.cmp(g).then_with(|| cmp_lists(x, y)),
+        (Func(..), Apply(..)) => Ordering::Less,
+        (Apply(..), Func(..)) => Ordering::Greater,
         (Add(x), Add(y)) | (Mul(x), Mul(y)) => cmp_lists(x, y),
         (Matrix(x), Matrix(y)) => x.len().cmp(&y.len()),
         (Bool(x), Bool(y)) => x.cmp(y),

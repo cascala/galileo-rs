@@ -298,6 +298,13 @@ impl P {
             Some(Tok::Sym(s)) => *s,
             _ => return None,
         };
+        // inside [ ], "a -b" is two elements (as in Matlab); "a - b" and "a-b" subtract
+        if self.in_matrix > 0 && (s == "-" || s == "+") && self.space_before() {
+            let next_space = self.t.get(self.i + 1).is_some_and(|t| t.space_before);
+            if !next_space {
+                return None;
+            }
+        }
         Some(match s {
             "||" => (Op::Or, 1, false),
             "&&" => (Op::And, 2, false),
@@ -462,7 +469,14 @@ fn describe(t: &Tok) -> String {
 
 /// Parse a program: statements separated by `;` or newlines.
 pub fn parse(src: &str) -> Result<Vec<Stmt>, String> {
+    Ok(parse_quiet(src)?.into_iter().map(|(s, _)| s).collect())
+}
+
+/// Parse a program; each statement comes with whether it ends in `;`
+/// (which hides its result in notebooks and scripts)
+pub fn parse_quiet(src: &str) -> Result<Vec<(Stmt, bool)>, String> {
     let toks = lex(src)?;
+    let mut semi = vec![];
     // newlines outside brackets separate statements
     let mut t: Vec<Token> = vec![];
     let mut depth = 0i32;
@@ -473,6 +487,7 @@ pub fn parse(src: &str) -> Result<Vec<Stmt>, String> {
             _ => {}
         }
         let sep = depth <= 0 && matches!(tok.tok, Tok::Newline | Tok::Sym(";"));
+        semi.push(sep && matches!(tok.tok, Tok::Sym(";")));
         t.push(if sep { Token { tok: Tok::Sep, space_before: tok.space_before } } else { tok });
     }
     let mut p = P { t, i: 0, in_matrix: 0 };
@@ -484,7 +499,9 @@ pub fn parse(src: &str) -> Result<Vec<Stmt>, String> {
         if p.peek().is_none() {
             break;
         }
-        out.push(p.statement()?);
+        let st = p.statement()?;
+        let quiet = semi.get(p.i).copied().unwrap_or(false);
+        out.push((st, quiet));
         p.skip_newlines();
         match p.peek() {
             None => break,
@@ -493,6 +510,53 @@ pub fn parse(src: &str) -> Result<Vec<Stmt>, String> {
         }
     }
     Ok(out)
+}
+
+
+/// A node written back as source text (for plot labels): (text, precedence)
+fn src_prec(n: &Node) -> (String, u8) {
+    let wrap = |s: (String, u8), min: u8| if s.1 < min { format!("({})", s.0) } else { s.0 };
+    match n {
+        Node::Num(s) | Node::Ident(s) => (s.clone(), 9),
+        Node::Str(s) => (format!("\"{}\"", s), 9),
+        Node::Neg(a) => (format!("-{}", wrap(src_prec(a), 6)), 5),
+        Node::Bin(op, a, b) => {
+            let (sym, p, right) = match op {
+                Op::Or => ("||", 1, false),
+                Op::And => ("&&", 2, false),
+                Op::Add => ("+", 3, false),
+                Op::Sub => ("-", 3, false),
+                Op::Mul => ("*", 4, false),
+                Op::Div => ("/", 4, false),
+                Op::Solve => ("\\", 4, false),
+                Op::Pow => ("^", 6, true),
+            };
+            let (l, mut r) = if right { (p + 1, p) } else { (p, p + 1) };
+            // a*(-b) reads better than a*-b
+            if matches!(**b, Node::Neg(_)) {
+                r = r.max(6);
+            }
+            (format!("{}{}{}", wrap(src_prec(a), l), sym, wrap(src_prec(b), r)), p)
+        }
+        Node::Range(a, s, b) => {
+            let mut t = source(a);
+            if let Some(s) = s {
+                t = format!("{}:{}", t, source(s));
+            }
+            (format!("{}:{}", t, source(b)), 0)
+        }
+        Node::Call(f, args) => (format!("{}({})", f, args.iter().map(source).collect::<Vec<_>>().join(", ")), 9),
+        Node::Index(a, ix) => (format!("{}[{}]", wrap(src_prec(a), 9), ix.iter().map(source).collect::<Vec<_>>().join(", ")), 9),
+        Node::Matrix(rows) => (
+            format!("[{}]", rows.iter().map(|r| r.iter().map(source).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join("; ")),
+            9,
+        ),
+        Node::Transpose(a) => (format!("{}'", wrap(src_prec(a), 9)), 9),
+    }
+}
+
+pub fn source(n: &Node) -> String {
+    src_prec(n).0
 }
 
 #[cfg(test)]
@@ -520,7 +584,9 @@ mod tests {
         assert_eq!(s.len(), 3);
         assert!(matches!(&s[0], Stmt::Assign(n, Node::Matrix(rows)) if n == "A" && rows.len() == 2));
         assert!(matches!(&s[2], Stmt::MultiAssign(n, _) if n.len() == 2));
-        assert!(matches!(&parse("[a -b]").unwrap()[0], Stmt::Expr(Node::Matrix(r)) if r[0].len() == 1));
+        assert!(matches!(&parse("[a -b]").unwrap()[0], Stmt::Expr(Node::Matrix(r)) if r[0].len() == 2));
+        assert!(matches!(&parse("[a - b]").unwrap()[0], Stmt::Expr(Node::Matrix(r)) if r[0].len() == 1));
+        assert!(matches!(&parse("[a-b]").unwrap()[0], Stmt::Expr(Node::Matrix(r)) if r[0].len() == 1));
         assert!(matches!(&parse("load(examples/a.gg)").unwrap()[0], Stmt::Command(c, Some(p)) if c == "load" && p == "examples/a.gg"));
     }
 }

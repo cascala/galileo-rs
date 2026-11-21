@@ -53,12 +53,48 @@ pub fn deriv(e: &Expr, x: &str) -> Expr {
                 Func::Atan => pow(add2(Expr::one(), pow(a, Expr::int(2))), Expr::int(-1)),
                 Func::Log => pow(a, Expr::int(-1)),
                 Func::Abs => div(a.clone(), func(Func::Abs, a)),
+                Func::Sinh => func(Func::Cosh, a),
+                Func::Cosh => func(Func::Sinh, a),
+                Func::Tanh => pow(func(Func::Cosh, a), Expr::int(-2)),
+                Func::Asinh => pow(add2(pow(a, Expr::int(2)), Expr::one()), rat(-1, 2)),
+                Func::Acosh => pow(sub(pow(a, Expr::int(2)), Expr::one()), rat(-1, 2)),
+                Func::Atanh => pow(sub(Expr::one(), pow(a, Expr::int(2))), Expr::int(-1)),
             };
             mul(vec![outer, da])
+        }
+        Apply(f, args) if f == "atan2" && args.len() == 2 => {
+            // d atan2(y, x) = (x dy - y dx) / (x^2 + y^2)
+            let (y, xx) = (&args[0], &args[1]);
+            div(
+                sub(mul2(xx.clone(), deriv(y, x)), mul2(y.clone(), deriv(xx, x))),
+                add2(pow(xx.clone(), Expr::int(2)), pow(y.clone(), Expr::int(2))),
+            )
+        }
+        Apply(f, args) if args.len() == 1 => {
+            // chain rule with a new function f'
+            mul2(Apply(format!("{}'", f), args.clone()), deriv(&args[0], x))
+        }
+        Apply(f, args) => {
+            // partial derivatives: f_{,k} written as f_k with k the argument position (1-based)
+            add(args
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.contains_sym(x))
+                .map(|(k, a)| mul2(Apply(partial_name(f, k), args.clone()), deriv(a, x)))
+                .collect())
         }
         Matrix(rows) => Matrix(rows.iter().map(|r| r.iter().map(|v| deriv(v, x)).collect()).collect()),
         _ => Expr::zero(),
     }
+}
+
+/// name of the derivative of f with respect to its k-th argument: f_1, f_12, ...
+fn partial_name(f: &str, k: usize) -> String {
+    let (base, idx) = match f.rsplit_once(',') {
+        Some((b, i)) => (b.to_string(), i.to_string()),
+        None => (f.to_string(), String::new()),
+    };
+    format!("{},{}{}", base, idx, k + 1)
 }
 
 /// Multiply out products and positive integer powers of sums
@@ -352,6 +388,7 @@ pub fn simplify(e: &Expr) -> Expr {
     };
     let r = rationalize(&inner);
     consider(r.clone());
+    consider(crate::ratfun::tidy(&inner));
     consider(together(&inner));
     let ex = expand(&inner);
     consider(together(&ex));

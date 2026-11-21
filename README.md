@@ -16,6 +16,13 @@ underneath is new:
   The printer turns these back into `-`, `/` and `exp`, and its output can be pasted back in.
 * **Values, not statements.** The parser produces a syntax tree; functions are looked up by
   name at evaluation time, so `sinx` is just a variable and adding a function is one match arm.
+  Unknown names are errors, except one-letter names like `a(t)` or `f2(x)`, which are
+  undefined functions: `deriv(a(t)^2, t)` is `2*a(t)*a'(t)`.
+* **Rational-function simplification.** `simplify` puts expressions over a common
+  denominator, cancels polynomial factors exactly, and rewrites `sin^2` as `1-cos^2` where
+  that helps. Curvature results come out tidy (the Kerr Ricci tensor is zero in about 2 s).
+* **Late binding.** A variable holds an expression, and names in it are looked up again when
+  it is used: after `f = a*x; a = 2`, `f` is `2*x`.
 
 ## Try it
 
@@ -36,7 +43,45 @@ galileo> simplify(cos(y)^2 + sin(y)^2)
 1
 ```
 
-Type `help` for the list of commands.
+Type `help` for the list of commands, and `help(name)` for one of them. A statement ending
+in `;` runs without printing its result.
+
+## Differential geometry
+
+```
+galileo> S = metric.generate(schwarzschild)
+ds^2 = -(r-r_s)/r*dt^2 + r/(r-r_s)*dr^2 + r^2*dtheta^2 + r^2*sin(theta)^2*dphi^2
+galileo> christoffel(S)[1,0,0]
+r_s*(r-r_s)/(2*r^3)
+galileo> kretschmann(S)
+12*r_s^2/r^6
+```
+
+* `metric(coords, g)`, `metric.generate(name)` (minkowski, polar, euclidean, spherical,
+  two-sphere, three-sphere, schwarzschild, torus, hyperbolic), `inducedmetric(embedding, coords)`
+* `christoffel` (`christoffelfirst`, `christoffelsecond`), `riemann` (`riemannfirst`,
+  `riemannsecond`), `riccitensor`, `ricciscalar`, `einsteintensor`, `einsteinscalar`,
+  `schoutentensor`, `weyltensor`, `gausscurvature`, `kretschmann`, `geodesics`, `inverse`
+* Components are indexed from 0: `g[0,0]`, `riemann(g)[1,0,1,0]`.
+* `geodesic(g, x0, v0, s1)` integrates a geodesic and plots it.
+
+## Plots and ODEs
+
+`plot`, `parametric`, `plot3d`, `surface`, `parametric3d`, `odeplot`, `odesolve` and
+`geodesic`. In the terminal a plot is drawn in text; in a notebook it is an interactive
+Plotly chart with an SVG fallback. `odesolve` uses fixed-step RK4.
+
+## Jupyter
+
+`galileo --kernel` serves a simple line protocol on stdin/stdout (see `src/kernel.rs`):
+a header line `execute <length>`, `complete <cursor> <length>` or `inspect <cursor> <length>`,
+then the code; each reply is one line of JSON with MIME bundles (text, LaTeX, Markdown, SVG,
+Plotly). [iGalileo](https://github.com/cascala/igalileo) wraps it in a small Python ipykernel.
+
+## Language changes from the Scala version
+
+* Inside a matrix, `[a -b]` has two elements (as in Matlab); `[a - b]` and `[a-b]` are one.
+* `exit` is not available in a notebook.
 
 ## Layout
 
@@ -51,6 +96,13 @@ Type `help` for the list of commands.
 | `src/parser.rs` | Lexer and Pratt parser |
 | `src/eval.rs` | Sessions: variables, commands, built-in functions |
 | `src/help.rs` | `help` and `help(name)` |
+| `src/ratfun.rs` | Rational-function normal form behind `simplify` |
+| `src/geometry.rs` | Metrics, curvature tensors, geodesic equations |
+| `src/commands.rs` | Geometry, plot and ODE commands |
+| `src/numeric.rs`, `src/ode.rs` | Compiled numeric evaluation and RK4 |
+| `src/plot.rs` | Figures: text, SVG and Plotly JSON |
+| `src/latex.rs`, `src/display.rs` | LaTeX and notebook MIME bundles |
+| `src/kernel.rs` | `galileo --kernel` protocol |
 
 ## Parity with the Scala version
 
@@ -64,9 +116,9 @@ because it only equals `y` for `0 <= y <= pi`).
 ## Status
 
 - [x] Core algebra, calculus, simplification, matrices, parser, REPL
-- [ ] Tensors and differential geometry (metrics, Christoffel, Riemann, Ricci, Einstein, Weyl, geodesics, ODE solver)
-- [ ] Plotting (SVG and Plotly) and LaTeX output
-- [ ] Jupyter kernel
+- [x] Tensors and differential geometry (metrics, Christoffel, Riemann, Ricci, Einstein, Weyl, geodesics, ODE solver)
+- [x] Plotting (SVG and Plotly) and LaTeX output
+- [x] Jupyter kernel (through iGalileo)
 
 ## License
 

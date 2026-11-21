@@ -207,12 +207,7 @@ fn iroot(n: i128, q: u32) -> Option<i128> {
         return Some(n);
     }
     let guess = (n as f64).powf(1.0 / q as f64).round() as i128;
-    for c in [guess - 1, guess, guess + 1] {
-        if c >= 0 && c.checked_pow(q) == Some(n) {
-            return Some(c);
-        }
-    }
-    None
+    [guess - 1, guess, guess + 1].into_iter().find(|&c| c >= 0 && c.checked_pow(q) == Some(n))
 }
 
 impl PartialEq for Number {

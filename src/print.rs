@@ -17,6 +17,7 @@ pub fn show(e: &Expr) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         Str(s) => s.clone(),
+        Obj(o) => o.text(),
         _ => fmt(e).0,
     }
 }
@@ -51,6 +52,7 @@ fn fmt(e: &Expr) -> (String, u8) {
         ),
         Bool(b) => (b.to_string(), P_ATOM),
         Str(s) => (format!("\"{}\"", s), P_ATOM),
+        Obj(o) => (format!("<{}>", o.kind()), P_ATOM),
         Matrix(rows) => (
             format!(
                 "[{}]",
@@ -62,6 +64,7 @@ fn fmt(e: &Expr) -> (String, u8) {
             P_ATOM,
         ),
         Func(f, a) => (format!("{}({})", f.name(), fmt(a).0), P_ATOM),
+        Apply(f, v) => (format!("{}({})", f, v.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", ")), P_ATOM),
         Add(terms) => {
             // lead with a positive term when there is one: b-a rather than -a+b
             let mut terms = terms.clone();
