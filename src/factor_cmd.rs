@@ -415,6 +415,11 @@ impl Session {
                         Some(af::Form::Poly { f, x })
                     })
                     .or_else(|| {
+                        let (name, f, x, y) = af::catalogue_match2(&n.abs(), effort)?;
+                        family_name = Some(format!("from the list of families, with a second variable: {}", name));
+                        Some(af::Form::Poly2 { f, x, y })
+                    })
+                    .or_else(|| {
                         let (f, x) = af::base_search(&n.abs(), effort)?;
                         family_name = Some("found by writing N in base x with small digits".into());
                         Some(af::Form::Poly { f, x })
@@ -460,6 +465,13 @@ impl Session {
                     let m = format!("This number is {} with {} = {}{}. The polynomial factors, so the number splits into {} pieces:", fs, var, x, from, p.len());
                     (p, m.clone(), m)
                 }
+            }
+            Some(af::Form::Poly2 { f, x, y }) => {
+                let fs = af::show_hzpoly(f, "x", "y");
+                let p = af::poly2_pieces(f, x, y).unwrap_or_default();
+                let from = family_name.as_ref().map(|n| format!(" ({})", n)).unwrap_or_default();
+                let m = format!("This number is {} with x = {} and y = {}{}. The polynomial factors, so the number splits into {} pieces:", fs, x, y, from, p.len());
+                (p, m.clone(), m)
             }
             None => match &no_fit {
                 Some(fs) => {

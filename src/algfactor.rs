@@ -1346,6 +1346,8 @@ pub enum Form {
     Divides { b: u64, k: u64, plus: bool, searched: u64 },
     /// n = f(x) for a polynomial f (with integer coefficients) that factors
     Poly { f: ZPoly, x: BigInt },
+    /// n = y^d f(x/y), the homogeneous form of a polynomial f of degree d that factors
+    Poly2 { f: ZPoly, x: BigInt, y: BigInt },
 }
 
 /// Search for an algebraic form of n >= 2. effort (1 = about a second) sets
@@ -1565,6 +1567,19 @@ fn builtin_families() -> Vec<(String, ZPoly)> {
             out.push((format!("quartic {}", show_zpoly(&f, "x")), f));
         }
     }
+    let mono = |c: &[i64]| -> ZPoly { c.iter().map(|&v| BigInt::from(v)).collect() };
+    for (name, f) in [
+        ("Sophie Germain x^4 + 4 (with y: x^4 + 4y^4)", mono(&[4, 0, 0, 0, 1])),
+        ("Lucas x^6 + 27 (with y: x^6 + 27y^6)", mono(&[27, 0, 0, 0, 0, 0, 1])),
+        ("x^6 - 27", mono(&[-27, 0, 0, 0, 0, 0, 1])),
+        ("x^8 + 4", mono(&[4, 0, 0, 0, 0, 0, 0, 0, 1])),
+        ("x^8 + x^4 + 1", mono(&[1, 0, 0, 0, 1, 0, 0, 0, 1])),
+        ("x^4 + 2x^2 + 9", mono(&[9, 0, 2, 0, 1])),
+    ] {
+        if factors_nontrivially(&f) && !out.iter().any(|(_, g)| *g == f) {
+            out.push((name.to_string(), f));
+        }
+    }
     let chernick = pmul(&pmul(&[BigInt::one(), BigInt::from(6)], &[BigInt::one(), BigInt::from(12)]), &[BigInt::one(), BigInt::from(18)]);
     out.push(("Chernick (6x + 1)(12x + 1)(18x + 1)".into(), chernick));
     out
@@ -1661,4 +1676,83 @@ pub fn catalogue_match(n: &BigInt) -> Option<(String, ZPoly, BigInt)> {
         }
     }
     None
+}
+
+/// the homogeneous form y^d f(x/y) as a polynomial in x for a fixed y
+pub fn homogenize(f: &[BigInt], y: &BigInt) -> ZPoly {
+    let d = f.len() - 1;
+    f.iter().enumerate().map(|(i, c)| c * y.pow((d - i) as u32)).collect()
+}
+
+/// homogeneous text: x^2 - 3*x*y + 9*y^2
+pub fn show_hzpoly(p: &[BigInt], x: &str, y: &str) -> String {
+    let d = p.len() - 1;
+    let mut s = String::new();
+    for (k, c) in p.iter().enumerate().rev() {
+        if c.is_zero() {
+            continue;
+        }
+        let a = c.abs();
+        if s.is_empty() {
+            if c.is_negative() {
+                s.push('-');
+            }
+        } else {
+            s.push_str(if c.is_negative() { " - " } else { " + " });
+        }
+        let pw = |v: &str, e: usize| match e {
+            0 => String::new(),
+            1 => v.to_string(),
+            _ => format!("{}^{}", v, e),
+        };
+        let mono: Vec<String> = [pw(x, k), pw(y, d - k)].into_iter().filter(|m| !m.is_empty()).collect();
+        let mono = mono.join("*");
+        if mono.is_empty() {
+            s.push_str(&a.to_string());
+        } else if a.is_one() {
+            s.push_str(&mono);
+        } else {
+            s.push_str(&format!("{}*{}", a, mono));
+        }
+    }
+    s
+}
+
+/// Two-variable search: every catalogued family f (built in or added) is
+/// homogenized to F(x, y) = y^d f(x/y), and for y = 2, 3, ... up to 50*effort
+/// we look for a whole number x with F(x, y) = n and gcd(x, y) = 1.
+/// Returns the family's name, f, x and y.
+pub fn catalogue_match2(n: &BigInt, effort: u64) -> Option<(String, ZPoly, BigInt, BigInt)> {
+    let (_, all) = families();
+    let all: Vec<_> = all.into_iter().filter(|(_, f)| f.len() >= 3 && !f[0].is_zero()).collect();
+    let ymax = (50 * effort).min(100_000);
+    for yy in 2..=ymax {
+        let y = BigInt::from(yy);
+        for (name, f) in &all {
+            let fy = homogenize(f, &y);
+            if let Some(x) = int_root(&fy, n) {
+                if x.abs() >= BigInt::from(2) && crate::numtheory::gcd(&x, &y).is_one() {
+                    return Some((name.clone(), f.clone(), x, y));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// the pieces of n = F(x, y): the homogenized factors of f, evaluated at (x, y)
+pub fn poly2_pieces(f: &[BigInt], x: &BigInt, y: &BigInt) -> Option<Vec<Piece>> {
+    let (c, fs) = factor_zpoly(f)?;
+    let mut out = vec![];
+    if !c.abs().is_one() {
+        out.push(Piece { text: c.abs().to_string(), latex: c.abs().to_string(), value: c.abs(), d: 0 });
+    }
+    for (g, m) in fs {
+        let v = peval(&homogenize(&g, y), x).abs();
+        let gs = show_hzpoly(&g, "x", "y");
+        for _ in 0..m {
+            out.push(Piece { text: gs.clone(), latex: gs.clone(), value: v.clone(), d: 0 });
+        }
+    }
+    Some(out)
 }
