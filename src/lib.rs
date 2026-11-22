@@ -17,6 +17,8 @@ pub mod plot;
 pub mod geometry;
 pub mod ode;
 pub mod commands;
+pub mod cas;
+pub mod cas_cmd;
 pub mod display;
 pub mod kernel;
 #[cfg(target_arch = "wasm32")]

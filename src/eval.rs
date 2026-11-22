@@ -344,7 +344,7 @@ impl Session {
                 Ok(match f {
                     "simplify" => calc::simplify(&a),
                     "expand" => calc::expand(&a),
-                    "factor" => calc::factor(&a),
+                    "factor" => crate::cas::factor_poly(&a).unwrap_or_else(|| calc::factor(&a)),
                     "eval" => calc::evalf(&a),
                     "complexity" => Expr::int(a.size() as i128),
                     _ => Expr::Str(structure(&a)),

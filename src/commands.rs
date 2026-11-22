@@ -75,6 +75,9 @@ type Trajectory = (String, Vec<(f64, Vec<f64>)>);
 
 impl Session {
     pub(crate) fn command_call(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        if let Some(r) = self.cas_call(f, args) {
+            return r;
+        }
         match f {
             "plot" => self.plot(args),
             "parametric" => self.parametric(args),
