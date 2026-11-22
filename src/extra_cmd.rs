@@ -660,6 +660,7 @@ impl Session {
             "implicitplot" => self.implicitplot(args),
             "perm" | "compose" | "pinverse" | "porder" | "psign" | "cycles" | "generate" | "cayley" => self.perms(f, args),
             "dsolve" => self.dsolve(args),
+            "polydiv" => self.polydiv(args),
             _ => return None,
         };
         Some(r)
@@ -1042,6 +1043,38 @@ impl Session {
             ("cayley", _) => Err("usage: cayley(G) where G lists a group's permutations, one per row (see generate)".into()),
             _ => Err(format!("{} takes a permutation such as [2, 3, 1]", f)),
         }
+    }
+
+    /// [quotient, remainder] of polynomial long division
+    fn polydiv(&mut self, args: &[Node]) -> R<Expr> {
+        let [p, q, x] = args else { return Err("usage: polydiv(p, q, x) gives [quotient, remainder] with p = quotient*q + remainder".into()) };
+        let x = name(x, "polydiv: x")?;
+        let pv = self.eval_hidden(p, std::slice::from_ref(&x))?;
+        let qv = self.eval_hidden(q, std::slice::from_ref(&x))?;
+        let mut a = cas::poly_coeffs(&expand(&pv), &x).ok_or("polydiv: p must be a polynomial in x")?;
+        let b = cas::poly_coeffs(&expand(&qv), &x).ok_or("polydiv: q must be a polynomial in x")?;
+        let b: Vec<Expr> = b.into_iter().map(|c| simplify(&c)).collect();
+        let mut bl = b.clone();
+        while bl.last().is_some_and(cas::is_zero) {
+            bl.pop();
+        }
+        if bl.is_empty() {
+            return Err("polydiv: division by zero".into());
+        }
+        let m = bl.len() - 1;
+        let xs = Expr::sym(&x);
+        let mut quot = vec![Expr::zero(); a.len().saturating_sub(m).max(1)];
+        while a.len() > m {
+            let lead = simplify(&div(a[a.len() - 1].clone(), bl[m].clone()));
+            let k = a.len() - 1 - m;
+            for j in 0..=m {
+                a[k + j] = simplify(&sub(a[k + j].clone(), mul2(lead.clone(), bl[j].clone())));
+            }
+            quot[k] = lead;
+            a.pop();
+        }
+        let poly = |c: &[Expr]| add(c.iter().enumerate().map(|(k, v)| mul2(v.clone(), pow(xs.clone(), Expr::int(k as i128)))).collect());
+        Ok(row(vec![poly(&quot), poly(&a)]))
     }
 
     fn dsolve(&mut self, args: &[Node]) -> R<Expr> {
