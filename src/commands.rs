@@ -26,6 +26,12 @@ pub fn index_obj(o: &Obj, ix: &[usize]) -> R<Expr> {
             [i] => e.eqs.get(*i).map(|x| x.1.clone()).ok_or_else(|| "index out of bounds".into()),
             _ => Err("use one index to pick an equation".into()),
         },
+        Obj::Report(r) => match ix {
+            [i] => r.formulas.get(*i).cloned().ok_or_else(|| {
+                if r.formulas.is_empty() { "this result has no formulas".to_string() } else { format!("pick a formula from 0 to {}", r.formulas.len() - 1) }
+            }),
+            _ => Err("use one index to pick a formula, e.g. d[0]".into()),
+        },
         _ => Err(format!("a {} can't be indexed", o.kind())),
     }
 }
@@ -79,6 +85,9 @@ impl Session {
             return r;
         }
         if let Some(r) = self.extra_call(f, args) {
+            return r;
+        }
+        if let Some(r) = self.discover_call(f, args) {
             return r;
         }
         match f {
@@ -214,7 +223,7 @@ impl Session {
         let mut series = vec![];
         for n in fs {
             let (code, v) = self.function(n, std::slice::from_ref(&var))?;
-            series.push(Series { label: label(n, &v), points: xs.iter().map(|&x| (x, run(&code, &[x]))).collect() });
+            series.push(Series { label: label(n, &v), points: xs.iter().map(|&x| (x, run(&code, &[x]))).collect(), ..Default::default() });
         }
         Ok(obj(Obj::Figure(Figure::new(series, &var, "", false))))
     }
@@ -226,7 +235,7 @@ impl Session {
         let (gx, vx) = self.function(fx, std::slice::from_ref(&t))?;
         let (gy, vy) = self.function(fy, std::slice::from_ref(&t))?;
         let pts = plot::steps(a, b, plot::SAMPLES).iter().map(|&s| (run(&gx, &[s]), run(&gy, &[s]))).collect();
-        let s = Series { label: format!("({}, {})", label(fx, &vx), label(fy, &vy)), points: pts };
+        let s = Series { label: format!("({}, {})", label(fx, &vx), label(fy, &vy)), points: pts, ..Default::default() };
         Ok(obj(Obj::Figure(Figure::new(vec![s], "", "", true))))
     }
 
@@ -363,6 +372,7 @@ impl Session {
                                 (run(&fs[0], &a), run(&fs[1], &a))
                             })
                             .collect(),
+                        ..Default::default()
                     })
                     .collect();
                 Ok(obj(Obj::Figure(Figure::new(series, &labels[0], &labels[1], equal))))

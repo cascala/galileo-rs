@@ -34,6 +34,7 @@ pub fn bundle(e: &Expr) -> Option<Bundle> {
             Obj::Metric(m) => vec![("text/plain", m.text()), ("text/latex", m.latex()), ("text/markdown", m.latex())],
             Obj::Components(c) => vec![("text/plain", c.text()), ("text/latex", c.latex()), ("text/markdown", c.markdown())],
             Obj::Equations(q) => vec![("text/plain", q.text()), ("text/latex", q.latex()), ("text/markdown", q.markdown())],
+            Obj::Report(r) => vec![("text/plain", r.text.clone()), ("text/markdown", r.markdown.clone())],
         }),
         _ if typeset(e) => Some(vec![("text/plain", show(e)), ("text/latex", format!("$${}$$", latex(e)))]),
         _ => None,

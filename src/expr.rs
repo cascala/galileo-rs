@@ -119,6 +119,7 @@ pub enum Obj {
     Metric(crate::geometry::Metric),
     Components(crate::geometry::Components),
     Equations(crate::geometry::Equations),
+    Report(crate::discover::Report),
 }
 
 impl Obj {
@@ -129,6 +130,7 @@ impl Obj {
             Obj::Metric(_) => "Metric",
             Obj::Components(_) => "Components",
             Obj::Equations(_) => "Equations",
+            Obj::Report(r) => r.kind,
         }
     }
     /// Plain text rendering
@@ -139,6 +141,7 @@ impl Obj {
             Obj::Metric(m) => m.text(),
             Obj::Components(c) => c.text(),
             Obj::Equations(e) => e.text(),
+            Obj::Report(r) => r.text.clone(),
         }
     }
 }

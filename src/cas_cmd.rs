@@ -377,7 +377,7 @@ impl Session {
                 (rr * s.cos(), rr * s.sin())
             })
             .collect();
-        let s = crate::plot::Series { label: format!("r = {}", crate::parser::source(r)), points: pts };
+        let s = crate::plot::Series { label: format!("r = {}", crate::parser::source(r)), points: pts, ..Default::default() };
         Ok(Expr::Obj(Rc::new(Obj::Figure(crate::plot::Figure::new(vec![s], "x", "y", true)))))
     }
 

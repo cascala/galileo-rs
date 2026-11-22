@@ -93,10 +93,14 @@ fn ticks(lo: f64, hi: f64, target: usize) -> Vec<f64> {
 
 // ---------- 2D ----------
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Series {
     pub label: String,
     pub points: Vec<(f64, f64)>,
+    /// draw points (data) instead of a line
+    pub markers: bool,
+    /// vertical error bars, one per point (or none)
+    pub errors: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,8 +137,16 @@ impl Figure {
 
     /// Data bounds, ignoring poles: when a few points blow up (tan, 1/x), clip to the bulk
     fn bounds(&self) -> Bounds {
-        let pts: Vec<(f64, f64)> =
+        let mut pts: Vec<(f64, f64)> =
             self.series.iter().flat_map(|s| s.points.iter().copied()).filter(|p| finite(p.0) && finite(p.1)).collect();
+        for s in &self.series {
+            for (p, e) in s.points.iter().zip(&s.errors) {
+                if finite(p.0) && finite(p.1) && finite(*e) {
+                    pts.push((p.0, p.1 + e));
+                    pts.push((p.0, p.1 - e));
+                }
+            }
+        }
         if pts.is_empty() {
             return Bounds { x0: -1.0, x1: 1.0, y0: -1.0, y1: 1.0 };
         }
@@ -206,6 +218,24 @@ impl Figure {
                     ys.extend(r.iter().map(|p| p.1));
                     xs.push(f64::NAN);
                     ys.push(f64::NAN);
+                }
+                if s.markers {
+                    let pts: Vec<&(f64, f64)> = s.points.iter().collect();
+                    let mut fields = vec![
+                        ("type", jstr("scatter")),
+                        ("mode", jstr("markers")),
+                        ("name", jstr(&s.label)),
+                        ("x", jnums(&pts.iter().map(|p| p.0).collect::<Vec<_>>())),
+                        ("y", jnums(&pts.iter().map(|p| p.1).collect::<Vec<_>>())),
+                        ("marker", obj(&[("color", jstr(PALETTE[i % PALETTE.len()])), ("size", "8".into())])),
+                    ];
+                    if !s.errors.is_empty() {
+                        fields.push((
+                            "error_y",
+                            obj(&[("type", jstr("data")), ("array", jnums(&s.errors)), ("visible", "true".into())]),
+                        ));
+                    }
+                    return obj(&fields);
                 }
                 obj(&[
                     ("type", jstr("scatter")),
@@ -297,6 +327,27 @@ impl Figure {
         s.push_str(r#"<g clip-path="url(#plotarea)" fill="none" stroke-width="2" stroke-linejoin="round">"#);
         let span = b.y1 - b.y0;
         for (i, ser) in self.series.iter().enumerate() {
+            if ser.markers {
+                let c = PALETTE[i % PALETTE.len()];
+                for (k, &(x, y)) in ser.points.iter().enumerate() {
+                    if !(finite(x) && finite(y)) {
+                        continue;
+                    }
+                    if let Some(e) = ser.errors.get(k).filter(|e| finite(**e) && **e > 0.0) {
+                        let (xx, y0, y1) = (sx(x), sy(y - e), sy(y + e));
+                        let _ = write!(
+                            s,
+                            r#"<path d="M{xx:.2},{y0:.2}L{xx:.2},{y1:.2}M{:.2},{y0:.2}L{:.2},{y0:.2}M{:.2},{y1:.2}L{:.2},{y1:.2}" stroke="{c}" stroke-width="1.5"/>"#,
+                            xx - 4.0,
+                            xx + 4.0,
+                            xx - 4.0,
+                            xx + 4.0
+                        );
+                    }
+                    let _ = write!(s, r#"<circle cx="{:.2}" cy="{:.2}" r="4" fill="{c}" stroke="white" stroke-width="1"/>"#, sx(x), sy(y));
+                }
+                continue;
+            }
             let mut d = String::new();
             for run in self.runs(ser, &b) {
                 for (k, (x, y)) in run.iter().enumerate() {
@@ -331,11 +382,14 @@ impl Figure {
         for (i, ser) in self.series.iter().enumerate() {
             let y = mt + 14.0 + i as f64 * 18.0;
             let c = PALETTE[i % PALETTE.len()];
+            if ser.markers {
+                let _ = write!(s, r#"<circle cx="{:.2}" cy="{y:.2}" r="4" fill="{c}"/>"#, ml + 20.0);
+            } else {
+                let _ = write!(s, r#"<line x1="{:.2}" y1="{y:.2}" x2="{:.2}" y2="{y:.2}" stroke="{c}" stroke-width="2"/>"#, ml + 10.0, ml + 30.0);
+            }
             let _ = write!(
                 s,
-                r##"<line x1="{:.2}" y1="{y:.2}" x2="{:.2}" y2="{y:.2}" stroke="{c}" stroke-width="2"/><text x="{:.2}" y="{y:.2}" dy="4" fill="#111827" paint-order="stroke" stroke="white" stroke-width="3">{}</text>"##,
-                ml + 10.0,
-                ml + 30.0,
+                r##"<text x="{:.2}" y="{y:.2}" dy="4" fill="#111827" paint-order="stroke" stroke="white" stroke-width="3">{}</text>"##,
                 ml + 36.0,
                 esc(&ser.label)
             );

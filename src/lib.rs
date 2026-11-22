@@ -21,6 +21,7 @@ pub mod cas;
 pub mod cas_cmd;
 pub mod numtheory;
 pub mod extra_cmd;
+pub mod discover;
 pub mod display;
 pub mod kernel;
 #[cfg(target_arch = "wasm32")]

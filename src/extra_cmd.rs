@@ -962,11 +962,11 @@ impl Session {
             let code = numeric::compile(&g, &[xn.as_str(), yn.as_str()]);
             let pts = contour(&|a, b| numeric::run(&code, &[a, b]), lims[0], lims[1], lims[2], lims[3], 200);
             let label = labels.get(i).cloned().unwrap_or_else(|| show(c));
-            series.push(Series { label, points: pts });
+            series.push(Series { label, points: pts, ..Default::default() });
         }
         let mut fig = Figure::new(series, &xn, &yn, true);
         // keep the window the user asked for: add invisible corner points
-        fig.series.push(Series { label: String::new(), points: vec![] });
+        fig.series.push(Series { label: String::new(), points: vec![], ..Default::default() });
         fig.series.pop();
         Ok(Expr::Obj(Rc::new(Obj::Figure(fig))))
     }
