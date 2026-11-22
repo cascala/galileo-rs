@@ -403,26 +403,30 @@ impl Session {
         if step <= 0 || b < a || (b - a) / step > 5000 {
             return Err("factorsearch: give a <= b, a positive step and at most 5000 values".into());
         }
-        let e = self.eval_hidden(body, std::slice::from_ref(k))?;
-        let mut md = vec!["| k | polynomial | factors |".replace('k', k), "|---|---|---|".into()];
-        let mut tx = vec![];
-        let mut formulas = vec![];
-        let (mut total, mut hits) = (0, 0);
+        let mut vals = vec![];
         let mut kv = a;
         while kv <= b {
-            total += 1;
-            let ek = calc::expand(&calc::subst(&e, k, &int(kv)));
+            vals.push(int(kv));
+            kv += step;
+        }
+        let polys = self.with_values(body, k, &vals)?;
+        let mut md = vec![format!("| {} | polynomial | factors |", k), "|---|---|---|".into()];
+        let mut tx = vec![];
+        let mut formulas = vec![];
+        let (total, mut hits) = (vals.len(), 0);
+        for (kv, e) in vals.iter().zip(polys) {
+            let ek = calc::expand(&e);
             if let Some((c, fs)) = factor_parts(&ek) {
                 let count: u32 = fs.iter().map(|(_, m)| *m).sum();
-                if count >= 2 {
+                let monomial = fs.iter().all(|(f, _)| matches!(f, Expr::Sym(_)));
+                if count >= 2 && !monomial {
                     hits += 1;
                     let fe = assemble(c, &fs);
-                    md.push(format!("| {} | ${}$ | ${}$ |", kv, latex(&ek), latex(&fe)));
-                    tx.push(format!("{} = {}: {} = {}", k, kv, show(&ek), show(&fe)));
+                    md.push(format!("| {} | ${}$ | ${}$ |", show(kv), latex(&ek), latex(&fe)));
+                    tx.push(format!("{} = {}: {} = {}", k, show(kv), show(&ek), show(&fe)));
                     formulas.push(fe);
                 }
             }
-            kv += step;
         }
         let summary = format!("{} of {} values of {} give a polynomial that factors over the integers.", hits, total, k);
         if hits == 0 {

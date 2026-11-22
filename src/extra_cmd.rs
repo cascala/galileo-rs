@@ -1152,7 +1152,7 @@ impl Session {
     }
 
     /// evaluate a body for k = a, a+step, ..., b (the body sees k as a number)
-    fn with_values(&mut self, body: &Node, k: &str, vals: &[Expr]) -> R<Vec<Expr>> {
+    pub(crate) fn with_values(&mut self, body: &Node, k: &str, vals: &[Expr]) -> R<Vec<Expr>> {
         let saved = self.vars.remove(k);
         let hidden = self.hidden.clone();
         self.hidden.retain(|h| h != k);

@@ -963,6 +963,11 @@ pub fn algebraic_pieces(a: &BigInt, b: &BigInt, n: u64, plus: bool) -> Option<Ve
         b /= &g;
         pieces.push(Piece { text: format!("{}^{}", g, n), latex: format!("{}^{{{}}}", g, n), value: num_traits::pow(g.clone(), n as usize) });
     }
+    if a == b {
+        // a^n + a^n = 2 a^n
+        pieces.push(Piece { text: "2".into(), latex: "2".into(), value: BigInt::from(2) });
+        return if pieces.len() > 1 { Some(pieces) } else { None };
+    }
     // a = α^k, b = β^k: use the largest common power
     let (ra, ka) = perfect_power(&a);
     let (rb, kb) = perfect_power(&b);
