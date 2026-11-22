@@ -22,6 +22,7 @@ pub mod cas_cmd;
 pub mod numtheory;
 pub mod algfactor;
 pub mod algext;
+pub mod rsa_data;
 pub mod factor_cmd;
 pub mod extra_cmd;
 pub mod discover;
