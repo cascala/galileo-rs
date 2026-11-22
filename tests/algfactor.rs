@@ -73,3 +73,18 @@ fn numbers() {
     assert_eq!(detect_binomial(&(num_traits::pow(BigInt::from(10), 300) + 1)), Some((BigInt::from(10), 300, true)));
     assert_eq!(detect_binomial(&(num_traits::pow(BigInt::from(4), 30) - 1)), Some((BigInt::from(2), 60, false)));
 }
+
+#[test]
+fn prime_exponent() {
+    let p = algebraic_pieces(&BigInt::from(3), &BigInt::from(1), 67, true);
+    assert!(p.is_some());
+    assert_eq!(divisors_u64(134), vec![1, 2, 67, 134]);
+}
+
+
+#[test]
+fn small_primes_equal_to_a_base() {
+    for p in [53u128, 59, 61, 67, 71] {
+        assert!(galileo_rs::numtheory::small::is_prime(p), "{}", p);
+    }
+}

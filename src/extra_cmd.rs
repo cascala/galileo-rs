@@ -1188,6 +1188,8 @@ impl Session {
         let vals: Vec<Expr> = match &args[2..] {
             [list] => match self.eval(list)? {
                 Expr::Matrix(m) => m.into_iter().flatten().collect(),
+                // [5] is just 5: a list with one value
+                v @ Expr::Num(_) => vec![v],
                 _ => return Err(usage.into()),
             },
             [a, b] | [a, b, _] => {

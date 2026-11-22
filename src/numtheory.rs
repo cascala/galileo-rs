@@ -435,6 +435,10 @@ pub mod small {
         }
         let bases: &[u128] = &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71];
         'outer: for &a in bases {
+            if a % n == 0 {
+                // a prime base equal to n says nothing
+                continue;
+            }
             let mut x = powmod(a, d, n);
             if x == 1 || x == n - 1 {
                 continue;
