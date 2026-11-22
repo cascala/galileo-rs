@@ -418,6 +418,10 @@ impl Session {
         all.push(t.clone());
         let rhs = flat(self.eval_hidden(&args[0], &all)?);
         let y0 = self.numbers(&args[3], "the start values")?;
+        // odeplot: several rows of start values draw several solutions
+        let several = plot && !vars.is_empty() && y0.len() > vars.len() && y0.len() % vars.len() == 0;
+        let starts: Vec<Vec<f64>> = if several { y0.chunks(vars.len()).map(|c| c.to_vec()).collect() } else { vec![y0.clone()] };
+        let y0 = starts[0].clone();
         if rhs.len() != vars.len() || y0.len() != vars.len() {
             return Err(format!("{}: give one equation and one start value per unknown", if plot { "odeplot" } else { "odesolve" }));
         }
@@ -447,6 +451,20 @@ impl Session {
             fs.iter().map(|g| run(g, &a)).collect()
         };
         let traj = ode::rk4(&f, &y0, t0, t1, steps);
+        if several {
+            let m = map.unwrap();
+            let ms = flat(self.eval_hidden(m, &all)?);
+            let polar = ms.len() == 2 && show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
+            let what = if ms.len() == 2 { show(&ms[1]) } else { "solution".into() };
+            let trajs: Vec<Trajectory> = starts
+                .iter()
+                .map(|s0| {
+                    let label = format!("{} from [{}]", what, s0.iter().map(|v| if v.fract() == 0.0 && v.abs() < 1e15 { format!("{}", *v as i64) } else { crate::num::fmt_float(*v) }).collect::<Vec<_>>().join(", "));
+                    (label, ode::rk4(&f, s0, t0, t1, steps))
+                })
+                .collect();
+            return self.figure(trajs, &all, ms, polar);
+        }
         match map {
             None => {
                 let last = &traj[traj.len() - 1];

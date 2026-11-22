@@ -388,6 +388,77 @@ pub fn solve_trig(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
     Some(Ok(out))
 }
 
+/// Equations with x inside one exponential or logarithm, such as
+/// 70 e^(-10 k) = 40 or 2^x = 10: solve for the inside, then invert
+pub fn solve_inverse(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
+    fn find(e: &Expr, x: &str, out: &mut Vec<Expr>) {
+        let inner = match e {
+            Expr::Pow(b, h) if b.is_number() || matches!(**b, Expr::Const(_)) => h.contains_sym(x),
+            Expr::Func(Func::Log, h) => h.contains_sym(x),
+            _ => false,
+        };
+        if inner {
+            if !out.contains(e) {
+                out.push(e.clone());
+            }
+            return;
+        }
+        let _ = e.map_children(&mut |c| {
+            find(c, x, out);
+            c.clone()
+        });
+    }
+    fn replace(e: &Expr, from: &Expr, to: &Expr) -> Expr {
+        if e == from { to.clone() } else { e.map_children(&mut |c| replace(c, from, to)) }
+    }
+    let mut found = vec![];
+    find(f, x, &mut found);
+    if found.len() != 1 {
+        return None;
+    }
+    let t = found.remove(0);
+    let g = replace(f, &t, &Expr::sym("u__"));
+    if g.contains_sym(x) {
+        return None;
+    }
+    let roots = match cas::solve(&g, "u__") {
+        Ok(r) => r,
+        Err(e) => return Some(Err(e)),
+    };
+    let mut out: Vec<Expr> = vec![];
+    for r in roots {
+        if has_i(&r) {
+            continue;
+        }
+        let (inside, target) = match &t {
+            Expr::Func(Func::Log, h) => ((**h).clone(), exp(r.clone())),
+            Expr::Pow(b, h) => {
+                let v = numeric::value(&r);
+                if v.is_finite() && v <= 0.0 {
+                    continue;
+                }
+                ((**h).clone(), div(func(Func::Log, r.clone()), func(Func::Log, (**b).clone())))
+            }
+            _ => continue,
+        };
+        match cas::solve(&sub(inside, target), x) {
+            Ok(xs) => {
+                for v in xs {
+                    let v = simplify(&v);
+                    if !has_i(&v) && !out.iter().any(|o| cas::is_zero(&sub(o.clone(), v.clone()))) {
+                        out.push(v);
+                    }
+                }
+            }
+            Err(e) => return Some(Err(e)),
+        }
+    }
+    if out.is_empty() {
+        return Some(Err("no solution".into()));
+    }
+    Some(Ok(out))
+}
+
 // ---------- implicit curves (marching squares) ----------
 
 fn contour(f: &dyn Fn(f64, f64) -> f64, x0: f64, x1: f64, y0: f64, y1: f64, n: usize) -> Vec<(f64, f64)> {

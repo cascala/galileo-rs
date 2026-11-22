@@ -192,6 +192,9 @@ impl Session {
                 if let Some(t) = crate::extra_cmd::solve_trig(&eqs[0], &xs[0]) {
                     return t.map(row);
                 }
+                if let Some(t) = crate::extra_cmd::solve_inverse(&eqs[0], &xs[0]) {
+                    return t.map(row);
+                }
             }
             return r.map(row);
         }

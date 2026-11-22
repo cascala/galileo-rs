@@ -252,6 +252,19 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
     Pow(Box::new(b), Box::new(e))
 }
 
+/// n = b^k with the largest k > 1, if there is one
+fn perfect_power(n: i128) -> Option<(i128, i128)> {
+    for k in (2..=126).rev() {
+        let b = (n as f64).powf(1.0 / k as f64).round() as i128;
+        for c in [b - 1, b, b + 1] {
+            if c >= 2 && c.checked_pow(k as u32) == Some(n) {
+                return Some((c, k));
+            }
+        }
+    }
+    None
+}
+
 /// positive numbers, pi, e and their real powers
 fn positive_constant(e: &Expr) -> bool {
     match e {
@@ -508,6 +521,17 @@ pub fn func(f: Func, x: Expr) -> Expr {
         Log => {
             if x.is_one() {
                 return Expr::zero();
+            }
+            if let Num(Number::Rat(n, d)) = x {
+                // log(1/4) = -log(4), log(8) = 3*log(2)
+                if n == 1 && d > 1 {
+                    return neg(func(Log, Expr::int(d)));
+                }
+                if d == 1 && n > 1 {
+                    if let Some((b, k)) = perfect_power(n) {
+                        return mul2(Expr::int(k), func(Log, Expr::int(b)));
+                    }
+                }
             }
             if x == Const(Const::E) {
                 return Expr::one();
