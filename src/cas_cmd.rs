@@ -55,10 +55,11 @@ fn integer(e: &Expr, f: &str) -> R<i128> {
     if let Some(n) = exact_int(e) {
         return Ok(n);
     }
+    let orig = e;
     let e = calc::evalf(e);
-    let v = e.num().map(|n| n.to_f64()).ok_or_else(|| format!("{} needs integers, got {}", f, show(&e)))?;
+    let v = e.num().map(|n| n.to_f64()).ok_or_else(|| crate::extra_cmd::not_whole(orig, f))?;
     if v.fract() != 0.0 || v.abs() > 1e30 {
-        return Err(format!("{} needs integers, got {}", f, show(&e)));
+        return Err(crate::extra_cmd::not_whole(orig, f));
     }
     Ok(v as i128)
 }
@@ -84,6 +85,11 @@ fn modulo(va: &Expr, vb: &Expr) -> R<Expr> {
         let r = x % &y;
         let r = if r.is_negative() { r + y.abs() } else { r };
         return Ok(crate::extra_cmd::bnum(r));
+    }
+    for v in [va, vb] {
+        if crate::extra_cmd::is_huge(v) {
+            return Err(crate::extra_cmd::not_whole(v, "mod"));
+        }
     }
     let (x, y) = (real(va, "mod")?, real(vb, "mod")?);
     Ok(Expr::float(x - y * (x / y).floor()))

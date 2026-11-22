@@ -48,13 +48,68 @@ fn uint(n: u128) -> Expr {
     bnum(BigInt::from(n))
 }
 
+/// log10 of the number of digits of the largest power of numbers in e, for
+/// numbers too large to compute exactly (they stay symbolic, like 2^(10^9))
+fn log10_digits(e: &Expr) -> Option<f64> {
+    match e {
+        Expr::Pow(b, x) => {
+            let (b, x) = (b.num()?, x.num()?);
+            let lb = b.abs().to_f64().log10();
+            // log10 of the exponent, also when it is too large for a float
+            let lx = match x.as_bigint() {
+                Some(k) => {
+                    let f = k.to_f64().unwrap_or(f64::INFINITY);
+                    if f.is_finite() { f.abs().log10() } else { k.bits() as f64 * std::f64::consts::LOG10_2 }
+                }
+                None => x.to_f64().abs().log10(),
+            };
+            (lb > 0.0 && lx.is_finite()).then(|| lx + lb.log10())
+        }
+        Expr::Add(v) | Expr::Mul(v) => v.iter().filter_map(log10_digits).reduce(f64::max),
+        _ => None,
+    }
+}
+
+/// a number too large to compute exactly, kept as a power (2^(10^9) - 1)
+pub(crate) fn is_huge(e: &Expr) -> bool {
+    !matches!(e, Expr::Num(_)) && e.symbols().is_empty() && log10_digits(e).is_some_and(|l| l > 5.0)
+}
+
+/// why e is not a whole number we can work with, in words
+pub(crate) fn not_whole(e: &Expr, f: &str) -> String {
+    if let Some(l) = log10_digits(e).filter(|_| is_huge(e)) {
+        let digits = if l < 15.0 { format!("about {:.0} digits", 10f64.powf(l)) } else { format!("about 10^{:.0} digits", l) };
+        return format!(
+            "{}: this number is too large to compute: it would have {}. Galileo computes exact whole numbers up to about a million digits",
+            f, digits
+        );
+    }
+    if let Some(n) = e.num().filter(|n| !n.is_exact() && !n.to_f64().is_finite()) {
+        return format!(
+            "{}: got {}, a decimal too large to represent. eval turns whole numbers into decimals; leave it out to keep numbers exact",
+            f, n
+        );
+    }
+    if let Some(n) = e.num().filter(|n| !n.is_exact() && n.is_integer()) {
+        return format!(
+            "{}: got the decimal {}, whose last digits are lost. eval turns whole numbers into decimals; leave it out to keep numbers exact",
+            f, n
+        );
+    }
+    let mut s = show(e);
+    if s.len() > 80 {
+        s = format!("{}...", &s[..77]);
+    }
+    format!("{} needs whole numbers, got {}", f, s)
+}
+
 /// a whole number of any size (or a float that is exactly a small whole number)
 pub(crate) fn big_of(e: &Expr, f: &str) -> R<BigInt> {
     let v = match e {
         Expr::Num(n) if !n.is_exact() && n.is_integer() && n.to_f64().abs() < 1e15 => return Ok(BigInt::from(n.to_f64() as i128)),
         e => e.num().and_then(|n| n.as_bigint()),
     };
-    v.ok_or_else(|| format!("{} needs whole numbers, got {}", f, show(e)))
+    v.ok_or_else(|| not_whole(e, f))
 }
 
 fn big_nonneg(e: &Expr, f: &str) -> R<BigInt> {

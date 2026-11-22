@@ -176,8 +176,15 @@ impl Session {
                 if Func::from_name(name).is_some() || ["exp", "sqrt"].contains(&name.as_str()) {
                     return Err(format!("{} is a built-in function; pick another name", name));
                 }
-                self.funcs.insert(name.clone(), (params.clone(), body.clone()));
-                Ok(Output::Text(format!("{}({}) := {}", name, params.join(", "), crate::parser::source(body))))
+                // `ans` means the last result at the time of the definition, not when
+                // the function is called: d(x) := ans after deriv(f(x), x) is the derivative
+                let body = match self.vars.get("ans").cloned() {
+                    Some(v) if !params.iter().any(|p| p == "ans") => replace_ident(body, "ans", &expr_node(&v)?),
+                    _ => body.clone(),
+                };
+                let text = format!("{}({}) := {}", name, params.join(", "), crate::parser::source(&body));
+                self.funcs.insert(name.clone(), (params.clone(), body));
+                Ok(Output::Text(text))
             }
         }
     }
@@ -400,6 +407,7 @@ impl Session {
                     "factor" => match a.num().and_then(|n| n.as_bigint()) {
                         // factor(360) = 2^3 * 3^2 * 5
                         Some(n) if n.bits() > 1 => Expr::Str(crate::extra_cmd::factored_text(&n).map_err(|e| format!("factor: {}", e))?),
+                        _ if crate::extra_cmd::is_huge(&a) => return Err(crate::extra_cmd::not_whole(&a, "factor")),
                         _ => crate::cas::factor_poly(&a).unwrap_or_else(|| calc::factor(&a)),
                     },
                     "eval" => calc::evalf(&a),
@@ -897,6 +905,38 @@ fn check(e: &Expr) -> R<()> {
     }
 }
 
+/// an expression as source code again, so it can go into a function body
+fn expr_node(v: &Expr) -> R<Node> {
+    match v {
+        Expr::Matrix(m) => Ok(Node::Matrix(m.iter().map(|r| r.iter().map(expr_node).collect::<R<_>>()).collect::<R<_>>()?)),
+        Expr::Str(s) => Ok(Node::Str(s.clone())),
+        e => match crate::parser::parse(&show(e)) {
+            Ok(mut st) if st.len() == 1 => match st.pop() {
+                Some(crate::parser::Stmt::Expr(n)) => Ok(n),
+                _ => Err(format!("cannot use {} in a function body", show(e))),
+            },
+            _ => Err(format!("cannot use {} in a function body", show(e))),
+        },
+    }
+}
+
+/// body with every use of the name replaced by node
+fn replace_ident(body: &Node, name: &str, node: &Node) -> Node {
+    let r = |n: &Node| replace_ident(n, name, node);
+    let rb = |n: &Box<Node>| Box::new(replace_ident(n, name, node));
+    match body {
+        Node::Ident(s) if s == name => node.clone(),
+        Node::Neg(a) => Node::Neg(rb(a)),
+        Node::Bin(op, a, b) => Node::Bin(*op, rb(a), rb(b)),
+        Node::Range(a, s, b) => Node::Range(rb(a), s.as_ref().map(rb), rb(b)),
+        Node::Call(f, args) => Node::Call(f.clone(), args.iter().map(r).collect()),
+        Node::Index(a, args) => Node::Index(rb(a), args.iter().map(r).collect()),
+        Node::Matrix(m) => Node::Matrix(m.iter().map(|row| row.iter().map(r).collect()).collect()),
+        Node::Transpose(a) => Node::Transpose(rb(a)),
+        other => other.clone(),
+    }
+}
+
 /// a:step:b as a row vector; exact when the inputs are exact
 fn range(a: &Expr, s: &Expr, b: &Expr) -> R<Expr> {
     let (Some(an), Some(sn), Some(bn)) = (a.num(), s.num(), b.num()) else {
@@ -986,6 +1026,15 @@ mod tests {
         assert_eq!(run("[1 true]"), "1\ttrue");
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
         assert!(run("factor(10^300 + 1)").starts_with("Error: factor: found the factors 73, 137, "));
+        assert!(run("isprime(2^(2^2281 - 1) - 1)").contains("too large to compute: it would have about 10^686 digits"));
+        assert!(run("isprime(eval(2^(2^2281 - 1) - 1))").contains("decimal too large to represent"));
+        assert!(run("factor(2^(10^9) + 1)").contains("about 301029996 digits"));
+        assert!(run("mod(2^(10^7), 7)").contains("too large to compute"));
+        let out = run("f(x) := 8 + 3*x^2 + 9*x; deriv(f(x), x); d(x) := ans; deriv(d(x), x); d(3)");
+        assert_eq!(out.lines().last().unwrap(), "27");
+        assert!(out.contains("d(x) := 6*x+9"));
+        assert!(run("m = [1 2; 3 4]; m*2; g(k) := k*ans; g(2)").ends_with("4\t8\n12\t16"));
+        assert_eq!(run("h(ans) := ans + 1; h(1)").lines().last().unwrap(), "2");
         assert_eq!(run("2^200"), "1606938044258990275541962092341162602522202993782792835301376");
         assert_eq!(run("mod(3^100, 7)"), "4");
         assert_eq!(run("isprime(2^521 - 1)"), "true");
