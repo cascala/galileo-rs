@@ -118,13 +118,24 @@ pub fn pollard_rho(n: &BigInt) -> Option<BigInt> {
     if let Some(v) = word_of(n) {
         return small::pollard_rho(v).map(big);
     }
+    pollard_rho_pow(n, 2)
+}
+
+/// Pollard–Brent rho with the walk x -> x^k + c. When every prime factor p
+/// of n has p = 1 (mod k), the walk takes only (p - 1)/k values mod p, so the
+/// repeat comes about sqrt(k) times sooner (Brent and Pollard, 1981).
+pub fn pollard_rho_pow(n: &BigInt, k: u64) -> Option<BigInt> {
     if n.is_even() {
         return Some(BigInt::from(2));
     }
+    let k = k.max(2);
+    let kb = BigInt::from(k);
+    // multiplications per step
+    let cost = if k == 2 { 1 } else { (64 - k.leading_zeros() as u64) + k.count_ones() as u64 - 1 };
     let mut budget = BIG_RHO_WORK / limbs(n);
     for c in 1..20u32 {
         let c = BigInt::from(c);
-        let f = |x: &BigInt| (x * x + &c) % n;
+        let f = |x: &BigInt| if k == 2 { (x * x + &c) % n } else { (x.modpow(&kb, n) + &c) % n };
         let (mut y, mut r, mut q, m) = (BigInt::from(2), 1u64, BigInt::one(), 128u64);
         let (mut g, mut x, mut ys) = (BigInt::one(), BigInt::zero(), BigInt::zero());
         while g.is_one() {
@@ -142,7 +153,7 @@ pub fn pollard_rho(n: &BigInt) -> Option<BigInt> {
                 g = q.gcd(n);
                 k += m;
             }
-            budget = budget.checked_sub(2 * r)?;
+            budget = budget.checked_sub(2 * r * cost)?;
             r *= 2;
         }
         if &g == n {
@@ -165,10 +176,16 @@ pub fn pollard_rho(n: &BigInt) -> Option<BigInt> {
 /// all prime factors of p - 1 are below 10^5, except one that may go up to
 /// 5*10^6 (10^6 for numbers above 2^256)
 pub fn pollard_pm1(n: &BigInt) -> Option<BigInt> {
+    pollard_pm1_with(n, 1)
+}
+
+/// Pollard's p - 1 when a factor of p - 1 is known in advance (for a prime
+/// p dividing a cyclotomic piece Phi_d(b), d divides p - 1)
+pub fn pollard_pm1_with(n: &BigInt, known: u64) -> Option<BigInt> {
     const B1: usize = 100_000;
     let b2: usize = if limbs(n) <= 4 { 5_000_000 } else { 1_000_000 };
     let ps = small::primes_upto(b2);
-    let mut a = BigInt::from(2);
+    let mut a = BigInt::from(2).modpow(&BigInt::from(known.max(1)), n);
     for (i, &q) in ps.iter().take_while(|&&q| q <= B1).enumerate() {
         let mut qk = q as u64;
         while qk * (q as u64) <= B1 as u64 {

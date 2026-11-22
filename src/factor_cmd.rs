@@ -258,7 +258,7 @@ impl Session {
             if let Some(pieces) = af::algebraic_pieces(&a, &b, k, plus) {
                 let mut f = IntFactors { sign: neg, primes: BTreeMap::new(), composites: vec![] };
                 for p in &pieces {
-                    let (ps, cs) = af::factor_partial(&p.value);
+                    let (ps, cs) = af::factor_partial_known(&p.value, p.d);
                     for q in ps {
                         *f.primes.entry(q).or_insert(0) += 1;
                     }
@@ -336,7 +336,7 @@ impl Session {
             None => (vec![], String::new(), String::new()),
         };
         let pieces = if pieces.is_empty() {
-            vec![af::Piece { text: n.to_string(), latex: n.to_string(), value: n.abs() }]
+            vec![af::Piece { text: n.to_string(), latex: n.to_string(), value: n.abs(), d: 0 }]
         } else {
             pieces
         };
@@ -351,7 +351,7 @@ impl Session {
         let (mut nprime, mut ncomp, mut compdig) = (0, 0, 0);
         let mut formulas = vec![];
         for p in &pieces {
-            let (ps, cs) = af::factor_partial(&p.value);
+            let (ps, cs) = af::factor_partial_known(&p.value, p.d);
             nprime += ps.len();
             ncomp += cs.len();
             compdig += cs.iter().map(digits).sum::<usize>();

@@ -905,6 +905,8 @@ pub struct Piece {
     pub text: String,
     pub latex: String,
     pub value: BigInt,
+    /// every prime factor p of the value not dividing d has p = 1 (mod d); 0 if unknown
+    pub d: u64,
 }
 
 /// the largest k with x a perfect k-th power, and its k-th root
@@ -961,11 +963,11 @@ pub fn algebraic_pieces(a: &BigInt, b: &BigInt, n: u64, plus: bool) -> Option<Ve
     if !g.is_one() {
         a /= &g;
         b /= &g;
-        pieces.push(Piece { text: format!("{}^{}", g, n), latex: format!("{}^{{{}}}", g, n), value: num_traits::pow(g.clone(), n as usize) });
+        pieces.push(Piece { text: format!("{}^{}", g, n), latex: format!("{}^{{{}}}", g, n), value: num_traits::pow(g.clone(), n as usize), d: 0 });
     }
     if a == b {
         // a^n + a^n = 2 a^n
-        pieces.push(Piece { text: "2".into(), latex: "2".into(), value: BigInt::from(2) });
+        pieces.push(Piece { text: "2".into(), latex: "2".into(), value: BigInt::from(2), d: 0 });
         return if pieces.len() > 1 { Some(pieces) } else { None };
     }
     // a = α^k, b = β^k: use the largest common power
@@ -1002,14 +1004,14 @@ pub fn algebraic_pieces(a: &BigInt, b: &BigInt, n: u64, plus: bool) -> Option<Ve
                     if !gl.is_one() && gl != v {
                         let other = &v / &gl;
                         let (lo, hi) = if gl < other { (gl, other) } else { (other, gl) };
-                        pieces.push(Piece { text: format!("L_{}({})", d, nt_), latex: format!("L_{{{}}}({})", d, nl), value: lo });
-                        pieces.push(Piece { text: format!("M_{}({})", d, nt_), latex: format!("M_{{{}}}({})", d, nl), value: hi });
+                        pieces.push(Piece { text: format!("L_{}({})", d, nt_), latex: format!("L_{{{}}}({})", d, nl), value: lo, d });
+                        pieces.push(Piece { text: format!("M_{}({})", d, nt_), latex: format!("M_{{{}}}({})", d, nl), value: hi, d });
                         continue;
                     }
                 }
             }
         }
-        pieces.push(Piece { text, latex, value: v });
+        pieces.push(Piece { text, latex, value: v, d });
     }
     if pieces.len() <= 1 {
         return None;
@@ -1041,6 +1043,12 @@ pub fn detect_binomial(n: &BigInt) -> Option<(BigInt, u64, bool)> {
 
 /// Factor n as far as the budget allows: (primes with multiplicity, composite leftovers)
 pub fn factor_partial(n: &BigInt) -> (Vec<BigInt>, Vec<BigInt>) {
+    factor_partial_known(n, 0)
+}
+
+/// the same, knowing that the large prime factors are 1 (mod d) (d = 0: nothing known).
+/// Then p - 1 gets d (or 2d) into its exponent for free.
+pub fn factor_partial_known(n: &BigInt, d: u64) -> (Vec<BigInt>, Vec<BigInt>) {
     let mut m = n.abs();
     let mut primes = vec![];
     let mut comps = vec![];
@@ -1069,7 +1077,7 @@ pub fn factor_partial(n: &BigInt) -> (Vec<BigInt>, Vec<BigInt>) {
             }
         } else if nt::is_prime(&m) {
             primes.push(m);
-        } else if let Some(d) = nt::pollard_pm1(&m).or_else(|| nt::pollard_rho(&m)) {
+        } else if let Some(d) = split_known(&m, d) {
             todo.push(&m / &d);
             todo.push(d);
         } else {
@@ -1079,4 +1087,19 @@ pub fn factor_partial(n: &BigInt) -> (Vec<BigInt>, Vec<BigInt>) {
     primes.sort();
     comps.sort();
     (primes, comps)
+}
+
+/// one factor of a composite m whose prime factors are 1 (mod d)
+fn split_known(m: &BigInt, d: u64) -> Option<BigInt> {
+    if d <= 2 {
+        return nt::pollard_pm1(m).or_else(|| nt::pollard_rho(m));
+    }
+    // p odd and p = 1 (mod d) give p = 1 (mod 2d) when d is odd. Only p - 1
+    // uses it: it gets d into its exponent for free, which matters when d has a
+    // prime factor above p - 1's bound. A rho walk x -> x^d + c would need about
+    // sqrt(d) times fewer steps but log2(d) times more work per step, which
+    // measured no faster for the d of the Cunningham numbers (Brent and Pollard's
+    // x^1024 + 1 for 2^256 + 1 is the case where it pays).
+    let k = if d % 2 == 1 { 2 * d } else { d };
+    nt::pollard_pm1_with(m, k).or_else(|| nt::pollard_rho(m))
 }
