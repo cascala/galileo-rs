@@ -1302,14 +1302,18 @@ impl Session {
             Expr::Add(v) => v,
             t => vec![t],
         };
-        let mut groups: Vec<(Expr, Expr, usize)> = vec![]; // (a, b, max degree)
+        // forcing terms grouped by their type e^(a x) cos/sin(b x): (a, b, max degree, terms)
+        let mut groups: Vec<(Expr, Expr, usize, Vec<Expr>)> = vec![];
         for t in &terms {
             let (_, p, ea, eb) = forcing_term(t, x).ok_or_else(|| {
                 format!("dsolve: can't find a particular solution for the term {} (polynomials, exponentials, sines and cosines work)", show(t))
             })?;
-            match groups.iter_mut().find(|(ga, gb, _)| cas::is_zero(&sub(ga.clone(), ea.clone())) && cas::is_zero(&sub(gb.clone(), eb.clone()))) {
-                Some(gr) => gr.2 = gr.2.max(p),
-                None => groups.push((ea, eb, p)),
+            match groups.iter_mut().find(|(ga, gb, _, _)| cas::is_zero(&sub(ga.clone(), ea.clone())) && cas::is_zero(&sub(gb.clone(), eb.clone()))) {
+                Some(gr) => {
+                    gr.2 = gr.2.max(p);
+                    gr.3.push(t.clone());
+                }
+                None => groups.push((ea, eb, p, vec![t.clone()])),
             }
         }
         let lop = |y: &Expr| -> Expr {
@@ -1321,24 +1325,22 @@ impl Session {
             }
             add(acc)
         };
-        let mut unknowns: Vec<String> = vec![];
-        let mut trial = vec![];
-        for (gi, (ea, eb, p)) in groups.iter().enumerate() {
+        let mut parts_out = vec![];
+        for (gi, (ea, eb, p, gterms)) in groups.iter().enumerate() {
             let lambda = add2(ea.clone(), mul2(eb.clone(), Expr::Const(Const::I)));
-            let s = if roots.iter().any(|r| cas::is_zero(&sub(r.clone(), lambda.clone()))) {
-                mult(&lambda)
-            } else {
-                0
-            };
+            let s = if roots.iter().any(|r| cas::is_zero(&sub(r.clone(), lambda.clone()))) { mult(&lambda) } else { 0 };
             let e_ax = exp(mul2(ea.clone(), xs.clone()));
             let trig = !cas::is_zero(eb);
+            let (cosx, sinx) = (func(Func::Cos, mul2(eb.clone(), xs.clone())), func(Func::Sin, mul2(eb.clone(), xs.clone())));
+            let mut unknowns: Vec<String> = vec![];
+            let mut trial = vec![];
             for j in 0..=*p {
                 let xp = pow(xs.clone(), Expr::int((j + s) as i128));
                 let c = format!("A__{}_{}", gi, j);
                 if trig {
                     let d = format!("B__{}_{}", gi, j);
-                    trial.push(mul(vec![Expr::sym(&c), xp.clone(), e_ax.clone(), func(Func::Cos, mul2(eb.clone(), xs.clone()))]));
-                    trial.push(mul(vec![Expr::sym(&d), xp, e_ax.clone(), func(Func::Sin, mul2(eb.clone(), xs.clone()))]));
+                    trial.push(mul(vec![Expr::sym(&c), xp.clone(), e_ax.clone(), cosx.clone()]));
+                    trial.push(mul(vec![Expr::sym(&d), xp, e_ax.clone(), sinx.clone()]));
                     unknowns.push(c);
                     unknowns.push(d);
                 } else {
@@ -1346,23 +1348,59 @@ impl Session {
                     unknowns.push(c);
                 }
             }
+            let yp = add(trial);
+            let resid = sub(lop(&yp), add(gterms.clone()));
+            let vals = match match_coefficients(&resid, ea, &cosx, &sinx, x, &unknowns) {
+                Some(v) => v,
+                None => {
+                    // numeric fallback: the residual must vanish at sample points
+                    let mut eqs = vec![];
+                    for k in 0..(unknowns.len() * 2 + 2) {
+                        let xv = rat(2 * k as i128 + 1, 7);
+                        eqs.push(calc::evalf(&subst(&resid, x, &xv)));
+                    }
+                    least_squares(&eqs, &unknowns)?
+                }
+            };
+            let mut ypart = yp;
+            for (u, v) in unknowns.iter().zip(vals) {
+                ypart = subst(&ypart, u, &v);
+            }
+            parts_out.push(ypart);
         }
-        let yp = add(trial);
-        let resid = sub(lop(&yp), g.clone());
-        // the residual must vanish for every x: sample it at enough points
-        let mut eqs = vec![];
-        for k in 0..(unknowns.len() * 2 + 2) {
-            let xv = rat(2 * k as i128 + 1, 7);
-            eqs.push(calc::evalf(&subst(&resid, x, &xv)));
-        }
-        let vals = least_squares(&eqs, &unknowns)?;
-        let mut ypart = yp;
-        for (u, v) in unknowns.iter().zip(vals) {
-            ypart = subst(&ypart, u, &v);
-        }
+        let ypart = add(parts_out);
         let ypart = simplify(&ypart);
         Ok((add2(homogeneous, ypart), consts))
     }
+}
+
+/// Undetermined coefficients, exactly: divide the residual by e^(a x), write
+/// cos(b x), sin(b x) as symbols, and require every coefficient to vanish
+fn match_coefficients(resid: &Expr, a: &Expr, cosx: &Expr, sinx: &Expr, x: &str, unknowns: &[String]) -> Option<Vec<Expr>> {
+    fn replace(e: &Expr, from: &Expr, to: &Expr) -> Expr {
+        if e == from { to.clone() } else { e.map_children(&mut |c| replace(c, from, to)) }
+    }
+    let r = expand(&mul2(resid.clone(), exp(neg(mul2(a.clone(), Expr::sym(x))))));
+    let r = replace(&replace(&r, cosx, &Expr::sym("C__")), sinx, &Expr::sym("S__"));
+    let r = expand(&r);
+    let coeffs = cas::poly_coeffs(&r, x)?;
+    let mut eqs = vec![];
+    for c in coeffs {
+        let c = expand(&c);
+        let cc = simplify(&deriv(&c, "C__"));
+        let sc = simplify(&deriv(&c, "S__"));
+        let rest = simplify(&subst(&subst(&c, "C__", &Expr::zero()), "S__", &Expr::zero()));
+        for q in [cc, sc, rest] {
+            if q.contains_sym("C__") || q.contains_sym("S__") || q.contains_sym(x) {
+                return None;
+            }
+            if !cas::is_zero(&q) {
+                eqs.push(q);
+            }
+        }
+    }
+    let names: Vec<String> = unknowns.to_vec();
+    cas::solve_linear(&eqs, &names).ok().map(|v| v.into_iter().map(|e| simplify(&e)).collect())
 }
 
 /// numeric value with every variable set to a (different) positive number
