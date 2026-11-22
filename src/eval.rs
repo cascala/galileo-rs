@@ -344,6 +344,9 @@ impl Session {
         if self.funcs.contains_key(f) {
             return self.call_user(f, args);
         }
+        if let Some(Expr::Matrix(m)) = self.vars.get(f).filter(|_| !self.hidden.iter().any(|h| h == f)).cloned() {
+            return self.index(f, &m, args);
+        }
         if f.ends_with('\'') {
             return self.call_primed(f, args);
         }
@@ -528,6 +531,27 @@ impl Session {
         let r = self.run_user(f.to_string(), vals);
         self.depth -= 1;
         r
+    }
+
+    /// A(k): entry k of a vector, or row k of a matrix; A(i, j): one entry. Counting from 1.
+    fn index(&mut self, f: &str, m: &[Vec<Expr>], args: &[Node]) -> R<Expr> {
+        let mut ks = vec![];
+        for a in args {
+            let v = self.eval(a)?;
+            let k = v.num().filter(|n| n.is_exact()).and_then(|n| n.as_int()).ok_or_else(|| format!("{}(...): positions are whole numbers, got {}", f, show(&v)))?;
+            ks.push(k);
+        }
+        let (rows, cols) = (m.len() as i128, m.first().map_or(0, |r| r.len()) as i128);
+        let bad = |k: i128, n: i128| -> R<usize> {
+            if k < 1 || k > n { Err(format!("{}: position {} is outside 1..{}", f, k, n)) } else { Ok(k as usize - 1) }
+        };
+        match ks[..] {
+            [k] if rows == 1 => Ok(m[0][bad(k, cols)?].clone()),
+            [k] if cols == 1 => Ok(m[bad(k, rows)?][0].clone()),
+            [k] => Ok(Expr::Matrix(vec![m[bad(k, rows)?].clone()])),
+            [i, j] => Ok(m[bad(i, rows)?][bad(j, cols)?].clone()),
+            _ => Err(format!("{}(...) takes one or two positions", f)),
+        }
     }
 
     /// Runs a user function. A call in tail position (the whole body, or a
@@ -947,5 +971,8 @@ mod tests {
         assert_eq!(run("mod([3 6 9], 7)"), "3\t6\t2");
         assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
         assert_eq!(run("[1 true]"), "1\ttrue");
+        assert_eq!(run("v = [3 5 7]; v(2)").lines().last().unwrap(), "5");
+        assert_eq!(run("A = [1 2; 3 4]; A(2, 1)").lines().last().unwrap(), "3");
+        assert_eq!(run("A = [1 2; 3 4]; A(2)").lines().last().unwrap(), "3\t4");
     }
 }
