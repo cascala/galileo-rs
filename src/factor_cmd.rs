@@ -308,6 +308,32 @@ impl Session {
     pub(crate) fn factor_call(&mut self, f: &str, args: &[Node]) -> Option<R<Expr>> {
         Some(match f {
             "cyclotomic" => self.cyclotomic_cmd(args),
+            "addfamily" => (|| {
+                let [f] = args else { return Err("addfamily(f) adds a polynomial family like x^5 + x + 1 to the list algfactor tries".into()) };
+                let v = self.eval(f)?;
+                let (x, y, p, den) = one_var_form(&v)?;
+                if y.is_some() || !den.is_one() {
+                    return Err("addfamily(f): f must be a polynomial in one variable with whole-number coefficients".into());
+                }
+                let splits = af::factor_zpoly(&p).is_some_and(|(_, fs)| fs.iter().map(|(_, m)| *m).sum::<u32>() >= 2);
+                let added = af::add_family(&show(&x), p);
+                Ok(Expr::Str(match (added, splits) {
+                    (false, _) => "already in the list".into(),
+                    (true, true) => format!("added {}; algfactor now tries it on every number", show(&v)),
+                    (true, false) => format!("added {}; note that it does not factor over the integers, so it can recognize a number but not split it", show(&v)),
+                }))
+            })(),
+            "families" => (|| {
+                let (nb, all) = af::families();
+                let mut md = vec![format!("algfactor tests every number against a^k ± b^k (any a, b up to 12·effort), Sophie Germain's a^4 + 4b^4, divisors of b^k ± 1, and these {} polynomial families ({} built in, {} added with `addfamily`):", all.len(), nb, all.len() - nb), String::new()];
+                let mut tx = vec![md[0].replace('`', "")];
+                for (i, (name, _)) in all.iter().enumerate() {
+                    let tag = if i < nb { "" } else { " (added)" };
+                    md.push(format!("* {}{}", name, tag));
+                    tx.push(format!("  {}{}", name, tag));
+                }
+                Ok(report("Families", tx.join("\n"), md.join("\n"), vec![]))
+            })(),
             "algfactor" => self.algfactor_cmd(args),
             "factorsearch" => self.factorsearch_cmd(args),
             "digits" => (|| {
@@ -338,28 +364,56 @@ impl Session {
     }
 
     fn algfactor_cmd(&mut self, args: &[Node]) -> R<Expr> {
-        let usage = "usage: algfactor(n) or algfactor(n, effort): the algebraic pieces of n and their factors; effort 1 (the default) is about a second of searching, larger numbers search more bases and exponents and factor longer";
-        let (a, effort) = match args {
-            [a] => (a, 1u64),
-            [a, e] => {
-                let e = self.eval(e)?.num().and_then(|n| n.as_int()).filter(|&e| (1..=10_000).contains(&e)).ok_or("algfactor(n, effort): effort is a whole number from 1 to 10000")?;
-                (a, e as u64)
-            }
+        let usage = "usage: algfactor(n), algfactor(n, effort), algfactor(n, f) or algfactor(n, f, effort), with f a polynomial family like x^6 + 27: the algebraic pieces of n and their factors; effort 1 (the default) is about a second of searching, larger numbers search more bases and exponents and factor longer";
+        let (a, rest) = match args {
+            [a, rest @ ..] if rest.len() <= 2 => (a, rest),
             _ => return Err(usage.into()),
         };
+        let mut effort = 1u64;
+        let mut family: Option<(String, ZPoly)> = None;
+        for r in rest {
+            let v = self.eval(r)?;
+            if let Some(e) = v.num() {
+                effort = e.as_int().filter(|&e| (1..=10_000).contains(&e)).ok_or("algfactor(n, effort): effort is a whole number from 1 to 10000")? as u64;
+            } else {
+                let (x, y, p, den) = one_var_form(&v)?;
+                if y.is_some() || !den.is_one() {
+                    return Err("algfactor(n, f): f must be a polynomial in one variable with whole-number coefficients, like x^6 + 27".into());
+                }
+                family = Some((show(&x), p));
+            }
+        }
         let v = self.eval(a)?;
         let n = v.num().and_then(|n| n.as_bigint()).filter(|n| n.abs() > BigInt::one()).ok_or("algfactor needs a whole number of 2 or more")?;
         crate::numtheory::set_effort(effort);
-        let r = self.algfactor_run(a, &n, effort);
+        let r = self.algfactor_run(a, &n, effort, family);
         crate::numtheory::set_effort(1);
         r
     }
 
-    fn algfactor_run(&mut self, a: &Node, n: &BigInt, effort: u64) -> R<Expr> {
+    fn algfactor_run(&mut self, a: &Node, n: &BigInt, effort: u64, family: Option<(String, ZPoly)>) -> R<Expr> {
         let typed = int_form(self, Some(a), n, false);
-        let form = match typed {
-            Some((a, b, k, plus, _)) => Some(af::Form::Exact { a, b, k, plus }),
-            None => af::find_form(&n.abs(), effort),
+        let mut var = "x".to_string();
+        let mut no_fit = None;
+        let mut family_name: Option<String> = None;
+        let form = if let Some((v, f)) = family {
+            var = v.clone();
+            match af::int_root(&f, n) {
+                Some(x) => Some(af::Form::Poly { f, x }),
+                None => {
+                    no_fit = Some(af::show_zpoly(&f, &v));
+                    None
+                }
+            }
+        } else {
+            match typed {
+                Some((a, b, k, plus, _)) => Some(af::Form::Exact { a, b, k, plus }),
+                None => af::find_form(&n.abs(), effort).or_else(|| {
+                    let (name, f, x) = af::catalogue_match(&n.abs())?;
+                    family_name = Some(name);
+                    Some(af::Form::Poly { f, x })
+                }),
+            }
         };
         let nd = digits(n);
         let (pieces, head_md, head_tx) = match &form {
@@ -389,7 +443,25 @@ impl Session {
                     format!("This {}-digit number N divides {}^{} {} 1, so it splits along the pieces of that number into {} part{}:", nd, b, k, op, p.len(), s),
                 )
             }
-            None => (vec![], String::new(), String::new()),
+            Some(af::Form::Poly { f, x }) => {
+                let fs = af::show_zpoly(f, &var);
+                let p = af::poly_pieces(f, x, &var).unwrap_or_default();
+                if p.len() <= 1 {
+                    let m = format!("This number is {} with {} = {}, but that polynomial does not factor over the integers, so it is one piece:", fs, var, x);
+                    (vec![], m.clone(), m)
+                } else {
+                    let from = family_name.as_ref().map(|n| format!(" (from the list of families: {})", n)).unwrap_or_default();
+                    let m = format!("This number is {} with {} = {}{}. The polynomial factors, so the number splits into {} pieces:", fs, var, x, from, p.len());
+                    (p, m.clone(), m)
+                }
+            }
+            None => match &no_fit {
+                Some(fs) => {
+                    let m = format!("This number is not {} for any whole number {}, so it is one piece:", fs, var);
+                    (vec![], m.clone(), m)
+                }
+                None => (vec![], String::new(), String::new()),
+            },
         };
         let pieces = if pieces.is_empty() {
             vec![af::Piece { text: n.to_string(), latex: n.to_string(), value: n.abs(), d: 0 }]

@@ -1053,6 +1053,8 @@ mod tests {
         assert_eq!(run("factor(x^2 + y^2, i)"), "(x-i*y)*(x+i*y)");
         assert!(run("N = (2^1062 + 1)/5; algfactor(N)").contains("divides 2^1062 + 1"));
         assert!(run("N = 7^50 + 3^50; algfactor(N)").contains("All 7 prime factors found"));
+        assert!(run("N = 31415926^5 + 31415926 + 1; algfactor(N)").contains("x^5 + x + 1 with x = 31415926"));
+        assert!(run("N = 98765^4 + 4*7^4; algfactor(N)").contains("x^4 + 9604 with x = 98765"));
         assert!(run("isprime(2^(2^2281 - 1) - 1)").contains("too large to compute: it would have about 10^686 digits"));
         assert!(run("isprime(eval(2^(2^2281 - 1) - 1))").contains("decimal too large to represent"));
         assert!(run("factor(2^(10^9) + 1)").contains("about 301029996 digits"));

@@ -1344,6 +1344,8 @@ pub enum Form {
     Exact { a: BigInt, b: BigInt, k: u64, plus: bool },
     /// n divides b^k + 1 (plus) or b^k - 1, k the smallest such exponent found
     Divides { b: u64, k: u64, plus: bool, searched: u64 },
+    /// n = f(x) for a polynomial f (with integer coefficients) that factors
+    Poly { f: ZPoly, x: BigInt },
 }
 
 /// Search for an algebraic form of n >= 2. effort (1 = about a second) sets
@@ -1386,6 +1388,18 @@ pub fn find_form(n: &BigInt, effort: u64) -> Option<Form> {
                     return Some(Form::Exact { a: r, b: bb, k, plus });
                 }
             }
+        }
+    }
+    // Sophie Germain: n = a^4 + 4 b^4
+    for b in 1..=bmax {
+        let f: ZPoly = vec![BigInt::from(4) * num_traits::pow(BigInt::from(b), 4), BigInt::zero(), BigInt::zero(), BigInt::zero(), BigInt::one()];
+        let m = n - &f[0];
+        if m.sign() != num_bigint::Sign::Plus {
+            break;
+        }
+        let r = m.nth_root(4);
+        if r > BigInt::one() && num_traits::pow(r.clone(), 4) == m {
+            return Some(Form::Poly { f, x: r });
         }
     }
     // n divides b^k ± 1
@@ -1437,4 +1451,166 @@ pub fn divisor_pieces(n: &BigInt, b: u64, k: u64, plus: bool) -> Vec<Piece> {
         out.push(Piece { text: "rest".into(), latex: "\\text{rest}".into(), value: rest, d: 0 });
     }
     out
+}
+
+/// an integer x with f(x) = t, for large t (Newton's method from the t^(1/d) estimate, both signs)
+pub fn int_root(f: &[BigInt], t: &BigInt) -> Option<BigInt> {
+    let f = trim(f.to_vec());
+    let d = deg(&f);
+    if d == 0 {
+        return None;
+    }
+    let lc = f.last().unwrap().clone();
+    let df = pderiv(&f);
+    let est = (t.abs() / lc.abs()).nth_root(d as u32);
+    for sign in [1i32, -1] {
+        let mut x = &est * sign;
+        for _ in 0..300 {
+            let h = peval(&f, &x) - t;
+            if h.is_zero() {
+                return Some(x);
+            }
+            let dh = peval(&df, &x);
+            if dh.is_zero() {
+                break;
+            }
+            let step = &h / &dh;
+            if step.is_zero() {
+                break;
+            }
+            x -= step;
+        }
+        for dx in -3i32..=3 {
+            let y = &x + dx;
+            if peval(&f, &y) == *t {
+                return Some(y);
+            }
+        }
+    }
+    // small x: try directly
+    if t.bits() < 64 {
+        return (-1000i32..=1000).map(BigInt::from).find(|x| peval(&f, x) == *t);
+    }
+    None
+}
+
+/// the pieces f_i(x) of n = f(x), f = c * prod f_i^m_i over the integers
+pub fn poly_pieces(f: &[BigInt], x: &BigInt, var: &str) -> Option<Vec<Piece>> {
+    let (c, fs) = factor_zpoly(f)?;
+    let mut out = vec![];
+    if !c.abs().is_one() {
+        out.push(Piece { text: c.abs().to_string(), latex: c.abs().to_string(), value: c.abs(), d: 0 });
+    }
+    for (g, m) in fs {
+        let v = peval(&g, x).abs();
+        let gs = show_zpoly(&g, var);
+        for _ in 0..m {
+            out.push(Piece { text: gs.clone(), latex: gs.clone(), value: v.clone(), d: 0 });
+        }
+    }
+    Some(out)
+}
+
+/// x^2 - 2*x + 2 style text
+pub fn show_zpoly(p: &[BigInt], var: &str) -> String {
+    let mut s = String::new();
+    for (k, c) in p.iter().enumerate().rev() {
+        if c.is_zero() {
+            continue;
+        }
+        let neg = c.is_negative();
+        let a = c.abs();
+        if s.is_empty() {
+            if neg {
+                s.push('-');
+            }
+        } else {
+            s.push_str(if neg { " - " } else { " + " });
+        }
+        let mono = match k {
+            0 => String::new(),
+            1 => var.to_string(),
+            _ => format!("{}^{}", var, k),
+        };
+        if mono.is_empty() {
+            s.push_str(&a.to_string());
+        } else if a.is_one() {
+            s.push_str(&mono);
+        } else {
+            s.push_str(&format!("{}*{}", a, mono));
+        }
+    }
+    if s.is_empty() { "0".into() } else { s }
+}
+
+// ---------- a catalogue of polynomial families that factor ----------
+
+thread_local! {
+    static CATALOG: std::cell::RefCell<Option<Vec<(String, ZPoly)>>> = const { std::cell::RefCell::new(None) };
+    static USER_FAMILIES: std::cell::RefCell<Vec<(String, ZPoly)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn factors_nontrivially(f: &[BigInt]) -> bool {
+    factor_zpoly(f).is_some_and(|(_, fs)| fs.iter().map(|(_, m)| *m).sum::<u32>() >= 2)
+}
+
+/// Built-in families f(x) with whole coefficients that factor over the integers,
+/// beyond the binomials a^k ± b^k and Sophie Germain's a^4 + 4b^4 that find_form
+/// tests directly: every trinomial x^n ± x^m ± 1 (n <= 24) that factors, the
+/// quartics x^4 + k x^2 + 1 that factor, and Chernick's (6k+1)(12k+1)(18k+1).
+fn builtin_families() -> Vec<(String, ZPoly)> {
+    let mut out = vec![];
+    for n in 2..=24usize {
+        for m in 1..n {
+            for (sm, s0) in [(1i32, 1i32), (1, -1), (-1, 1), (-1, -1)] {
+                let mut f = vec![BigInt::zero(); n + 1];
+                f[n] = BigInt::one();
+                f[m] += BigInt::from(sm);
+                f[0] += BigInt::from(s0);
+                if factors_nontrivially(&f) {
+                    out.push((format!("trinomial {}", show_zpoly(&f, "x")), f));
+                }
+            }
+        }
+    }
+    for k in -100i32..=100 {
+        let f: ZPoly = vec![BigInt::one(), BigInt::zero(), BigInt::from(k), BigInt::zero(), BigInt::one()];
+        if factors_nontrivially(&f) {
+            out.push((format!("quartic {}", show_zpoly(&f, "x")), f));
+        }
+    }
+    let chernick = pmul(&pmul(&[BigInt::one(), BigInt::from(6)], &[BigInt::one(), BigInt::from(12)]), &[BigInt::one(), BigInt::from(18)]);
+    out.push(("Chernick (6x + 1)(12x + 1)(18x + 1)".into(), chernick));
+    out
+}
+
+/// add a family to this session's list (algfactor tries it on every number)
+pub fn add_family(var: &str, f: ZPoly) -> bool {
+    let fresh = USER_FAMILIES.with(|u| !u.borrow().iter().any(|(_, g)| *g == f));
+    if fresh {
+        USER_FAMILIES.with(|u| u.borrow_mut().push((show_zpoly(&f, var), f)));
+    }
+    fresh
+}
+
+/// the families tried automatically: built-in, then added ones
+pub fn families() -> (usize, Vec<(String, ZPoly)>) {
+    let builtin = CATALOG.with(|c| c.borrow_mut().get_or_insert_with(builtin_families).clone());
+    let nb = builtin.len();
+    let mut all = builtin;
+    USER_FAMILIES.with(|u| all.extend(u.borrow().iter().cloned()));
+    (nb, all)
+}
+
+/// the first catalogued family with n = f(x) for a whole number x (|x| >= 2)
+pub fn catalogue_match(n: &BigInt) -> Option<(String, ZPoly, BigInt)> {
+    let (_, all) = families();
+    for (name, f) in all {
+        if let Some(x) = int_root(&f, n) {
+            if x.abs() >= BigInt::from(2) {
+                return Some((name, f, x));
+            }
+        }
+    }
+    None
 }
