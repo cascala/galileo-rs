@@ -292,6 +292,23 @@ fn numeric_roots(c: &[f64]) -> Vec<(f64, f64)> {
     z
 }
 
+/// a numeric root that is really a Gaussian rational such as 1 + i: exact,
+/// when the polynomial vanishes there exactly
+fn exact_gaussian_root(p: &[Number], r: (f64, f64)) -> Option<Expr> {
+    let snap = |v: f64| -> Option<Number> {
+        (1..=60i128).find_map(|d| {
+            let n = (v * d as f64).round();
+            ((n / d as f64 - v).abs() < 1e-9 && n.abs() < 1e12).then(|| Number::rat(n as i128, d).unwrap())
+        })
+    };
+    let (a, b) = (snap(r.0)?, snap(r.1)?);
+    let z = add2(Num(a), mul2(Num(b), Const(Const::I)));
+    let x = Expr::sym("z__");
+    let poly = add(p.iter().enumerate().map(|(k, c)| mul2(Num(*c), pow(x.clone(), int(k as i128)))).collect());
+    let v = crate::calc::subst(&poly, "z__", &z);
+    if v.is_zero() { Some(z) } else { None }
+}
+
 fn complex_expr(r: (f64, f64)) -> Expr {
     if r.1 == 0.0 {
         Expr::float(r.0)
@@ -327,7 +344,11 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
             0 | 1 => {}
             2 => out.push(Num(rest[0].neg().div(rest[1]).unwrap())),
             3 => out.extend(quadratic(&Num(rest[2]), &Num(rest[1]), &Num(rest[0]))),
-            _ => out.extend(numeric_roots(&rest.iter().map(|v| v.to_f64()).collect::<Vec<_>>()).into_iter().map(complex_expr)),
+            _ => out.extend(
+                numeric_roots(&rest.iter().map(|v| v.to_f64()).collect::<Vec<_>>())
+                    .into_iter()
+                    .map(|r| exact_gaussian_root(&rest, r).unwrap_or_else(|| complex_expr(r))),
+            ),
         }
         return Ok(out);
     }

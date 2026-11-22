@@ -392,6 +392,16 @@ pub fn func(f: Func, x: Expr) -> Expr {
             return Expr::float(f.apply(v));
         }
     }
+    // sin(acos(x)) = sqrt(1 - x^2) and friends
+    if let Func(g, inner) = &x {
+        let y = (**inner).clone();
+        let root = || sqrt(sub(Expr::one(), pow(y.clone(), Expr::int(2))));
+        match (f, g) {
+            (Sin, Asin) | (Cos, Acos) | (Tan, Atan) => return y,
+            (Sin, Acos) | (Cos, Asin) => return root(),
+            _ => {}
+        }
+    }
     let negated = x.is_negative_term();
     match f {
         Sin | Tan | Asin | Atan | Sinh | Tanh | Asinh | Atanh if negated => return neg(func(f, neg(x))),
