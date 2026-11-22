@@ -278,11 +278,13 @@ impl Session {
                     for x in r {
                         match self.eval(x)? {
                             Expr::Matrix(m) => parts.push(m),
-                            v if v.is_scalar() => parts.push(vec![vec![v]]),
+                            v if v.is_scalar() || matches!(v, Expr::Bool(_) | Expr::Str(_)) => parts.push(vec![vec![v]]),
                             v => return Err(format!("{} can't be a matrix element", show(&v))),
                         }
                     }
-                    let h = parts[0].len();
+                    // empty blocks ([]) vanish, so [a, rest] works when rest is []
+                    parts.retain(|p| !p.is_empty() && !p[0].is_empty());
+                    let Some(h) = parts.first().map(|p| p.len()) else { continue };
                     if parts.iter().any(|p| p.len() != h) {
                         return Err("matrix blocks in a row must have the same height".into());
                     }
@@ -943,5 +945,7 @@ mod tests {
         assert_eq!(run("fact(n) := if(n == 0, 1, n*fact(n-1)); fact(20)").lines().last().unwrap(), "2432902008176640000");
         assert_eq!(run("gcd(2^60-1, 2^40-1)"), "1048575");
         assert_eq!(run("mod([3 6 9], 7)"), "3\t6\t2");
+        assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
+        assert_eq!(run("[1 true]"), "1\ttrue");
     }
 }
