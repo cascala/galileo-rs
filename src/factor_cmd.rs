@@ -89,15 +89,38 @@ fn hpoly_expr(p: &[BigInt], x: &Expr, y: &Expr) -> Expr {
 /// or homogeneous in two: (constant, [(factor, multiplicity)]).
 pub fn factor_parts(e: &Expr) -> Option<(Number, Vec<(Expr, u32)>)> {
     let vars = e.symbols();
-    if vars.is_empty() || vars.len() > 2 {
+    if vars.is_empty() || vars.len() > 8 {
         return None;
     }
     let ts = terms_of(e, &vars)?;
     let den = ts.iter().fold(BigInt::one(), |acc, (_, c)| acc.lcm(c.denom()));
     let total: Vec<usize> = ts.iter().filter(|(_, c)| !c.is_zero()).map(|(ex, _)| ex.iter().sum()).collect();
     let dtot = *total.first()?;
-    if vars.len() == 2 && total.iter().any(|&d| d != dtot) {
-        return None;
+    if vars.len() > 2 || (vars.len() == 2 && total.iter().any(|&d| d != dtot)) {
+        // several variables: Kronecker substitution
+        let mt: Vec<af::MTerm> = ts
+            .iter()
+            .map(|(ex, c)| (ex.iter().map(|&k| k as u32).collect(), (c * BigRational::from_integer(den.clone())).to_integer()))
+            .collect();
+        let (c, fs) = af::factor_multi(&mt, vars.len())?;
+        let syms: Vec<Expr> = vars.iter().map(|v| Expr::sym(v)).collect();
+        let out = fs
+            .into_iter()
+            .map(|(f, m)| {
+                let e = add(f
+                    .into_iter()
+                    .map(|(ex, c)| {
+                        let mut v = vec![bnum(c)];
+                        for (s, k) in syms.iter().zip(ex) {
+                            v.push(pow(s.clone(), int(k as i128)));
+                        }
+                        mul(v)
+                    })
+                    .collect());
+                (e, m)
+            })
+            .collect();
+        return Some((Number::from_big(BigRational::new(c, den)), out));
     }
     // coefficients in the first variable (the second is set to 1)
     let dmax = ts.iter().map(|(ex, _)| ex[0]).max()?;
@@ -436,5 +459,106 @@ impl Session {
         md.push(summary.clone());
         tx.push(summary);
         Ok(report("Factor search", tx.join("\n"), md.join("\n"), formulas))
+    }
+}
+
+// ---------- factoring over other fields ----------
+
+/// a polynomial in one variable, or homogeneous in two: (x, y and total degree when homogeneous, integer coefficients in x, common denominator)
+fn one_var_form(e: &Expr) -> R<(Expr, Option<(Expr, usize)>, ZPoly, BigInt)> {
+    let vars = e.symbols();
+    let bad = || "factor(p, field): p must be a polynomial in one variable, or homogeneous in two (like x^2 + y^2)".to_string();
+    if vars.is_empty() || vars.len() > 2 {
+        return Err(bad());
+    }
+    let ts = terms_of(e, &vars).ok_or_else(bad)?;
+    let den = ts.iter().fold(BigInt::one(), |acc, (_, c)| acc.lcm(c.denom()));
+    let total: Vec<usize> = ts.iter().filter(|(_, c)| !c.is_zero()).map(|(ex, _)| ex.iter().sum()).collect();
+    let dtot = *total.first().ok_or_else(bad)?;
+    if vars.len() == 2 && total.iter().any(|&d| d != dtot) {
+        return Err(bad());
+    }
+    let dmax = ts.iter().map(|(ex, _)| ex[0]).max().unwrap_or(0);
+    let mut p: ZPoly = vec![BigInt::zero(); dmax + 1];
+    for (ex, c) in &ts {
+        p[ex[0]] += (c * BigRational::from_integer(den.clone())).to_integer();
+    }
+    let y = if vars.len() == 2 { Some((Expr::sym(&vars[1]), dtot)) } else { None };
+    Ok((Expr::sym(&vars[0]), y, af::trim(p), den))
+}
+
+/// sum c_k x^k, homogenized with y when given
+fn coeffs_expr(cs: &[Expr], x: &Expr, y: Option<&Expr>) -> Expr {
+    let d = cs.len() - 1;
+    add(cs
+        .iter()
+        .enumerate()
+        .map(|(k, c)| {
+            let mut v = vec![c.clone(), pow(x.clone(), int(k as i128))];
+            if let Some(y) = y {
+                v.push(pow(y.clone(), int((d - k) as i128)));
+            }
+            mul(v)
+        })
+        .collect())
+}
+
+/// the squarefree d with Q(v) = Q(sqrt(d)), when v is a square root of a rational
+fn quadratic_field(v: &Expr) -> Option<BigInt> {
+    let sq = calc::expand(&pow(v.clone(), int(2)));
+    let q = sq.num().filter(|n| n.is_exact())?.big()?;
+    let t = q.numer() * q.denom();
+    if t.is_zero() {
+        return None;
+    }
+    let mut d = if t.sign() == num_bigint::Sign::Minus { -BigInt::one() } else { BigInt::one() };
+    for (p, e) in crate::numtheory::factorize(&t.magnitude().clone().into()).ok()? {
+        if e % 2 == 1 {
+            d *= p;
+        }
+    }
+    if d.is_one() { None } else { Some(d) }
+}
+
+impl Session {
+    /// factor(p, field): field is a prime (mod p) or a square root such as sqrt(2), i or sqrt(-3)
+    pub(crate) fn factor_over(&mut self, e: &Expr, field: &Expr) -> R<Expr> {
+        let (x, y, p, den) = one_var_form(e)?;
+        let yref = y.as_ref().map(|(y, _)| y);
+        let extra_y = |degf: usize| -> Option<(Expr, u32)> {
+            match &y {
+                Some((y, dt)) if *dt > degf => Some((y.clone(), (*dt - degf) as u32)),
+                _ => None,
+            }
+        };
+        let degf = p.len().saturating_sub(1);
+        if let Some(n) = field.num().filter(|n| n.is_exact() && n.is_integer()) {
+            let pr = n.as_int().filter(|&q| q >= 2 && q < 1 << 31 && crate::numtheory::small::is_prime(q as u128)).ok_or("factor(p, n) factors modulo a prime n: give a prime below 2^31")? as u64;
+            let pb = BigInt::from(pr);
+            let dinv = (&den % &pb).modinv(&pb).ok_or("factor(p, n): a denominator of p is divisible by n")?;
+            let (lead, fs) = af::factor_mod_p(&p, pr).ok_or("factor: polynomial too large")?;
+            let lead = (BigInt::from(lead) * dinv) % &pb;
+            let mut v = vec![bnum(lead)];
+            if let Some((yy, m)) = extra_y(af::trim(p.clone()).len().saturating_sub(1)) {
+                v.push(pow(yy, int(m as i128)));
+            }
+            for (h, m) in fs {
+                let cs: Vec<Expr> = h.iter().map(|&c| int(c as i128)).collect();
+                v.push(pow(coeffs_expr(&cs, &x, yref), int(m as i128)));
+            }
+            return Ok(mul(v));
+        }
+        let d = quadratic_field(field).ok_or("factor(p, field): the field is a prime (factor mod p), or a square root like sqrt(2), i or sqrt(-3)")?;
+        let (c, fs) = crate::algext::factor_ext(&p, &d).ok_or("factor: polynomial too large")?;
+        let root = if d == -BigInt::one() { Expr::Const(crate::expr::Const::I) } else { crate::build::sqrt(bnum(d.clone())) };
+        let mut v = vec![Expr::Num(Number::from_big(c / BigRational::from_integer(den)))];
+        if let Some((yy, m)) = extra_y(degf) {
+            v.push(pow(yy, int(m as i128)));
+        }
+        for (h, m) in fs {
+            let cs: Vec<Expr> = h.iter().map(|q| add2(Expr::Num(Number::from_big(q.a.clone())), mul2(Expr::Num(Number::from_big(q.b.clone())), root.clone()))).collect();
+            v.push(pow(coeffs_expr(&cs, &x, yref), int(m as i128)));
+        }
+        Ok(mul(v))
     }
 }

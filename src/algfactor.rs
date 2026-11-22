@@ -416,7 +416,7 @@ fn edf(f: &[u64], d: usize, p: u64, seed: &mut u64) -> Vec<MPoly> {
     if n == d {
         return vec![f.to_vec()];
     }
-    let e = (num_traits::pow(BigInt::from(p), d) - 1u32) / 2u32;
+    let e = if p == 2 { BigInt::zero() } else { (num_traits::pow(BigInt::from(p), d) - 1u32) / 2u32 };
     loop {
         let a: MPoly = mtrim(
             (0..n)
@@ -431,7 +431,18 @@ fn edf(f: &[u64], d: usize, p: u64, seed: &mut u64) -> Vec<MPoly> {
         if a.len() < 2 {
             continue;
         }
-        let b = msub(&mpowmod(&a, &e, f, p), &[1], p);
+        let b = if p == 2 {
+            // trace map a + a^2 + a^4 + ... + a^(2^(d-1))
+            let mut t = a.clone();
+            let mut sq = a.clone();
+            for _ in 1..d {
+                sq = mdivrem(&mmul(&sq, &sq, p), f, p).1;
+                t = madd(&t, &sq, p);
+            }
+            t
+        } else {
+            msub(&mpowmod(&a, &e, f, p), &[1], p)
+        };
         let g = mgcd(f, &b, p);
         if g.len() > 1 && g.len() < f.len() {
             let h = mdivrem(f, &g, p).0;
@@ -1102,4 +1113,224 @@ fn split_known(m: &BigInt, d: u64) -> Option<BigInt> {
     // x^1024 + 1 for 2^256 + 1 is the case where it pays).
     let k = if d % 2 == 1 { 2 * d } else { d };
     nt::pollard_pm1_with(m, k).or_else(|| nt::pollard_rho(m))
+}
+
+// ---------- polynomials in several variables ----------
+
+/// a term: exponents of each variable, coefficient
+pub type MTerm = (Vec<u32>, BigInt);
+type MPolyZ = std::collections::BTreeMap<Vec<u32>, BigInt>;
+
+fn mp_from(terms: &[MTerm]) -> MPolyZ {
+    let mut m = MPolyZ::new();
+    for (e, c) in terms {
+        *m.entry(e.clone()).or_insert_with(BigInt::zero) += c;
+    }
+    m.retain(|_, c| !c.is_zero());
+    m
+}
+
+fn mp_mul(a: &MPolyZ, b: &MPolyZ) -> MPolyZ {
+    let mut r = MPolyZ::new();
+    for (ea, ca) in a {
+        for (eb, cb) in b {
+            let e: Vec<u32> = ea.iter().zip(eb).map(|(x, y)| x + y).collect();
+            *r.entry(e).or_insert_with(BigInt::zero) += ca * cb;
+        }
+    }
+    r.retain(|_, c| !c.is_zero());
+    r
+}
+
+/// Kronecker substitution: variable i becomes t^(w_i)
+fn kron_encode(f: &MPolyZ, w: &[usize]) -> ZPoly {
+    let deg = f.keys().map(|e| e.iter().zip(w).map(|(x, y)| *x as usize * y).sum::<usize>()).max().unwrap_or(0);
+    let mut p = vec![BigInt::zero(); deg + 1];
+    for (e, c) in f {
+        let k: usize = e.iter().zip(w).map(|(x, y)| *x as usize * y).sum();
+        p[k] += c;
+    }
+    trim(p)
+}
+
+fn kron_decode(p: &[BigInt], dims: &[usize]) -> MPolyZ {
+    let mut m = MPolyZ::new();
+    for (k, c) in p.iter().enumerate() {
+        if c.is_zero() {
+            continue;
+        }
+        let mut k = k;
+        let e: Vec<u32> = dims
+            .iter()
+            .map(|d| {
+                let r = k % d;
+                k /= d;
+                r as u32
+            })
+            .collect();
+        m.insert(e, c.clone());
+    }
+    m
+}
+
+/// content and sign: the leading term (largest exponent vector) becomes positive
+fn mp_normalize(f: &MPolyZ) -> (BigInt, MPolyZ) {
+    let mut g = BigInt::zero();
+    for c in f.values() {
+        g = g.gcd(c);
+    }
+    if f.iter().next_back().is_some_and(|(_, c)| c.is_negative()) {
+        g = -g;
+    }
+    (g.clone(), f.iter().map(|(e, c)| (e.clone(), c / &g)).collect())
+}
+
+/// Factor a polynomial with integer coefficients in nv variables:
+/// (constant, [(irreducible factor, multiplicity)]). The variables are packed
+/// into one by Kronecker substitution (a factor's exponents never exceed the
+/// polynomial's), the univariate image is factored, and products of its
+/// factors are unpacked and kept when they divide exactly.
+pub fn factor_multi(terms: &[MTerm], nv: usize) -> Option<(BigInt, Vec<(Vec<MTerm>, u32)>)> {
+    let f = mp_from(terms);
+    if f.is_empty() {
+        return None;
+    }
+    let dims: Vec<usize> = (0..nv).map(|i| f.keys().map(|e| e[i] as usize).max().unwrap_or(0) + 1).collect();
+    let mut w = vec![1usize; nv];
+    for i in 1..nv {
+        w[i] = w[i - 1].checked_mul(dims[i - 1])?;
+    }
+    if w[nv - 1].checked_mul(dims[nv - 1])? > 401 {
+        return None;
+    }
+    let (_, fz) = factor_zpoly(&kron_encode(&f, &w))?;
+    let mut pieces: Vec<ZPoly> = vec![];
+    for (p, m) in fz {
+        for _ in 0..m {
+            pieces.push(p.clone());
+        }
+    }
+    let mut cur = f.clone();
+    let mut found: Vec<MPolyZ> = vec![];
+    let mut s = 1;
+    let mut work = 0usize;
+    'outer: while 2 * s <= pieces.len() {
+        let n = pieces.len();
+        let mut comb: Vec<usize> = (0..s).collect();
+        loop {
+            work += 1;
+            if work > 200_000 {
+                break 'outer;
+            }
+            let mut h: ZPoly = vec![BigInt::one()];
+            for &j in &comb {
+                h = pmul(&h, &pieces[j]);
+            }
+            let hm = kron_decode(&h, &dims);
+            let cz = kron_encode(&cur, &w);
+            if let Some(q) = pdivexact(&cz, &h) {
+                let qm = kron_decode(&q, &dims);
+                if mp_mul(&hm, &qm) == cur {
+                    found.push(hm);
+                    cur = qm;
+                    let keep: Vec<ZPoly> = (0..n).filter(|j| !comb.contains(j)).map(|j| pieces[j].clone()).collect();
+                    pieces = keep;
+                    continue 'outer;
+                }
+            }
+            let mut i = s;
+            loop {
+                if i == 0 {
+                    s += 1;
+                    continue 'outer;
+                }
+                i -= 1;
+                if comb[i] < n - s + i {
+                    comb[i] += 1;
+                    for j in i + 1..s {
+                        comb[j] = comb[j - 1] + 1;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    let mut constant = BigInt::one();
+    let mut out: Vec<(MPolyZ, u32)> = vec![];
+    let nonconst = |m: &MPolyZ| m.keys().any(|e| e.iter().any(|&x| x > 0));
+    if nonconst(&cur) {
+        found.push(cur);
+    } else if let Some(c) = cur.values().next() {
+        constant *= c;
+    }
+    for h in found {
+        let (c, h) = mp_normalize(&h);
+        constant *= c;
+        match out.iter_mut().find(|(g, _)| *g == h) {
+            Some((_, m)) => *m += 1,
+            None => out.push((h, 1)),
+        }
+    }
+    out.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0)));
+    Some((constant, out.into_iter().map(|(m, k)| (m.into_iter().collect(), k)).collect()))
+}
+
+// ---------- factoring modulo a prime ----------
+
+fn mderiv(f: &[u64], p: u64) -> MPoly {
+    mtrim(f.iter().enumerate().skip(1).map(|(k, &c)| (k as u64 % p) * c % p).collect())
+}
+
+/// irreducible monic factors of f mod p with multiplicities (f monic, degree >= 1)
+fn factor_mod_monic(f: &[u64], p: u64, seed: &mut u64) -> Vec<(MPoly, u32)> {
+    if f.len() <= 1 {
+        return vec![];
+    }
+    let df = mderiv(f, p);
+    if df.is_empty() {
+        // f = g(x)^p: the coefficients sit at multiples of p
+        let g: MPoly = f.iter().step_by(p as usize).cloned().collect();
+        return factor_mod_monic(&g, p, seed).into_iter().map(|(h, m)| (h, m * p as u32)).collect();
+    }
+    let g = mgcd(f, &df, p);
+    let sq = mmonic(&mdivrem(f, &g, p).0, p);
+    let mut irr = vec![];
+    for (part, d) in ddf(&sq, p) {
+        irr.extend(edf(&mmonic(&part, p), d, p, seed));
+    }
+    let mut rest = f.to_vec();
+    let mut out = vec![];
+    for h in irr {
+        let mut m = 0;
+        loop {
+            let (q, r) = mdivrem(&rest, &h, p);
+            if !r.is_empty() {
+                break;
+            }
+            rest = q;
+            m += 1;
+        }
+        out.push((h, m));
+    }
+    // what is left has only multiplicities divisible by p
+    for (h, m) in factor_mod_monic(&mmonic(&rest, p), p, seed) {
+        match out.iter_mut().find(|(g, _)| *g == h) {
+            Some((_, k)) => *k += m,
+            None => out.push((h, m)),
+        }
+    }
+    out
+}
+
+/// factor an integer polynomial modulo a prime p < 2^31: (leading coefficient, [(monic factor, multiplicity)])
+pub fn factor_mod_p(f: &[BigInt], p: u64) -> Option<(u64, Vec<(Vec<u64>, u32)>)> {
+    let fp = mreduce(f, p);
+    if fp.is_empty() {
+        return Some((0, vec![]));
+    }
+    let lead = *fp.last().unwrap();
+    let mut seed = 0x2545F4914F6CDD1Du64;
+    let mut out = factor_mod_monic(&mmonic(&fp, p), p, &mut seed);
+    out.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0)));
+    Some((lead, out))
 }

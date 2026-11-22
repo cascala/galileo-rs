@@ -401,6 +401,10 @@ impl Session {
                     return Err(format!("{} takes 1 argument", f));
                 }
                 let a = self.eval(&args[0])?;
+                if f == "factor" && args.len() == 2 {
+                    let field = self.eval(&args[1])?;
+                    return self.factor_over(&a, &field);
+                }
                 Ok(match f {
                     "simplify" => calc::simplify(&a),
                     "expand" => calc::expand(&a),
@@ -1043,6 +1047,10 @@ mod tests {
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
         assert!(run("factor(10^300 + 1)").starts_with("73 * 137 * 401 * "));
         assert!(run("factor(10^300 + 1)").contains("\nC156 = "));
+        assert_eq!(run("factor(expand((a*x+b)*(c*x+d)))"), "(a*x+b)*(c*x+d)");
+        assert_eq!(run("factor(x^2 + 1, i)"), "(x+i)*(x-i)");
+        assert_eq!(run("factor(x^4 + 1, 17)"), "(x+2)*(x+8)*(x+9)*(x+15)");
+        assert_eq!(run("factor(x^2 + y^2, i)"), "(x-i*y)*(x+i*y)");
         assert!(run("isprime(2^(2^2281 - 1) - 1)").contains("too large to compute: it would have about 10^686 digits"));
         assert!(run("isprime(eval(2^(2^2281 - 1) - 1))").contains("decimal too large to represent"));
         assert!(run("factor(2^(10^9) + 1)").contains("about 301029996 digits"));
