@@ -236,6 +236,9 @@ impl Session {
                 if file.trim().eq_ignore_ascii_case("rsa") {
                     return Ok(self.load_rsa());
                 }
+                if cfg!(target_arch = "wasm32") {
+                    return Err(format!("load({}): the browser version has no files to load; load(RSA) loads the RSA challenge numbers", file));
+                }
                 let src = std::fs::read_to_string(file).map_err(|e| format!("load {}: {}", file, e))?;
                 let mut last = Output::Nothing;
                 for r in self.run(&src) {
