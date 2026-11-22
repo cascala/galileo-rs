@@ -1554,25 +1554,11 @@ fn factors_nontrivially(f: &[BigInt]) -> bool {
     factor_zpoly(f).is_some_and(|(_, fs)| fs.iter().map(|(_, m)| *m).sum::<u32>() >= 2)
 }
 
-/// Built-in families f(x) with whole coefficients that factor over the integers,
-/// beyond the binomials a^k ± b^k and Sophie Germain's a^4 + 4b^4 that find_form
-/// tests directly: every trinomial x^n ± x^m ± 1 (n <= 24) that factors, the
-/// quartics x^4 + k x^2 + 1 that factor, and Chernick's (6k+1)(12k+1)(18k+1).
+/// Built-in families with large coefficients, which the base-x search below
+/// cannot see: the quartics x^4 + k x^2 + 1 that factor (|k| <= 100) and
+/// Chernick's Carmichael family (6x + 1)(12x + 1)(18x + 1).
 fn builtin_families() -> Vec<(String, ZPoly)> {
     let mut out = vec![];
-    for n in 2..=24usize {
-        for m in 1..n {
-            for (sm, s0) in [(1i32, 1i32), (1, -1), (-1, 1), (-1, -1)] {
-                let mut f = vec![BigInt::zero(); n + 1];
-                f[n] = BigInt::one();
-                f[m] += BigInt::from(sm);
-                f[0] += BigInt::from(s0);
-                if factors_nontrivially(&f) {
-                    out.push((format!("trinomial {}", show_zpoly(&f, "x")), f));
-                }
-            }
-        }
-    }
     for k in -100i32..=100 {
         let f: ZPoly = vec![BigInt::one(), BigInt::zero(), BigInt::from(k), BigInt::zero(), BigInt::one()];
         if factors_nontrivially(&f) {
@@ -1582,6 +1568,68 @@ fn builtin_families() -> Vec<(String, ZPoly)> {
     let chernick = pmul(&pmul(&[BigInt::one(), BigInt::from(6)], &[BigInt::one(), BigInt::from(12)]), &[BigInt::one(), BigInt::from(18)]);
     out.push(("Chernick (6x + 1)(12x + 1)(18x + 1)".into(), chernick));
     out
+}
+
+/// The base-x search: for each degree d and each base x near (n/c)^(1/d), write
+/// n in base x with balanced digits. When all digits are small (|digit| <=
+/// 8*effort) and few are nonzero (at most 6 + effort), n = P(x) for a sparse
+/// polynomial P with small coefficients, and if P factors over the integers so
+/// does n. This finds every trinomial, quadrinomial, ... family at once, of any
+/// degree, without a table. Returns P and x.
+pub fn base_search(n: &BigInt, effort: u64) -> Option<(ZPoly, BigInt)> {
+    let cmax = BigInt::from((8 * effort).min(100_000));
+    let tmax = 6 + effort.min(10) as usize;
+    let three = BigInt::from(3);
+    let bits = n.bits();
+    let dmax = (bits as f64 / 3f64.log2()) as usize + 1;
+    for d in 2..=dmax {
+        let mut lead = BigInt::one();
+        while lead <= cmax {
+            let r = (n / &lead).nth_root(d as u32);
+            if r < three {
+                break;
+            }
+            let delta = 2 + (&cmax / BigInt::from(d)).to_i64().unwrap_or(0).min(1000);
+            for off in -delta..=delta {
+                let x = &r + off;
+                if x < three {
+                    continue;
+                }
+                let half = &x / 2u32;
+                let mut m = n.clone();
+                let mut coeffs: ZPoly = vec![];
+                let mut nonzero = 0;
+                let mut ok = true;
+                while !m.is_zero() {
+                    let mut dgt = m.mod_floor(&x);
+                    if dgt > half {
+                        dgt -= &x;
+                    }
+                    if dgt.abs() > cmax || coeffs.len() > d {
+                        ok = false;
+                        break;
+                    }
+                    if !dgt.is_zero() {
+                        nonzero += 1;
+                        if nonzero > tmax {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    m = (&m - &dgt) / &x;
+                    coeffs.push(dgt);
+                }
+                if !ok || coeffs.len() != d + 1 || nonzero < 3 {
+                    continue;
+                }
+                if factors_nontrivially(&coeffs) {
+                    return Some((coeffs, x));
+                }
+            }
+            lead += 1u32;
+        }
+    }
+    None
 }
 
 /// add a family to this session's list (algfactor tries it on every number)

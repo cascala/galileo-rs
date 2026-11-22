@@ -59,8 +59,14 @@ fn builtins() -> BTreeMap<String, Expr> {
     v.insert("j".into(), Expr::Const(Const::I));
     v.insert("true".into(), Expr::Bool(true));
     v.insert("false".into(), Expr::Bool(false));
+    // RSA-260, a 260-digit semiprime from the RSA Factoring Challenge (factored in 2026)
+    let rsa260 = num_bigint::BigInt::parse_bytes(RSA260.as_bytes(), 10).expect("RSA-260 digits");
+    v.insert("RSA260".into(), Expr::Num(crate::num::Number::from_bigint(rsa260.clone())));
+    v.insert("N".into(), Expr::Num(crate::num::Number::from_bigint(rsa260)));
     v
 }
+
+pub const RSA260: &str = "22112825529529666435281085255026230927612089502470015394413748319128822941402001986512729726569746599085900330031400051170742204560859276357953757185954298838958709229238491006703034124620545784566413664540684214361293017694020846391065875914794251435144458199";
 
 impl Session {
     pub fn new() -> Session {

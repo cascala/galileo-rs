@@ -325,7 +325,7 @@ impl Session {
             })(),
             "families" => (|| {
                 let (nb, all) = af::families();
-                let mut md = vec![format!("algfactor tests every number against a^k ± b^k (any a, b up to 12·effort), Sophie Germain's a^4 + 4b^4, divisors of b^k ± 1, and these {} polynomial families ({} built in, {} added with `addfamily`):", all.len(), nb, all.len() - nb), String::new()];
+                let mut md = vec![format!("algfactor tests every number against a^k ± b^k (any a, b up to 12·effort), Sophie Germain's a^4 + 4b^4, divisors of b^k ± 1, these {} polynomial families ({} built in, {} added with `addfamily`), and finally every sparse polynomial with small coefficients, by writing N in base x for each degree (trinomials, quadrinomials, ... of any degree):", all.len(), nb, all.len() - nb), String::new()];
                 let mut tx = vec![md[0].replace('`', "")];
                 for (i, (name, _)) in all.iter().enumerate() {
                     let tag = if i < nb { "" } else { " (added)" };
@@ -408,11 +408,17 @@ impl Session {
         } else {
             match typed {
                 Some((a, b, k, plus, _)) => Some(af::Form::Exact { a, b, k, plus }),
-                None => af::find_form(&n.abs(), effort).or_else(|| {
-                    let (name, f, x) = af::catalogue_match(&n.abs())?;
-                    family_name = Some(name);
-                    Some(af::Form::Poly { f, x })
-                }),
+                None => af::find_form(&n.abs(), effort)
+                    .or_else(|| {
+                        let (name, f, x) = af::catalogue_match(&n.abs())?;
+                        family_name = Some(format!("from the list of families: {}", name));
+                        Some(af::Form::Poly { f, x })
+                    })
+                    .or_else(|| {
+                        let (f, x) = af::base_search(&n.abs(), effort)?;
+                        family_name = Some("found by writing N in base x with small digits".into());
+                        Some(af::Form::Poly { f, x })
+                    }),
             }
         };
         let nd = digits(n);
@@ -450,7 +456,7 @@ impl Session {
                     let m = format!("This number is {} with {} = {}, but that polynomial does not factor over the integers, so it is one piece:", fs, var, x);
                     (vec![], m.clone(), m)
                 } else {
-                    let from = family_name.as_ref().map(|n| format!(" (from the list of families: {})", n)).unwrap_or_default();
+                    let from = family_name.as_ref().map(|n| format!(" ({})", n)).unwrap_or_default();
                     let m = format!("This number is {} with {} = {}{}. The polynomial factors, so the number splits into {} pieces:", fs, var, x, from, p.len());
                     (p, m.clone(), m)
                 }
@@ -471,8 +477,8 @@ impl Session {
         let (head_md, head_tx) = if head_md.is_empty() {
             let (b1, b2, k2) = ((12 * effort).min(10_000), (12 * effort).min(1000), (3000 * effort).min(10_000_000));
             (
-                format!("No algebraic form found: this {}-digit number is not $a^k \\pm 1$ for any $a$, not $a^k \\pm b^k$ for $b \\le {}$, and does not divide $b^k \\pm 1$ for $b \\le {}$, $k \\le {}$. It is one piece:", nd, b1, b2, k2),
-                format!("No algebraic form found: this {}-digit number is not a^k ± 1 for any a, not a^k ± b^k for b <= {}, and does not divide b^k ± 1 for b <= {}, k <= {}. It is one piece:", nd, b1, b2, k2),
+                format!("No algebraic form found: this {}-digit number is not $a^k \\pm 1$ for any $a$, not $a^k \\pm b^k$ for $b \\le {}$, and does not divide $b^k \\pm 1$ for $b \\le {}$, $k \\le {}$; it fits none of the listed families, and in no base $x$ is it a sparse polynomial with digits up to {} that factors. It is one piece:", nd, b1, b2, k2, (8 * effort).min(100_000)),
+                format!("No algebraic form found: this {}-digit number is not a^k ± 1 for any a, not a^k ± b^k for b <= {}, and does not divide b^k ± 1 for b <= {}, k <= {}; it fits none of the listed families, and in no base x is it a sparse polynomial with digits up to {} that factors. It is one piece:", nd, b1, b2, k2, (8 * effort).min(100_000)),
             )
         } else {
             (head_md, head_tx)
