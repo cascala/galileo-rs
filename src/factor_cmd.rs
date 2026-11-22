@@ -338,24 +338,57 @@ impl Session {
     }
 
     fn algfactor_cmd(&mut self, args: &[Node]) -> R<Expr> {
-        let [a] = args else { return Err("algfactor takes 1 argument: algfactor(2^58 + 1)".into()) };
+        let usage = "usage: algfactor(n) or algfactor(n, effort): the algebraic pieces of n and their factors; effort 1 (the default) is about a second of searching, larger numbers search more bases and exponents and factor longer";
+        let (a, effort) = match args {
+            [a] => (a, 1u64),
+            [a, e] => {
+                let e = self.eval(e)?.num().and_then(|n| n.as_int()).filter(|&e| (1..=10_000).contains(&e)).ok_or("algfactor(n, effort): effort is a whole number from 1 to 10000")?;
+                (a, e as u64)
+            }
+            _ => return Err(usage.into()),
+        };
         let v = self.eval(a)?;
         let n = v.num().and_then(|n| n.as_bigint()).filter(|n| n.abs() > BigInt::one()).ok_or("algfactor needs a whole number of 2 or more")?;
-        let form = int_form(self, Some(a), &n, true);
+        crate::numtheory::set_effort(effort);
+        let r = self.algfactor_run(a, &n, effort);
+        crate::numtheory::set_effort(1);
+        r
+    }
+
+    fn algfactor_run(&mut self, a: &Node, n: &BigInt, effort: u64) -> R<Expr> {
+        let typed = int_form(self, Some(a), n, false);
+        let form = match typed {
+            Some((a, b, k, plus, _)) => Some(af::Form::Exact { a, b, k, plus }),
+            None => af::find_form(&n.abs(), effort),
+        };
+        let nd = digits(n);
         let (pieces, head_md, head_tx) = match &form {
-            Some((a, b, k, plus, _)) => match af::algebraic_pieces(a, b, *k, *plus) {
-                Some(p) => {
-                    let f = form_latex(a, b, *k, *plus);
-                    let n_au = p.iter().filter(|x| x.text.starts_with('L')).count();
-                    let extra = if n_au > 0 { format!(", {} of them Aurifeuillean pairs $L \\cdot M$", n_au) } else { String::new() };
-                    (
-                        p.clone(),
-                        format!("$${}$$ splits algebraically into {} pieces{}:", f, p.len(), extra),
-                        format!("{} splits algebraically into {} pieces:", f.replace(['{', '}'], ""), p.len()),
-                    )
+            Some(af::Form::Exact { a, b, k, plus }) => {
+                let f = form_latex(a, b, *k, *plus);
+                let ft = f.replace(['{', '}'], "");
+                match af::algebraic_pieces(a, b, *k, *plus) {
+                    Some(p) => {
+                        let n_au = p.iter().filter(|x| x.text.starts_with('L')).count();
+                        let extra = if n_au > 0 { format!(", {} of them Aurifeuillean pairs $L \\cdot M$", n_au) } else { String::new() };
+                        (p.clone(), format!("$${}$$ splits algebraically into {} pieces{}:", f, p.len(), extra), format!("{} splits algebraically into {} pieces:", ft, p.len()))
+                    }
+                    None => (
+                        vec![],
+                        format!("This number is $${}$$ but that form does not split, so it is one piece:", f),
+                        format!("This number is {} but that form does not split, so it is one piece:", ft),
+                    ),
                 }
-                None => (vec![], String::new(), String::new()),
-            },
+            }
+            Some(af::Form::Divides { b, k, plus, .. }) => {
+                let op = if *plus { "+" } else { "-" };
+                let p = af::divisor_pieces(n, *b, *k, *plus);
+                let s = if p.len() == 1 { "" } else { "s" };
+                (
+                    p.clone(),
+                    format!("This {}-digit number $N$ divides $${}^{{{}}} {} 1$$ ({} is the smallest such exponent for base {}), so it splits along the algebraic pieces of that number into {} part{}:", nd, b, k, op, k, b, p.len(), s),
+                    format!("This {}-digit number N divides {}^{} {} 1, so it splits along the pieces of that number into {} part{}:", nd, b, k, op, p.len(), s),
+                )
+            }
             None => (vec![], String::new(), String::new()),
         };
         let pieces = if pieces.is_empty() {
@@ -364,8 +397,11 @@ impl Session {
             pieces
         };
         let (head_md, head_tx) = if head_md.is_empty() {
-            let m = "This number has no algebraic form $a^n \\pm b^n$ that splits, so it is one piece:".to_string();
-            (m.clone(), m.replace('$', "").replace("\\pm", "±"))
+            let (b1, b2, k2) = ((12 * effort).min(10_000), (12 * effort).min(1000), (3000 * effort).min(10_000_000));
+            (
+                format!("No algebraic form found: this {}-digit number is not $a^k \\pm 1$ for any $a$, not $a^k \\pm b^k$ for $b \\le {}$, and does not divide $b^k \\pm 1$ for $b \\le {}$, $k \\le {}$. It is one piece:", nd, b1, b2, k2),
+                format!("No algebraic form found: this {}-digit number is not a^k ± 1 for any a, not a^k ± b^k for b <= {}, and does not divide b^k ± 1 for b <= {}, k <= {}. It is one piece:", nd, b1, b2, k2),
+            )
         } else {
             (head_md, head_tx)
         };

@@ -1334,3 +1334,107 @@ pub fn factor_mod_p(f: &[BigInt], p: u64) -> Option<(u64, Vec<(Vec<u64>, u32)>)>
     out.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0)));
     Some((lead, out))
 }
+
+// ---------- recognizing algebraic forms of a large number ----------
+
+/// How a number relates to a^k ± b^k
+#[derive(Clone, Debug)]
+pub enum Form {
+    /// n = a^k + b^k (plus) or a^k - b^k
+    Exact { a: BigInt, b: BigInt, k: u64, plus: bool },
+    /// n divides b^k + 1 (plus) or b^k - 1, k the smallest such exponent found
+    Divides { b: u64, k: u64, plus: bool, searched: u64 },
+}
+
+/// Search for an algebraic form of n >= 2. effort (1 = about a second) sets
+/// how many bases b and exponents k are tried:
+/// * n = a^k ± 1 for every base a (k-th roots of n ∓ 1 for each k),
+/// * n = a^k ± b^k for b up to 12*effort,
+/// * n divides b^k ± 1 for b up to 12*effort and k up to 3000*effort.
+pub fn find_form(n: &BigInt, effort: u64) -> Option<Form> {
+    let bits = n.bits();
+    if bits < 3 {
+        return None;
+    }
+    let one = BigInt::one();
+    // a^k ± 1, largest k first (smallest base)
+    for k in (2..=bits).rev() {
+        for plus in [true, false] {
+            let m = if plus { n - 1u32 } else { n + 1u32 };
+            let r = m.nth_root(k as u32);
+            if r >= BigInt::from(2) && num_traits::pow(r.clone(), k as usize) == m {
+                return Some(Form::Exact { a: r, b: one, k, plus });
+            }
+        }
+    }
+    // a^k ± b^k
+    let bmax = (12 * effort).min(10_000);
+    for b in 2..=bmax {
+        let bb = BigInt::from(b);
+        let mut bk = bb.clone();
+        let mut k = 1u64;
+        while &bk * 2u32 < *n {
+            bk *= &bb;
+            k += 1;
+            for plus in [true, false] {
+                let m = if plus { n - &bk } else { n + &bk };
+                if m.sign() != num_bigint::Sign::Plus {
+                    continue;
+                }
+                let r = m.nth_root(k as u32);
+                if r > bb && num_traits::pow(r.clone(), k as usize) == m {
+                    return Some(Form::Exact { a: r, b: bb, k, plus });
+                }
+            }
+        }
+    }
+    // n divides b^k ± 1
+    let kmax = (3000 * effort).min(10_000_000);
+    let dmax = (12 * effort).min(1000);
+    let nm1 = n - 1u32;
+    let mut best: Option<Form> = None;
+    for b in 2..=dmax {
+        let bb = BigInt::from(b);
+        if !(n.gcd(&bb)).is_one() {
+            continue;
+        }
+        let mut x = BigInt::one();
+        let lb = (b as f64).ln();
+        for k in 1..=kmax {
+            // keep the smallest b^k ± 1 (so 2^1062 + 1 rather than 8^354 + 1)
+            if best.as_ref().is_some_and(|f| matches!(f, Form::Divides { b: bb, k: kb, .. } if k as f64 * lb >= *kb as f64 * (*bb as f64).ln() - 1e-9)) {
+                break;
+            }
+            x = &x * &bb % n;
+            if x.is_one() || x == nm1 {
+                best = Some(Form::Divides { b, k, plus: x == nm1, searched: kmax });
+                break;
+            }
+        }
+    }
+    best
+}
+
+/// The parts of n cut out by the algebraic pieces of b^k ± 1 (n divides it)
+pub fn divisor_pieces(n: &BigInt, b: u64, k: u64, plus: bool) -> Vec<Piece> {
+    let bb = BigInt::from(b);
+    let pieces = algebraic_pieces(&bb, &BigInt::one(), k, plus).unwrap_or_else(|| {
+        let v = if plus { num_traits::pow(bb.clone(), k as usize) + 1u32 } else { num_traits::pow(bb.clone(), k as usize) - 1u32 };
+        let (text, latex) = if plus { (format!("{}^{}+1", b, k), format!("{}^{{{}}}+1", b, k)) } else { (format!("{}^{}-1", b, k), format!("{}^{{{}}}-1", b, k)) };
+        vec![Piece { text, latex, value: v, d: if plus { 2 * k } else { k } }]
+    });
+    let mut rest = n.abs();
+    let mut out = vec![];
+    for p in pieces {
+        let g = rest.gcd(&p.value);
+        if g.is_one() {
+            continue;
+        }
+        rest /= &g;
+        out.push(Piece { text: format!("N in {}", p.text), latex: format!("N \\cap {}", p.latex), value: g, d: p.d });
+    }
+    if !rest.is_one() {
+        out.push(Piece { text: "rest".into(), latex: "\\text{rest}".into(), value: rest, d: 0 });
+    }
+    out
+}

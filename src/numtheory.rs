@@ -12,6 +12,17 @@ pub use small::primes_upto;
 /// the number of 64-bit limbs of n (about a second of work)
 const BIG_RHO_WORK: u64 = 5_000_000;
 
+static EFFORT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Scale the work rho and p - 1 may spend on a large number (1 = about a second)
+pub fn set_effort(e: u64) {
+    EFFORT.store(e.clamp(1, 10_000), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn effort() -> u64 {
+    EFFORT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn limbs(n: &BigInt) -> u64 {
     n.bits() / 64 + 1
 }
@@ -132,7 +143,7 @@ pub fn pollard_rho_pow(n: &BigInt, k: u64) -> Option<BigInt> {
     let kb = BigInt::from(k);
     // multiplications per step
     let cost = if k == 2 { 1 } else { (64 - k.leading_zeros() as u64) + k.count_ones() as u64 - 1 };
-    let mut budget = BIG_RHO_WORK / limbs(n);
+    let mut budget = BIG_RHO_WORK.saturating_mul(effort()) / limbs(n);
     for c in 1..20u32 {
         let c = BigInt::from(c);
         let f = |x: &BigInt| if k == 2 { (x * x + &c) % n } else { (x.modpow(&kb, n) + &c) % n };
@@ -182,17 +193,18 @@ pub fn pollard_pm1(n: &BigInt) -> Option<BigInt> {
 /// Pollard's p - 1 when a factor of p - 1 is known in advance (for a prime
 /// p dividing a cyclotomic piece Phi_d(b), d divides p - 1)
 pub fn pollard_pm1_with(n: &BigInt, known: u64) -> Option<BigInt> {
-    const B1: usize = 100_000;
-    let b2: usize = if limbs(n) <= 4 { 5_000_000 } else { 1_000_000 };
+    let e = effort() as usize;
+    let b1: usize = 100_000 * e.min(1000);
+    let b2: usize = ((if limbs(n) <= 4 { 5_000_000 } else { 1_000_000 }) * e).min(50_000_000).max(b1 + 1);
     let ps = small::primes_upto(b2);
     let mut a = BigInt::from(2).modpow(&BigInt::from(known.max(1)), n);
-    for (i, &q) in ps.iter().take_while(|&&q| q <= B1).enumerate() {
+    for (i, &q) in ps.iter().take_while(|&&q| q <= b1).enumerate() {
         let mut qk = q as u64;
-        while qk * (q as u64) <= B1 as u64 {
+        while qk * (q as u64) <= b1 as u64 {
             qk *= q as u64;
         }
         a = a.modpow(&BigInt::from(qk), n);
-        if i % 1000 == 999 || q > B1 - 1000 {
+        if i % 1000 == 999 || q > b1 - 1000 {
             let g = (&a - 1u32).gcd(n);
             if &g == n {
                 return None;
@@ -203,7 +215,7 @@ pub fn pollard_pm1_with(n: &BigInt, known: u64) -> Option<BigInt> {
         }
     }
     // stage 2: one larger prime q, stepping a^q from prime to prime
-    let first = ps.iter().position(|&q| q > B1)?;
+    let first = ps.iter().position(|&q| q > b1)?;
     let mut steps: Vec<BigInt> = vec![BigInt::one()];
     let a2 = &a * &a % n;
     for k in 1..=200 {
