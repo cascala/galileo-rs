@@ -244,7 +244,7 @@ fn content(terms: &[Expr]) -> Expr {
                 .into_iter()
                 .filter_map(|(b, p)| {
                     parts.iter().find(|(b2, _)| *b2 == b).map(|(_, p2)| {
-                        (b, if p.cmp_value(*p2).is_le() { p } else { *p2 })
+                        (b, if p.cmp_value(p2).is_le() { p } else { p2.clone() })
                     })
                 })
                 .collect(),
@@ -284,7 +284,7 @@ pub fn together(e: &Expr) -> Expr {
         for (b, p) in parts {
             match dparts.iter_mut().find(|(b2, _)| *b2 == b) {
                 Some(x) => {
-                    if p.cmp_value(x.1).is_gt() {
+                    if p.cmp_value(&x.1).is_gt() {
                         x.1 = p
                     }
                 }
@@ -292,7 +292,7 @@ pub fn together(e: &Expr) -> Expr {
             }
         }
     }
-    let mut dfactors: Vec<Expr> = dparts.iter().map(|(b, p)| pow(b.clone(), Num(*p))).collect();
+    let mut dfactors: Vec<Expr> = dparts.iter().map(|(b, p)| pow(b.clone(), Num(p.clone()))).collect();
     dfactors.push(Expr::int(dcoef));
     let den = mul(dfactors);
     if den.is_one() {
@@ -326,7 +326,7 @@ fn cancel(numer: &Expr, den: &Expr) -> Expr {
     }
     for (b, p) in &cparts {
         if let Some((_, q)) = dparts.iter().find(|(b2, _)| b2 == b) {
-            let m = if p.cmp_value(*q).is_le() { *p } else { *q };
+            let m = if p.cmp_value(q).is_le() { p.clone() } else { q.clone() };
             cancel_f.push(pow(b.clone(), Num(m)));
         }
     }

@@ -113,7 +113,7 @@ fn exact_poly(c: &[Expr]) -> Option<Poly> {
 }
 
 fn peval(p: &[Number], x: Number) -> Number {
-    p.iter().rev().fold(Number::zero(), |acc, c| acc.mul(x).add(*c))
+    p.iter().rev().fold(Number::zero(), |acc, c| acc.mul(&x).add(c))
 }
 
 fn ptrim(mut p: Poly) -> Poly {
@@ -131,13 +131,13 @@ fn pdivmod(p: &[Number], d: &[Number]) -> (Poly, Poly) {
         return (vec![Number::zero()], r);
     }
     let mut q = vec![Number::zero(); r.len() - d.len() + 1];
-    let lead = *d.last().unwrap();
+    let lead = d.last().unwrap().clone();
     while r.len() >= d.len() && !(r.len() == 1 && r[0].is_zero()) {
         let shift = r.len() - d.len();
-        let c = r.last().unwrap().div(lead).unwrap_or(Number::zero());
-        q[shift] = c;
+        let c = r.last().unwrap().div(&lead).unwrap_or(Number::zero());
+        q[shift] = c.clone();
         for (i, di) in d.iter().enumerate() {
-            r[i + shift] = r[i + shift].sub(c.mul(*di));
+            r[i + shift] = r[i + shift].sub(c.mul(di));
         }
         r.pop();
         r = ptrim(r);
@@ -152,7 +152,7 @@ fn pmul(a: &[Number], b: &[Number]) -> Poly {
     let mut out = vec![Number::zero(); a.len() + b.len() - 1];
     for (i, x) in a.iter().enumerate() {
         for (j, y) in b.iter().enumerate() {
-            out[i + j] = out[i + j].add(x.mul(*y));
+            out[i + j] = out[i + j].add(x.mul(y));
         }
     }
     out
@@ -222,17 +222,17 @@ fn rational_roots(p: &[Number]) -> (Vec<(Number, usize)>, Poly) {
         for pp in divisors(a0) {
             for s in [1, -1] {
                 if let Some(r) = Number::rat(s * pp, q) {
-                    if !cands.iter().any(|c| c.cmp_value(r).is_eq()) {
+                    if !cands.iter().any(|c| c.cmp_value(&r).is_eq()) {
                         cands.push(r);
                     }
                 }
             }
         }
     }
-    cands.sort_by(|a, b| a.abs().cmp_value(b.abs()).then(b.cmp_value(*a)));
+    cands.sort_by(|a, b| a.abs().cmp_value(b.abs()).then(b.cmp_value(a)));
     for r in cands {
         let mut m = 0;
-        while p.len() > 1 && peval(&p, r).is_zero() {
+        while p.len() > 1 && peval(&p, r.clone()).is_zero() {
             p = pdivmod(&p, &[r.neg(), Number::one()]).0;
             m += 1;
         }
@@ -304,7 +304,7 @@ fn exact_gaussian_root(p: &[Number], r: (f64, f64)) -> Option<Expr> {
     let (a, b) = (snap(r.0)?, snap(r.1)?);
     let z = add2(Num(a), mul2(Num(b), Const(Const::I)));
     let x = Expr::sym("z__");
-    let poly = add(p.iter().enumerate().map(|(k, c)| mul2(Num(*c), pow(x.clone(), int(k as i128)))).collect());
+    let poly = add(p.iter().enumerate().map(|(k, c)| mul2(Num(c.clone()), pow(x.clone(), int(k as i128)))).collect());
     let v = crate::calc::subst(&poly, "z__", &z);
     if v.is_zero() { Some(z) } else { None }
 }
@@ -342,8 +342,8 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
         let mut out: Vec<Expr> = roots.into_iter().map(|(r, _)| Num(r)).collect();
         match rest.len() {
             0 | 1 => {}
-            2 => out.push(Num(rest[0].neg().div(rest[1]).unwrap())),
-            3 => out.extend(quadratic(&Num(rest[2]), &Num(rest[1]), &Num(rest[0]))),
+            2 => out.push(Num(rest[0].neg().div(&rest[1]).unwrap())),
+            3 => out.extend(quadratic(&Num(rest[2].clone()), &Num(rest[1].clone()), &Num(rest[0].clone()))),
             _ => out.extend(
                 numeric_roots(&rest.iter().map(|v| v.to_f64()).collect::<Vec<_>>())
                     .into_iter()
@@ -384,7 +384,7 @@ pub fn factor_poly(e: &Expr) -> Option<Expr> {
         return None;
     }
     let xv = Expr::sym(x);
-    let mut lead = *rest.last().unwrap();
+    let mut lead = rest.last().unwrap().clone();
     let mut factors = vec![];
     for (r, m) in &roots {
         // (q x - p) for r = p/q
@@ -394,8 +394,8 @@ pub fn factor_poly(e: &Expr) -> Option<Expr> {
         factors.push(pow(lin, int(*m as i128)));
     }
     if rest.len() > 1 {
-        let l = *rest.last().unwrap();
-        let monic: Vec<Expr> = rest.iter().map(|v| Num(v.div(l).unwrap())).collect();
+        let l = rest.last().unwrap().clone();
+        let monic: Vec<Expr> = rest.iter().map(|v| Num(v.div(&l).unwrap())).collect();
         factors.push(from_coeffs(&monic, &xv));
     }
     factors.insert(0, Num(lead));
@@ -743,7 +743,7 @@ fn lim(e: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
         }
         Pow(b, q) if !q.contains_sym(x) => {
             let qn = q.num();
-            if qn.is_some_and(|v| v.is_negative()) {
+            if qn.as_ref().is_some_and(|v| v.is_negative()) {
                 return quotient(&Expr::one(), &pow((**b).clone(), neg((**q).clone())), x, p, depth);
             }
             match lim(b, x, p, depth + 1)? {
@@ -1038,7 +1038,7 @@ fn rational(e: &Expr, x: &str) -> Option<Expr> {
         for j in 1..=*m {
             den = pmul(&den, &[rt.neg(), Number::one()]);
             basis.push(pdivmod(&pd, &den).0);
-            kinds.push((Some((*rt, j)), 0));
+            kinds.push((Some((rt.clone(), j)), 0));
         }
     }
     if rest.len() == 3 {
@@ -1051,15 +1051,15 @@ fn rational(e: &Expr, x: &str) -> Option<Expr> {
     if basis.len() != deg {
         return None;
     }
-    let mat: Vec<Vec<Expr>> = (0..deg).map(|i| basis.iter().map(|b| Num(*b.get(i).unwrap_or(&Number::zero()))).collect()).collect();
-    let rhs: Vec<Vec<Expr>> = (0..deg).map(|i| vec![Num(*r.get(i).unwrap_or(&Number::zero()))]).collect();
+    let mat: Vec<Vec<Expr>> = (0..deg).map(|i| basis.iter().map(|b| Num(b.get(i).cloned().unwrap_or(Number::zero()))).collect()).collect();
+    let rhs: Vec<Vec<Expr>> = (0..deg).map(|i| vec![Num(r.get(i).cloned().unwrap_or(Number::zero()))]).collect();
     let sol = crate::linalg::solve(&mat, &rhs).ok()?;
     let coef: Vec<Expr> = sol.into_iter().map(|r| r[0].clone()).collect();
     let (mut bx, mut cx) = (Expr::zero(), Expr::zero());
     for (k, c) in kinds.iter().zip(coef) {
         match k {
             (Some((rt, j)), _) => {
-                let lin = sub(xv.clone(), Num(*rt));
+                let lin = sub(xv.clone(), Num(rt.clone()));
                 if *j == 1 {
                     out.push(mul2(c, func(Func::Log, lin)));
                 } else {
@@ -1073,11 +1073,11 @@ fn rational(e: &Expr, x: &str) -> Option<Expr> {
     }
     if rest.len() == 3 {
         // (B x + C) / (a x^2 + b x + c)
-        let (a, b, c) = (Num(rest[2]), Num(rest[1]), Num(rest[0]));
+        let (a, b, c) = (Num(rest[2].clone()), Num(rest[1].clone()), Num(rest[0].clone()));
         let qx = from_coeffs(&[c.clone(), b.clone(), a.clone()], &xv);
         out.push(mul2(div(bx.clone(), mul2(int(2), a.clone())), func(Func::Log, qx)));
         let k = sub(cx, div(mul2(bx, b.clone()), mul2(int(2), a.clone())));
-        let disc = rest[0].mul(rest[2]).mul(Number::int(4)).sub(rest[1].mul(rest[1]));
+        let disc = rest[0].mul(&rest[2]).mul(Number::int(4)).sub(rest[1].mul(&rest[1]));
         let lin = add2(mul2(mul2(int(2), a), xv.clone()), b);
         if disc.is_negative() {
             let s = sqrt(Num(disc.neg()));
@@ -1376,6 +1376,9 @@ pub fn nintegrate(f: &Expr, x: &str, a: f64, b: f64) -> R<f64> {
 pub fn factorial(n: i128) -> R<Expr> {
     if n < 0 {
         return Err("factorial needs a non-negative integer".into());
+    }
+    if n > 100_000 {
+        return Err("factorial: at most factorial(100000), which already has 456574 digits".into());
     }
     let mut acc = Number::one();
     for k in 2..=n {

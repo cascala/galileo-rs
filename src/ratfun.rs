@@ -103,7 +103,7 @@ fn mono_cmp(a: &Mono, b: &Mono) -> std::cmp::Ordering {
 
 fn leading(p: &Poly) -> (&Mono, Number) {
     let (m, c) = p.iter().max_by(|a, b| mono_cmp(a.0, b.0)).unwrap();
-    (m, *c)
+    (m, c.clone())
 }
 
 fn constant(c: Number) -> Poly {
@@ -117,7 +117,7 @@ fn constant(c: Number) -> Poly {
 fn as_constant(p: &Poly) -> Option<Number> {
     match p.len() {
         0 => Some(Number::zero()),
-        1 => p.get(&vec![]).copied(),
+        1 => p.get(&vec![]).cloned(),
         _ => None,
     }
 }
@@ -139,7 +139,7 @@ fn clean(p: Poly) -> Poly {
     let scale = p.values().map(|c| c.to_f64().abs()).fold(0.0, f64::max);
     p.into_iter()
         .filter(|(_, c)| match c {
-            Number::Rat(..) => !c.is_zero(),
+            Number::Rat(..) | Number::Big(_) => !c.is_zero(),
             Number::Float(f) => f.abs() > 1e-11 * scale && *f != 0.0,
         })
         .map(|(m, c)| (m, round(c)))
@@ -181,7 +181,7 @@ fn normalize(p: &Poly) -> (Number, Poly) {
         lc
     };
     let inv = c.recip().unwrap_or(Number::one());
-    (c, clean(p.iter().map(|(m, v)| (m.clone(), v.mul(inv))).collect()))
+    (c, clean(p.iter().map(|(m, v)| (m.clone(), v.mul(&inv))).collect()))
 }
 
 impl Ctx {
@@ -217,7 +217,7 @@ impl Ctx {
         let mut m = a.clone();
         for (mo, c) in b {
             let e = m.entry(mo.clone()).or_insert(Number::zero());
-            *e = e.add(c.mul(s));
+            *e = e.add(c.mul(&s));
         }
         self.reduce_poly(clean(m))
     }
@@ -228,7 +228,7 @@ impl Ctx {
         for (ma, ca) in a {
             for (mb, cb) in b {
                 let e = m.entry(mono_mul(ma, mb)).or_insert(Number::zero());
-                *e = e.add(ca.mul(*cb));
+                *e = e.add(ca.mul(cb));
             }
         }
         self.reduce_poly(clean(m))
@@ -308,7 +308,7 @@ impl Ctx {
                     if e > 2 {
                         rest = mono_mul(&rest, &vec![(k, e - 2)]);
                     }
-                    put(&mut out, rest.clone(), c);
+                    put(&mut out, rest.clone(), c.clone());
                     put(&mut out, mono_mul(&rest, &vec![(q, 2)]), c.neg());
                 }
                 Some((k, e, Err((b, q)))) => {
@@ -351,16 +351,16 @@ impl Ctx {
             self.spend(d.len())?;
             let (lr, cr) = leading(&rem);
             let Some(mo) = mono_div(lr, &ld) else { return Ok(None) };
-            let Some(c) = cr.div(cd) else { return Ok(None) };
+            let Some(c) = cr.div(&cd) else { return Ok(None) };
             let e = q.entry(mo.clone()).or_insert(Number::zero());
-            *e = e.add(c);
+            *e = e.add(&c);
             for (md, cdd) in d {
                 let x = mono_mul(&mo, md);
                 let e = rem.entry(x).or_insert(Number::zero());
-                *e = e.sub(c.mul(*cdd));
+                *e = e.sub(c.mul(cdd));
             }
             rem.retain(|_, v| match v {
-                Number::Rat(..) => !v.is_zero(),
+                Number::Rat(..) | Number::Big(_) => !v.is_zero(),
                 Number::Float(f) => f.abs() > 1e-9 * scale,
             });
         }
@@ -379,7 +379,7 @@ impl Ctx {
                 .filter_map(|(k, e)| mo.iter().find(|x| x.0 == k).map(|x| (k, e.min(x.1))))
                 .collect();
         }
-        let rest: Poly = p.iter().map(|(m, c)| (mono_div(m, &content).unwrap(), *c)).collect();
+        let rest: Poly = p.iter().map(|(m, c)| (mono_div(m, &content).unwrap(), c.clone())).collect();
         let (c, rest) = normalize(&rest);
         let mut fs: Vec<(Poly, u32)> = content
             .iter()
@@ -459,7 +459,7 @@ impl Ctx {
         use Expr::*;
         self.spend(1)?;
         Ok(match e {
-            Num(n) => Rat { num: constant(*n), den: vec![] },
+            Num(n) => Rat { num: constant(n.clone()), den: vec![] },
             Add(ts) => {
                 let mut acc = Rat { num: Poly::new(), den: vec![] };
                 for t in ts {
@@ -578,7 +578,7 @@ impl Ctx {
     fn poly_expr(&self, p: &Poly) -> Expr {
         add(p.iter().map(|(mo, c)| {
             let mut f = self.mono_expr(mo);
-            f.push(Expr::Num(*c));
+            f.push(Expr::Num(c.clone()));
             mul(f)
         })
         .collect())
@@ -614,7 +614,7 @@ impl Ctx {
                 .filter_map(|(k, e)| mo.iter().find(|x| x.0 == k).map(|x| (k, e.min(x.1))))
                 .collect();
         }
-        let rest: Poly = r.num.iter().map(|(m, c)| (mono_div(m, &content).unwrap(), *c)).collect();
+        let rest: Poly = r.num.iter().map(|(m, c)| (mono_div(m, &content).unwrap(), c.clone())).collect();
         let (mut c, mut prim) = normalize(&rest);
         let mut factors = self.mono_expr(&content);
         // pull out factors seen in the input, such as (R + a*cos(u))^2
@@ -667,7 +667,7 @@ impl Ctx {
             }
         }
         let mut main = factors.clone();
-        main.push(Expr::Num(c));
+        main.push(Expr::Num(c.clone()));
         main.push(e.clone());
         let main = mul(main);
         // -(r-r_s) reads better as r_s-r

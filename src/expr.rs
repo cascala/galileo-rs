@@ -166,7 +166,7 @@ impl Expr {
     }
 
     pub fn num(&self) -> Option<Number> {
-        if let Num(n) = self { Some(*n) } else { None }
+        if let Num(n) = self { Some(n.clone()) } else { None }
     }
     pub fn is_zero(&self) -> bool {
         matches!(self, Num(n) if n.is_zero())
@@ -187,12 +187,12 @@ impl Expr {
     /// Split a term into its numeric coefficient and the rest: `3*x*y` -> (3, x*y)
     pub fn coeff_and_rest(&self) -> (Number, Expr) {
         match self {
-            Num(n) => (*n, Expr::one()),
-            Mul(f) => match f[0] {
+            Num(n) => (n.clone(), Expr::one()),
+            Mul(f) => match &f[0] {
                 Num(n) => {
                     let rest: Vec<Expr> = f[1..].to_vec();
                     let rest = if rest.len() == 1 { rest.into_iter().next().unwrap() } else { Mul(rest) };
-                    (n, rest)
+                    (n.clone(), rest)
                 }
                 _ => (Number::one(), self.clone()),
             },
@@ -212,7 +212,7 @@ impl Expr {
     pub fn is_negative_term(&self) -> bool {
         match self {
             Num(n) => n.is_negative(),
-            Mul(f) => matches!(f[0], Num(n) if n.is_negative()),
+            Mul(f) => matches!(&f[0], Num(n) if n.is_negative()),
             _ => false,
         }
     }
@@ -308,7 +308,7 @@ pub fn cmp(a: &Expr, b: &Expr) -> Ordering {
         return ra.cmp(&rb);
     }
     match (a, b) {
-        (Num(x), Num(y)) => x.cmp_value(*y),
+        (Num(x), Num(y)) => x.cmp_value(y),
         (Const(x), Const(y)) => x.cmp(y),
         (Sym(x), Sym(y)) => x.cmp(y),
         (Func(f, x), Func(g, y)) => cmp(x, y).then(f.cmp(g)),

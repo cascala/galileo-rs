@@ -26,7 +26,7 @@ fn wrap(s: (String, u8), min: u8) -> String {
     if s.1 < min { format!("({})", s.0) } else { s.0 }
 }
 
-fn num_prec(n: Number) -> u8 {
+fn num_prec(n: &Number) -> u8 {
     if n.is_negative() {
         P_ADD
     } else if !n.is_integer() && n.is_exact() {
@@ -39,7 +39,7 @@ fn num_prec(n: Number) -> u8 {
 /// (text, precedence of the outermost operator)
 fn fmt(e: &Expr) -> (String, u8) {
     match e {
-        Num(n) => (n.to_string(), num_prec(*n)),
+        Num(n) => (n.to_string(), num_prec(n)),
         Sym(s) => (s.clone(), P_ATOM),
         Const(c) => (
             match c {
@@ -100,11 +100,11 @@ fn fmt(e: &Expr) -> (String, u8) {
         }
         Mul(_) => fmt_mul(e),
         Pow(b, x) => {
-            if let Num(n) = **x {
+            if let Num(n) = &**x {
                 if n.is_negative() {
                     return fmt_mul(e);
                 }
-                if n == Number::rat(1, 2).unwrap() {
+                if *n == Number::rat(1, 2).unwrap() {
                     return (format!("sqrt({})", fmt(b).0), P_ATOM);
                 }
             }
@@ -127,7 +127,7 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
     let mut denom: Vec<Expr> = vec![];
     for f in factors {
         match &f {
-            Num(n) => coeff = coeff.mul(*n),
+            Num(n) => coeff = coeff.mul(n),
             Pow(b, x) if x.num().is_some_and(|n| n.is_negative()) => {
                 denom.push(crate::build::pow((**b).clone(), Num(x.num().unwrap().neg())))
             }
@@ -145,6 +145,14 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
             }
             if d != 1 {
                 ds.push(d.to_string());
+            }
+        }
+        Number::Big(ref r) => {
+            if r.is_integer() {
+                ns.push(r.numer().to_string());
+            } else {
+                ns.push(r.numer().to_string());
+                ds.push(r.denom().to_string());
             }
         }
         Number::Float(_) => {

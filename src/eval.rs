@@ -397,17 +397,9 @@ impl Session {
                 Ok(match f {
                     "simplify" => calc::simplify(&a),
                     "expand" => calc::expand(&a),
-                    "factor" => match a.num().filter(|n| n.is_exact()).and_then(|n| n.as_int()) {
+                    "factor" => match a.num().and_then(|n| n.as_bigint()) {
                         // factor(360) = 2^3 * 3^2 * 5
-                        Some(n) if n.abs() > 1 => Expr::Str(crate::extra_cmd::factored_text(n)?),
-                        // a whole number too big for exact arithmetic has become a decimal:
-                        // its digits are gone, so there is nothing to factor
-                        _ if a.num().is_some_and(|n| !n.is_exact() && n.to_f64().abs() >= 1.7e38) => {
-                            return Err(format!(
-                                "factor: {} is too large. Galileo keeps whole numbers exact up to 38 digits (2^127 - 1); larger ones become decimals with 16 significant digits, which cannot be factored",
-                                show(&a)
-                            ))
-                        }
+                        Some(n) if n.bits() > 1 => Expr::Str(crate::extra_cmd::factored_text(&n).map_err(|e| format!("factor: {}", e))?),
                         _ => crate::cas::factor_poly(&a).unwrap_or_else(|| calc::factor(&a)),
                     },
                     "eval" => calc::evalf(&a),
@@ -913,7 +905,7 @@ fn range(a: &Expr, s: &Expr, b: &Expr) -> R<Expr> {
     if sn.is_zero() {
         return Err("range step can't be zero".into());
     }
-    let count = (bn.sub(an).to_f64() / sn.to_f64() + 1e-10).floor();
+    let count = (bn.sub(&an).to_f64() / sn.to_f64() + 1e-10).floor();
     if count < 0.0 {
         return Ok(Expr::Matrix(vec![vec![]]));
     }
@@ -921,11 +913,11 @@ fn range(a: &Expr, s: &Expr, b: &Expr) -> R<Expr> {
         return Err("range is too long".into());
     }
     // decimal steps like 0:0.1:0.5 give 0.3, not 0.30000000000000004
-    let decimals = |n: Number| -> Option<u32> {
+    let decimals = |n: &Number| -> Option<u32> {
         let s = format!("{}", n.to_f64());
         if s.contains('e') { None } else { Some(s.split('.').nth(1).map_or(0, |f| f.len()) as u32) }
     };
-    let scale = match (an.is_exact() && sn.is_exact(), decimals(an), decimals(sn)) {
+    let scale = match (an.is_exact() && sn.is_exact(), decimals(&an), decimals(&sn)) {
         (false, Some(x), Some(y)) if x.max(y) <= 12 => Some(10f64.powi(x.max(y) as i32)),
         _ => None,
     };
@@ -993,7 +985,15 @@ mod tests {
         assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
         assert_eq!(run("[1 true]"), "1\ttrue");
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
-        assert!(run("factor(10^300 + 1)").starts_with("Error: factor: "));
+        assert!(run("factor(10^300 + 1)").starts_with("Error: factor: found the factors 73, 137, "));
+        assert_eq!(run("2^200"), "1606938044258990275541962092341162602522202993782792835301376");
+        assert_eq!(run("mod(3^100, 7)"), "4");
+        assert_eq!(run("isprime(2^521 - 1)"), "true");
+        assert_eq!(run("factor(2^127 - 3)"), "5^2 * 213156431 * 31927947500766558008599290859");
+        assert_eq!(run("decode(encode(\"a message longer than fifteen characters\"))"), "a message longer than fifteen characters");
+        assert_eq!(run("floor(10^40/7)"), "1428571428571428571428571428571428571428");
+        assert_eq!(run("1/(2^200) * 2^201"), "2");
+        assert_eq!(run("170141183460469231731687303715884105728 - 1"), "170141183460469231731687303715884105727");
         assert_eq!(run("rank([1 2 3; 4 5 6; 7 8 9])"), "2");
         assert_eq!(run("null([1 2 3; 4 5 6; 7 8 9])"), "1\n-2\n1");
         assert_eq!(run("eigvec([2 1; 1 2])"), "-1\t1\n1\t1");

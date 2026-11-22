@@ -29,10 +29,10 @@ pub fn add(terms: Vec<Expr>) -> Expr {
         .collect();
     out.sort_by(term_cmp);
     if !constant.is_zero() {
-        out.push(Num(constant));
+        out.push(Num(constant.clone()));
     }
     match out.len() {
-        0 => Num(constant), // keeps 0.0 a float
+        0 => Num(constant.clone()), // keeps 0.0 a float
         1 => out.pop().unwrap(),
         _ => Add(out),
     }
@@ -56,7 +56,7 @@ fn scale(c: Number, e: Expr) -> Expr {
 /// a + b*i with numbers a, b (b may be 0)
 pub fn gauss(e: &Expr) -> Option<(Number, Number)> {
     match e {
-        Num(n) => Some((*n, Number::zero())),
+        Num(n) => Some((n.clone(), Number::zero())),
         Const(Const::I) => Some((Number::zero(), Number::one())),
         Mul(f) if f.len() == 2 && f[1] == Const(Const::I) => f[0].num().map(|n| (Number::zero(), n)),
         Add(t) => {
@@ -80,20 +80,20 @@ pub fn from_gauss(re: Number, im: Number) -> Expr {
 }
 
 fn gauss_mul(a: (Number, Number), b: (Number, Number)) -> (Number, Number) {
-    (a.0.mul(b.0).sub(a.1.mul(b.1)), a.0.mul(b.1).add(a.1.mul(b.0)))
+    (a.0.mul(&b.0).sub(a.1.mul(&b.1)), a.0.mul(&b.1).add(a.1.mul(&b.0)))
 }
 
 /// z^n for a Gaussian number z and a (not too large) integer n
 fn gauss_pow(z: (Number, Number), n: i128) -> Option<(Number, Number)> {
     let base = if n < 0 {
-        let norm = z.0.mul(z.0).add(z.1.mul(z.1));
-        (z.0.div(norm)?, z.1.neg().div(norm)?)
+        let norm = z.0.mul(&z.0).add(z.1.mul(&z.1));
+        (z.0.div(&norm)?, z.1.neg().div(&norm)?)
     } else {
         z
     };
     let mut acc = (Number::one(), Number::zero());
     for _ in 0..n.abs() {
-        acc = gauss_mul(acc, base);
+        acc = gauss_mul(acc, base.clone());
     }
     Some(acc)
 }
@@ -173,7 +173,8 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
         Num(Number::Float(f)) if f.fract() == 0.0 && f.abs() < 9.0e15 => Expr::int(f as i128),
         other => other,
     };
-    if let Num(en) = e {
+    if let Num(en) = &e {
+        let en = en.clone();
         if en.is_zero() {
             return Expr::one();
         }
@@ -182,17 +183,29 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
         }
         match &b {
             Num(bn) => {
-                if let Some(r) = bn.pow(en) {
+                if let Some(r) = bn.pow(&en) {
                     return Num(r);
                 }
                 // pull perfect powers out of roots: 8^(1/2) = 2*2^(1/2)
-                if let (Number::Rat(n, d), Number::Rat(p, q)) = (*bn, en) {
+                if let (&Number::Rat(n, d), &Number::Rat(p, q)) = (bn, &en) {
                     if n > 0 && q > 1 {
                         let (kn, mn) = split_root(n, q);
                         let (kd, md) = split_root(d, q);
                         if kn != 1 || kd != 1 {
                             let k = Num(Number::rat(kn, kd).unwrap());
                             let m = Num(Number::rat(mn, md).unwrap());
+                            return mul(vec![pow(k, Expr::int(p)), pow(m, e.clone())]);
+                        }
+                    }
+                }
+                // the same for big numbers, with small primes
+                if let (Number::Big(r), &Number::Rat(p, q)) = (bn, &en) {
+                    if !bn.is_negative() && q > 1 && q <= 64 {
+                        let (kn, mn) = split_root_big(r.numer(), q as u32);
+                        let (kd, md) = split_root_big(r.denom(), q as u32);
+                        if !(kn == 1.into() && kd == 1.into()) {
+                            let k = Num(Number::from_big(num_rational::BigRational::new(kn, kd)));
+                            let m = Num(Number::from_big(num_rational::BigRational::new(mn, md)));
                             return mul(vec![pow(k, Expr::int(p)), pow(m, e.clone())]);
                         }
                     }
@@ -292,6 +305,24 @@ fn split_root(n: i128, q: i128) -> (i128, i128) {
     (k, m)
 }
 
+fn split_root_big(n: &num_bigint::BigInt, q: u32) -> (num_bigint::BigInt, num_bigint::BigInt) {
+    use num_traits::Zero;
+    let (mut k, mut m) = (num_bigint::BigInt::from(1), n.clone());
+    // an exact q-th power of a big number
+    let r = m.nth_root(q);
+    if r.pow(q) == m {
+        return (r, num_bigint::BigInt::from(1));
+    }
+    for p in crate::numtheory::primes_upto(10_000) {
+        let pq = num_bigint::BigInt::from(p).pow(q);
+        while (&m % &pq).is_zero() {
+            m /= &pq;
+            k *= p;
+        }
+    }
+    (k, m)
+}
+
 pub fn neg(e: Expr) -> Expr {
     mul(vec![Expr::int(-1), e])
 }
@@ -336,7 +367,7 @@ fn i_pi_multiple(e: &Expr) -> Option<Number> {
     let (mut has_i, mut has_pi) = (false, false);
     for x in f {
         match x {
-            Num(n) if n.is_exact() => k = k.mul(*n),
+            Num(n) if n.is_exact() => k = k.mul(n),
             Const(Const::I) if !has_i => has_i = true,
             Const(Const::Pi) if !has_pi => has_pi = true,
             _ => return None,
@@ -416,7 +447,7 @@ fn asin_known(x: &Expr) -> Option<Expr> {
 
 pub fn func(f: Func, x: Expr) -> Expr {
     use Func::*;
-    if let Num(n) = x {
+    if let Num(n) = &x {
         if !n.is_exact() {
             let v = n.to_f64();
             return Expr::float(f.apply(v));
@@ -522,7 +553,7 @@ pub fn func(f: Func, x: Expr) -> Expr {
             if x.is_one() {
                 return Expr::zero();
             }
-            if let Num(Number::Rat(n, d)) = x {
+            if let Num(Number::Rat(n, d)) = x.clone() {
                 // log(1/4) = -log(4), log(8) = 3*log(2)
                 if n == 1 && d > 1 {
                     return neg(func(Log, Expr::int(d)));
@@ -543,12 +574,12 @@ pub fn func(f: Func, x: Expr) -> Expr {
             }
         }
         Abs => {
-            if let Num(n) = x {
+            if let Num(n) = &x {
                 return Num(n.abs());
             }
             // |a + b*i| = sqrt(a^2 + b^2)
             if let Some((a, b)) = gauss(&x) {
-                return sqrt(Num(a.mul(a).add(b.mul(b))));
+                return sqrt(Num(a.mul(&a).add(b.mul(&b))));
             }
             if let Const(Const::Pi | Const::E) = x {
                 return x;

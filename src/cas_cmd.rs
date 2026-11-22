@@ -11,6 +11,9 @@ use crate::numeric;
 use crate::parser::Node;
 use crate::print::show;
 use std::rc::Rc;
+use crate::num::Number;
+use num_bigint::BigInt;
+use num_traits::{Signed, Zero};
 
 fn name(n: &Node, what: &str) -> R<String> {
     match n {
@@ -60,12 +63,27 @@ fn integer(e: &Expr, f: &str) -> R<i128> {
     Ok(v as i128)
 }
 
+fn big_integer(e: &Expr, f: &str) -> R<BigInt> {
+    match exact_big(e) {
+        Some(n) => Ok(n),
+        None => integer(e, f).map(BigInt::from),
+    }
+}
+
 fn modulo(va: &Expr, vb: &Expr) -> R<Expr> {
     if let (Some(x), Some(y)) = (exact_int(va), exact_int(vb)) {
         if y == 0 {
             return Err("mod: division by zero".into());
         }
         return Ok(Expr::int(x.rem_euclid(y)));
+    }
+    if let (Some(x), Some(y)) = (exact_big(va), exact_big(vb)) {
+        if y.is_zero() {
+            return Err("mod: division by zero".into());
+        }
+        let r = x % &y;
+        let r = if r.is_negative() { r + y.abs() } else { r };
+        return Ok(crate::extra_cmd::bnum(r));
     }
     let (x, y) = (real(va, "mod")?, real(vb, "mod")?);
     Ok(Expr::float(x - y * (x / y).floor()))
@@ -127,6 +145,37 @@ pub(crate) fn eigvec(m: &linalg::Mat) -> R<(linalg::Mat, Vec<Expr>)> {
 
 fn exact_int(e: &Expr) -> Option<i128> {
     e.num().filter(|n| n.is_exact()).and_then(|n| n.as_int())
+}
+
+fn exact_big(e: &Expr) -> Option<BigInt> {
+    e.num().and_then(|n| n.as_bigint())
+}
+
+/// floor, ceil or round, exact for exact numbers of any size
+fn round_exact(v: &Expr, f: &str) -> Option<R<Expr>> {
+    match v {
+        Expr::Matrix(m) => {
+            let mut out = vec![];
+            for r in m {
+                let mut o = vec![];
+                for e in r {
+                    o.push(round_exact(e, f)?);
+                }
+                out.push(o.into_iter().collect::<R<Vec<_>>>());
+            }
+            Some(out.into_iter().collect::<R<Vec<_>>>().map(Expr::Matrix))
+        }
+        Expr::Num(n) if n.is_exact() => {
+            let r = n.big()?;
+            let r = match f {
+                "floor" => r.floor(),
+                "ceil" => r.ceil(),
+                _ => r.round(),
+            };
+            Some(Ok(Expr::Num(Number::from_big(r))))
+        }
+        _ => None,
+    }
 }
 
 fn real(e: &Expr, f: &str) -> R<f64> {
@@ -344,6 +393,7 @@ impl Session {
         };
         match f {
             "factorial" => cas::factorial(integer(&v, f)?),
+            "floor" | "ceil" | "round" if round_exact(&v, f).is_some() => round_exact(&v, f).unwrap(),
             "floor" => round(f64::floor),
             "ceil" => round(f64::ceil),
             "round" => round(f64::round),
@@ -404,9 +454,9 @@ impl Session {
         match f {
             "binomial" => Ok(cas::binomial(integer(&va, f)?, integer(&vb, f)?)),
             "gcd" | "lcm" => {
-                let (x, y) = (integer(&va, f)?, integer(&vb, f)?);
-                let g = cas::gcd_int(x, y);
-                Ok(Expr::int(if f == "gcd" { g } else if g == 0 { 0 } else { (x / g * y).abs() }))
+                let (x, y) = (big_integer(&va, f)?, big_integer(&vb, f)?);
+                let g = num_integer::Integer::gcd(&x, &y);
+                Ok(crate::extra_cmd::bnum(if f == "gcd" { g } else if g.is_zero() { g } else { (x / &g * y).abs() }))
             }
             "mod" => match (&va, &vb) {
                 (Expr::Matrix(m), b) => Ok(Expr::Matrix(m.iter().map(|r| r.iter().map(|x| modulo(x, b)).collect::<R<_>>()).collect::<R<_>>()?)),

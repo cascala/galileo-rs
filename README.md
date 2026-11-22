@@ -7,7 +7,9 @@ This is a redesign rather than a line-by-line port. The language is the same
 underneath is new:
 
 * **Exact numbers.** Integers and fractions are exact rationals: `1/3 + 2/6` is `2/3`,
-  `sqrt(8)` is `2*sqrt(2)`. Decimals like `0.5` are floats, and floats are contagious.
+  `sqrt(8)` is `2*sqrt(2)`, and they have no size limit: `2^521 - 1` keeps all 157 digits
+  (small numbers use i128, larger ones switch to big integers automatically and never turn
+  into floats). Decimals like `0.5` are floats, and floats are contagious.
 * **Canonical forms.** Every expression is built through smart constructors that flatten
   sums and products, fold numbers, collect like terms and powers, and sort operands. So
   `8*y*u*y*u*y^5*y*u*u^6*r*y*7*y` is simply `56*r*u^9*y^10`, with no hand-written

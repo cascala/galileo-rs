@@ -55,6 +55,15 @@ fn apply_name(f: &str) -> String {
 
 pub fn number(n: Number) -> String {
     match n {
+        Number::Big(ref r) if r.is_integer() => r.numer().to_string(),
+        Number::Big(ref r) => {
+            let a = r.numer();
+            if a.sign() == num_bigint::Sign::Minus {
+                format!("-\\frac{{{}}}{{{}}}", -a, r.denom())
+            } else {
+                format!("\\frac{{{}}}{{{}}}", a, r.denom())
+            }
+        }
         Number::Rat(a, 1) => a.to_string(),
         Number::Rat(a, b) => {
             if a < 0 {
@@ -127,7 +136,7 @@ fn func_name(f: Func) -> &'static str {
 
 fn fmt(e: &Expr) -> (String, u8) {
     match e {
-        Num(n) => (number(*n), if n.is_negative() { P_ADD } else if n.is_integer() { P_ATOM } else { P_MUL }),
+        Num(n) => (number(n.clone()), if n.is_negative() { P_ADD } else if n.is_integer() { P_ATOM } else { P_MUL }),
         Sym(s) => (name(s), P_ATOM),
         Const(Const::Pi) => ("\\pi".into(), P_ATOM),
         Const(Const::E) => ("e".into(), P_ATOM),
@@ -176,7 +185,7 @@ fn fmt(e: &Expr) -> (String, u8) {
         }
         Mul(_) => fmt_mul(e),
         Pow(b, x) => {
-            if let Num(n) = **x {
+            if let Num(n) = (**x).clone() {
                 if n.is_negative() {
                     return fmt_mul(e);
                 }
@@ -211,7 +220,7 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
     let mut denom: Vec<Expr> = vec![];
     for f in factors {
         match &f {
-            Num(n) => coeff = coeff.mul(*n),
+            Num(n) => coeff = coeff.mul(n),
             Pow(b, x) if x.num().is_some_and(|n| n.is_negative()) => denom.push(pow((**b).clone(), Num(x.num().unwrap().neg()))),
             _ => numer.push(f),
         }
@@ -220,6 +229,8 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
     let coeff = coeff.abs();
     let (cn, cd) = match coeff {
         Number::Rat(n, d) => (n.to_string(), if d == 1 { None } else { Some(d.to_string()) }),
+        Number::Big(ref r) if r.is_integer() => (r.numer().to_string(), None),
+        Number::Big(ref r) => (r.numer().to_string(), Some(r.denom().to_string())),
         Number::Float(_) => (number(coeff), None),
     };
     let join = |fs: &[Expr], lead: Option<String>| -> String {

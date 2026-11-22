@@ -13,6 +13,8 @@ use crate::numtheory as nt;
 use crate::parser::Node;
 use crate::plot::{Figure, Series};
 use crate::print::show;
+use num_bigint::BigInt;
+use num_traits::{One, Signed, ToPrimitive, Zero};
 use std::rc::Rc;
 
 fn name(n: &Node, what: &str) -> R<String> {
@@ -43,7 +45,28 @@ fn nonneg(e: &Expr, f: &str) -> R<u128> {
 }
 
 fn uint(n: u128) -> Expr {
-    if n <= i128::MAX as u128 { Expr::int(n as i128) } else { Expr::float(n as f64) }
+    bnum(BigInt::from(n))
+}
+
+/// a whole number of any size (or a float that is exactly a small whole number)
+pub(crate) fn big_of(e: &Expr, f: &str) -> R<BigInt> {
+    let v = match e {
+        Expr::Num(n) if !n.is_exact() && n.is_integer() && n.to_f64().abs() < 1e15 => return Ok(BigInt::from(n.to_f64() as i128)),
+        e => e.num().and_then(|n| n.as_bigint()),
+    };
+    v.ok_or_else(|| format!("{} needs whole numbers, got {}", f, show(e)))
+}
+
+fn big_nonneg(e: &Expr, f: &str) -> R<BigInt> {
+    let n = big_of(e, f)?;
+    if n.is_negative() {
+        return Err(format!("{} needs a number that is not negative, got {}", f, n));
+    }
+    Ok(n)
+}
+
+pub(crate) fn bnum(n: BigInt) -> Expr {
+    Expr::Num(Number::from_bigint(n))
 }
 
 /// apply an integer function to a number or to each entry of a matrix
@@ -65,19 +88,19 @@ fn each(v: &Expr, f: &mut dyn FnMut(&Expr) -> R<Expr>) -> R<Expr> {
 }
 
 /// 360 -> "2^3 * 3^2 * 5"
-pub fn factored_text(n: i128) -> R<String> {
-    if n == 0 {
+pub fn factored_text(n: &BigInt) -> R<String> {
+    if n.is_zero() {
         return Ok("0".into());
     }
     let mut parts = vec![];
-    if n < 0 {
+    if n.is_negative() {
         parts.push("-1".to_string());
     }
-    let a = n.unsigned_abs();
-    if a == 1 {
-        return Ok(if n < 0 { "-1".into() } else { "1".into() });
+    let a = n.abs();
+    if a.is_one() {
+        return Ok(if n.is_negative() { "-1".into() } else { "1".into() });
     }
-    for (p, e) in nt::factorize(a)? {
+    for (p, e) in nt::factorize(&a)? {
         parts.push(if e == 1 { p.to_string() } else { format!("{}^{}", p, e) });
     }
     Ok(parts.join(" * "))
@@ -637,7 +660,7 @@ fn parse_cycles(s: &str, n: usize) -> R<Vec<usize>> {
 }
 
 fn perm_order(p: &[usize]) -> u128 {
-    cycles(p).iter().fold(1u128, |acc, c| acc / nt::gcd(acc, c.len() as u128) * c.len() as u128)
+    cycles(p).iter().fold(1u128, |acc, c| acc / nt::small::gcd(acc, c.len() as u128) * c.len() as u128)
 }
 
 fn perm_sign(p: &[usize]) -> i128 {
@@ -842,22 +865,17 @@ impl Session {
             }
             "encode" => {
                 let s = text(&v)?;
-                if s.len() > 15 {
-                    return Err("encode: at most 15 characters fit in one number".into());
+                if s.len() > 100_000 {
+                    return Err("encode: at most 100000 characters".into());
                 }
-                Ok(Expr::int(s.bytes().fold(0i128, |acc, b| acc * 256 + b as i128)))
+                Ok(bnum(BigInt::from_bytes_be(num_bigint::Sign::Plus, s.as_bytes())))
             }
             _ => {
-                let mut n = int_of(&v, f)?;
-                if n < 0 {
+                let n = big_of(&v, f)?;
+                if n.is_negative() {
                     return Err("decode needs a number of 0 or more".into());
                 }
-                let mut bytes = vec![];
-                while n > 0 {
-                    bytes.push((n % 256) as u8);
-                    n /= 256;
-                }
-                bytes.reverse();
+                let bytes = if n.is_zero() { vec![] } else { n.to_bytes_be().1 };
                 Ok(Expr::Str(String::from_utf8_lossy(&bytes).into_owned()))
             }
         }
@@ -906,24 +924,34 @@ impl Session {
         let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
         let v = self.eval(a)?;
         each(&v, &mut |x| {
-            let n = nonneg(x, f)?;
-            Ok(match f {
-                "isprime" => Expr::Bool(nt::is_prime(n)),
-                "nextprime" => uint(nt::next_prime(n)),
-                "prevprime" => uint(nt::prev_prime(n).ok_or("prevprime: there is no prime below 2")?),
+            let bn = big_nonneg(x, f)?;
+            match f {
+                "isprime" => return Ok(Expr::Bool(nt::is_prime(&bn))),
+                "nextprime" => return Ok(bnum(nt::next_prime(&bn))),
+                "prevprime" => return Ok(bnum(nt::prev_prime(&bn).ok_or("prevprime: there is no prime below 2")?)),
                 "totient" | "eulerphi" => {
-                    if n == 0 {
+                    if bn.is_zero() {
                         return Err(format!("{}(0) is not defined", f));
                     }
-                    uint(nt::totient(n)?)
+                    return Ok(bnum(nt::totient(&bn).map_err(|e| format!("{}: {}", f, e))?));
                 }
                 "sigma" => {
-                    if n == 0 {
+                    if bn.is_zero() {
                         return Err("sigma(0) is not defined".into());
                     }
-                    uint(nt::divisors(n)?.iter().sum())
+                    return Ok(bnum(nt::divisors(&bn).map_err(|e| format!("sigma: {}", e))?.iter().sum()));
                 }
-                "isqrt" => uint(nt::isqrt(n)),
+                "isqrt" => return Ok(bnum(nt::isqrt(&bn))),
+                "pollard" => {
+                    if bn < BigInt::from(4) || nt::is_prime(&bn) {
+                        return Err(format!("pollard: {} has no proper factor", bn));
+                    }
+                    return Ok(bnum(nt::pollard_rho(&bn).ok_or("pollard: no factor found in reasonable time")?));
+                }
+                _ => {}
+            }
+            let n = bn.to_u128().ok_or_else(|| format!("{}: {} is too large", f, bn))?;
+            Ok(match f {
                 "primepi" => {
                     if n > 50_000_000 {
                         return Err("primepi: at most 50000000".into());
@@ -943,13 +971,7 @@ impl Session {
                         limit *= 2;
                     }
                 }
-                _ => {
-                    // pollard
-                    if n < 4 || nt::is_prime(n) {
-                        return Err(format!("pollard: {} has no proper factor", n));
-                    }
-                    uint(nt::pollard_rho(n).ok_or("pollard: no factor found")?)
-                }
+                _ => unreachable!(),
             })
         })
     }
@@ -957,27 +979,33 @@ impl Session {
     fn int_info(&mut self, f: &str, args: &[Node]) -> R<Expr> {
         let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
         let v = self.eval(a)?;
-        let n = int_of(&v, f)?;
+        let n = big_of(&v, f)?;
+        let two = BigInt::from(2);
+        let err = |e: String| format!("{}: {}", f, e);
         match f {
-            "ifactor" => Ok(Expr::Str(factored_text(n)?)),
+            "ifactor" => Ok(Expr::Str(factored_text(&n).map_err(err)?)),
             "factors" => {
-                if n < 2 {
+                if n < two {
                     return Err("factors: give a whole number of 2 or more".into());
                 }
-                let fs = nt::factorize(n as u128)?;
-                Ok(Expr::Matrix(fs.into_iter().map(|(p, e)| vec![uint(p), Expr::int(e as i128)]).collect()))
+                let fs = nt::factorize(&n).map_err(err)?;
+                Ok(Expr::Matrix(fs.into_iter().map(|(p, e)| vec![bnum(p), Expr::int(e as i128)]).collect()))
             }
             "divisors" => {
-                if n < 1 {
+                if !n.is_positive() {
                     return Err("divisors: give a positive whole number".into());
                 }
-                Ok(row(nt::divisors(n as u128)?.into_iter().map(uint).collect()))
+                let ds = nt::divisors(&n).map_err(err)?;
+                if ds.len() > 100_000 {
+                    return Err(format!("divisors: {} has {} divisors, too many to list", n, ds.len()));
+                }
+                Ok(row(ds.into_iter().map(bnum).collect()))
             }
             _ => {
-                if n < 2 {
+                if n < two {
                     return Err("primroot: give a whole number of 2 or more".into());
                 }
-                nt::primitive_root(n as u128)?.map(uint).ok_or_else(|| format!("{} has no primitive root", n))
+                nt::primitive_root(&n).map_err(err)?.map(bnum).ok_or_else(|| format!("{} has no primitive root", n))
             }
         }
     }
@@ -1002,42 +1030,45 @@ impl Session {
     fn powmod(&mut self, args: &[Node]) -> R<Expr> {
         let v = self.arg_vals(args)?;
         let [a, b, m] = v.as_slice() else { return Err("usage: powmod(a, b, n) is a^b mod n".into()) };
-        let (a, b, m) = (int_of(a, "powmod")?, int_of(b, "powmod")?, int_of(m, "powmod")?);
-        if m <= 0 {
+        let (a, b, m) = (big_of(a, "powmod")?, big_of(b, "powmod")?, big_of(m, "powmod")?);
+        if !m.is_positive() {
             return Err("powmod: the modulus must be positive".into());
         }
-        let base = if b < 0 { nt::modinv(a, m).ok_or_else(|| format!("powmod: {} has no inverse mod {}", a, m))? } else { a.rem_euclid(m) };
-        Ok(uint(nt::powmod(base as u128, b.unsigned_abs(), m as u128)))
+        let base = if b.is_negative() { nt::modinv(&a, &m).ok_or_else(|| format!("powmod: {} has no inverse mod {}", a, m))? } else { a };
+        Ok(bnum(nt::powmod(&base, &b.abs(), &m)))
     }
 
     fn int_binary(&mut self, f: &str, args: &[Node]) -> R<Expr> {
         let v = self.arg_vals(args)?;
         let [a, m] = v.as_slice() else { return Err(format!("usage: {}(a, n)", f)) };
-        let (a, m) = (int_of(a, f)?, int_of(m, f)?);
-        if m < 1 {
+        let (a, m) = (big_of(a, f)?, big_of(m, f)?);
+        if !m.is_positive() {
             return Err(format!("{}: the modulus must be positive", f));
         }
         match f {
-            "modinv" => nt::modinv(a, m).map(Expr::int).ok_or_else(|| format!("modinv: {} has no inverse mod {} (they share a factor)", a, m)),
-            _ => Ok(uint(nt::mult_order(a.rem_euclid(m) as u128, m as u128)?)),
+            "modinv" => nt::modinv(&a, &m).map(bnum).ok_or_else(|| format!("modinv: {} has no inverse mod {} (they share a factor)", a, m)),
+            _ => Ok(bnum(nt::mult_order(&num_integer::Integer::mod_floor(&a, &m), &m).map_err(|e| format!("multorder: {}", e))?)),
         }
     }
 
     fn crt(&mut self, args: &[Node]) -> R<Expr> {
         let v = self.arg_vals(args)?;
         let [r, m] = v.as_slice() else { return Err("usage: crt([r1, r2, ...], [m1, m2, ...]) solves x = r_i mod m_i".into()) };
-        let flat = |e: &Expr| -> R<Vec<i128>> {
+        let flat = |e: &Expr| -> R<Vec<BigInt>> {
             match e {
-                Expr::Matrix(m) => m.iter().flatten().map(|x| int_of(x, "crt")).collect(),
-                x => Ok(vec![int_of(x, "crt")?]),
+                Expr::Matrix(m) => m.iter().flatten().map(|x| big_of(x, "crt")).collect(),
+                x => Ok(vec![big_of(x, "crt")?]),
             }
         };
         let (rs, ms) = (flat(r)?, flat(m)?);
         if rs.len() != ms.len() {
             return Err("crt: give as many remainders as moduli".into());
         }
+        if ms.iter().any(|m| !m.is_positive()) {
+            return Err("crt: the moduli must be positive".into());
+        }
         let (x, _) = nt::crt(&rs, &ms).ok_or("crt: the moduli must have no common factors")?;
-        Ok(Expr::int(x))
+        Ok(bnum(x))
     }
 
     fn complex(&mut self, f: &str, args: &[Node]) -> R<Expr> {
@@ -1115,7 +1146,7 @@ impl Session {
                 if sn.is_zero() {
                     return Err("table: the step can't be 0".into());
                 }
-                let count = ((bn.sub(an).to_f64() / sn.to_f64()) + 1e-9).floor();
+                let count = ((bn.sub(&an).to_f64() / sn.to_f64()) + 1e-9).floor();
                 if count < 0.0 {
                     return Ok(Expr::Matrix(vec![vec![]]));
                 }

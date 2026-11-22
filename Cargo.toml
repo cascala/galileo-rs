@@ -15,6 +15,10 @@ name = "galileo"
 path = "src/bin/galileo.rs"
 
 [dependencies]
+num-bigint = "0.4"
+num-integer = "0.1"
+num-rational = { version = "0.4", default-features = false, features = ["num-bigint", "std"] }
+num-traits = "0.2"
 
 [profile.release]
 opt-level = 3
