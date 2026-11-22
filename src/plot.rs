@@ -156,7 +156,16 @@ impl Figure {
         let (lo, hi) = (ys[0], ys[ys.len() - 1]);
         let (q1, q9) = (q(0.02), q(0.98));
         let core = q9 - q1;
-        let (y0, y1) = if core > 0.0 && hi - lo > 20.0 * core { (q1 - core * 0.5, q9 + core * 0.5) } else { (lo, hi) };
+        let (mut y0, mut y1) = if core > 0.0 && hi - lo > 20.0 * core { (q1 - core * 0.5, q9 + core * 0.5) } else { (lo, hi) };
+        // clipping is for curves running off to a pole; data points always stay visible
+        for s in self.series.iter().filter(|s| s.markers) {
+            for &(x, y) in &s.points {
+                if finite(x) && finite(y) {
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                }
+            }
+        }
         let (ya, yb) = if y1 - y0 < 1e-12 * y0.abs().max(1.0) { (y0 - 1.0, y1 + 1.0) } else { (y0, y1) };
         let pad = (yb - ya) * 0.05;
         let xa = pts.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);

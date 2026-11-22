@@ -71,6 +71,24 @@ fn modulo(va: &Expr, vb: &Expr) -> R<Expr> {
     Ok(Expr::float(x - y * (x / y).floor()))
 }
 
+/// c/(a + b*sqrt(k)) -> c*(a - b*sqrt(k))/(a^2 - b^2*k), when that is simpler
+fn rationalize_root(e: &Expr) -> Expr {
+    let (n, d) = calc::num_den(e);
+    let Expr::Add(terms) = &d else { return e.clone() };
+    let is_root = |t: &Expr| format!("{:?}", t).contains("Pow") && show(t).contains("sqrt");
+    if terms.len() != 2 || terms.iter().filter(|t| is_root(t)).count() != 1 {
+        return e.clone();
+    }
+    let conj = add(terms.iter().map(|t| if is_root(t) { neg(t.clone()) } else { t.clone() }).collect());
+    let top = calc::expand(&mul2(n, conj.clone()));
+    let bottom = simplify(&calc::expand(&mul2(d.clone(), conj)));
+    if bottom.num().is_none() {
+        return e.clone();
+    }
+    let r = simplify(&calc::expand(&div(top, bottom)));
+    if r.size() <= e.size() + 2 { r } else { e.clone() }
+}
+
 /// Eigenvectors (columns) and the matching eigenvalues, from the null space
 /// of A - λI for each distinct exact eigenvalue.
 pub(crate) fn eigvec(m: &linalg::Mat) -> R<(linalg::Mat, Vec<Expr>)> {
@@ -97,7 +115,7 @@ pub(crate) fn eigvec(m: &linalg::Mat) -> R<(linalg::Mat, Vec<Expr>)> {
         let n = linalg::nullspace(&shifted);
         for k in 0..linalg::dims(&n).1 {
             // scale so the entries are as simple as possible: last nonzero entry 1
-            cols.push((0..r).map(|i| n[i][k].clone()).collect());
+            cols.push((0..r).map(|i| rationalize_root(&n[i][k])).collect());
             vals.push(l.clone());
         }
     }
