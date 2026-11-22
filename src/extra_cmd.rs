@@ -810,6 +810,59 @@ fn forcing_term(t: &Expr, x: &str) -> Option<(Expr, usize, Expr, Expr)> {
 }
 
 impl Session {
+    /// letters("HELLO") = [7 4 11 11 14], word([7 4 11 11 14]) = "HELLO";
+    /// encode("Hi") = the bytes as one number (base 256), decode undoes it
+    fn text_cmd(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+        let v = self.eval(a)?;
+        let text = |v: &Expr| match v {
+            Expr::Str(s) => Ok(s.clone()),
+            o => Err(format!("{} needs a text in quotes, got {}", f, show(o))),
+        };
+        match f {
+            "letters" => {
+                let s = text(&v)?;
+                let ks: Vec<Expr> = s.chars().filter(|c| c.is_ascii_alphabetic()).map(|c| Expr::int((c.to_ascii_uppercase() as u8 - b'A') as i128)).collect();
+                if ks.is_empty() {
+                    return Err("letters: the text has no letters".into());
+                }
+                Ok(if ks.len() == 1 { ks[0].clone() } else { row(ks) })
+            }
+            "word" => {
+                let items: Vec<Expr> = match v {
+                    Expr::Matrix(m) => m.into_iter().flatten().collect(),
+                    o => vec![o],
+                };
+                let mut s = String::new();
+                for e in &items {
+                    let k = int_of(e, f)?;
+                    s.push((b'A' + k.rem_euclid(26) as u8) as char);
+                }
+                Ok(Expr::Str(s))
+            }
+            "encode" => {
+                let s = text(&v)?;
+                if s.len() > 15 {
+                    return Err("encode: at most 15 characters fit in one number".into());
+                }
+                Ok(Expr::int(s.bytes().fold(0i128, |acc, b| acc * 256 + b as i128)))
+            }
+            _ => {
+                let mut n = int_of(&v, f)?;
+                if n < 0 {
+                    return Err("decode needs a number of 0 or more".into());
+                }
+                let mut bytes = vec![];
+                while n > 0 {
+                    bytes.push((n % 256) as u8);
+                    n /= 256;
+                }
+                bytes.reverse();
+                Ok(Expr::Str(String::from_utf8_lossy(&bytes).into_owned()))
+            }
+        }
+    }
+
     /// Some(result) if f is one of the commands here
     pub(crate) fn extra_call(&mut self, f: &str, args: &[Node]) -> Option<R<Expr>> {
         let r = match f {
@@ -828,6 +881,7 @@ impl Session {
             "implicitplot" => self.implicitplot(args),
             "perm" | "compose" | "pinverse" | "porder" | "psign" | "cycles" | "generate" | "cayley" => self.perms(f, args),
             "dsolve" => self.dsolve(args),
+            "letters" | "word" | "encode" | "decode" => self.text_cmd(f, args),
             "polydiv" => self.polydiv(args),
             _ => return None,
         };

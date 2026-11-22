@@ -92,6 +92,8 @@ pub const ENTRIES: &[Entry] = &[
     e!("multorder", "Number theory", "multorder(a, n), primroot(n)", "The smallest k > 0 with a^k = 1 mod n, and the smallest primitive root mod n (a number whose powers give every unit).", "multorder(2, 13)"),
     e!("crt", "Number theory", "crt([r1, r2, ...], [m1, m2, ...])", "Chinese remainder theorem: the smallest x >= 0 with x = r_i mod m_i (moduli without common factors).", "crt([2, 3, 2], [3, 5, 7])"),
     e!("pollard", "Number theory", "pollard(n), isqrt(n)", "One factor of n found by Pollard's rho method, and the integer square root (largest k with k^2 <= n).", "pollard(8051)"),
+    e!("letters", "Number theory", "letters(text), word(list)", "letters turns the letters of a text into numbers A = 0, B = 1, ..., Z = 25 (other characters are skipped); word turns numbers back into letters, taking them mod 26. For shift ciphers.", "word(mod(letters(\"HELLO\") + 3, 26))"),
+    e!("encode", "Number theory", "encode(text), decode(n)", "encode turns a text of at most 15 characters into one whole number (its bytes in base 256); decode turns the number back into the text. For RSA examples.", "decode(encode(\"Hi Galileo\"))"),
     e!("perm", "Groups", "perm(\"(1 2 3)(4 5)\", n), cycles(p)", "A permutation of 1..n written in one-line notation, p = [p(1), p(2), ...], from cycle notation; cycles(p) goes back.", "cycles([2, 3, 1, 5, 4])"),
     e!("compose", "Groups", "compose(p, q), pinverse(p)", "p after q: first q, then p, so compose(p, q)[i] = p[q[i]]. pinverse undoes p.", "compose([2, 3, 1], [2, 1, 3])"),
     e!("porder", "Groups", "porder(p), psign(p)", "Order of a permutation (smallest k with p^k = identity: the lcm of its cycle lengths) and its sign (+1 even, -1 odd).", "porder([2, 3, 1, 5, 4])"),
@@ -123,6 +125,8 @@ pub const ENTRIES: &[Entry] = &[
 ];
 
 const ALIASES: &[(&str, &str)] = &[
+    ("word", "letters"),
+    ("decode", "encode"),
     ("whos", "who"),
     ("cos", "sin"),
     ("tan", "sin"),
