@@ -156,12 +156,7 @@ fn fmt(e: &Expr) -> (String, u8) {
                 }
                 // a + b*i: the imaginary part last
                 let (re, im): (Vec<Expr>, Vec<Expr>) = terms.into_iter().partition(|t| !crate::extra_cmd::has_i(t));
-                if !re.is_empty() && !im.is_empty() && im[0].is_negative_term() && !re.iter().any(|t| !t.is_negative_term()) {
-                    // keep a positive term first when the real part is all negative
-                    terms = im.into_iter().chain(re).collect();
-                } else {
-                    terms = re.into_iter().chain(im).collect();
-                }
+                terms = re.into_iter().chain(im).collect();
             }
             let mut s = String::new();
             for (i, t) in terms.iter().enumerate() {

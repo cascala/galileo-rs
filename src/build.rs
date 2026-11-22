@@ -225,6 +225,13 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
             Mul(fs) if en.is_integer() => {
                 return mul(fs.iter().map(|f| pow(f.clone(), e.clone())).collect());
             }
+            Pow(b2, e2) if positive_constant(b2) => {
+                return pow((**b2).clone(), mul(vec![(**e2).clone(), e]));
+            }
+            // (400*pi^2)^(1/2) = 20*pi: roots of products of positive constants
+            Mul(fs) if fs.iter().all(positive_constant) => {
+                return mul(fs.iter().map(|f| pow(f.clone(), e.clone())).collect());
+            }
             _ => {}
         }
     } else if b.is_one() {
@@ -243,6 +250,16 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
         }
     }
     Pow(Box::new(b), Box::new(e))
+}
+
+/// positive numbers, pi, e and their real powers
+fn positive_constant(e: &Expr) -> bool {
+    match e {
+        Num(n) => !n.is_negative() && !n.is_zero(),
+        Const(Const::Pi | Const::E) => true,
+        Pow(b, x) => matches!(**b, Const(Const::Pi | Const::E)) && x.is_number(),
+        _ => false,
+    }
 }
 
 /// n = k^q * m with k as large as trial division (up to 10^5) finds
