@@ -1162,7 +1162,7 @@ fn fit_law(t: &Table, law: &Expr) -> R<Fit> {
             } else {
                 (
                     format!("chi2/dof = {:.2}, worst point {:.1}σ off (row {}): NOT consistent with the data", err, z, worst + 1),
-                    format!("ruled out (row {} is {:.0}σ off)", worst + 1, z),
+                    format!("ruled out (row {} is {:.1}σ off)", worst + 1, z),
                 )
             }
         }
@@ -1527,7 +1527,9 @@ impl Session {
             }
         }
         let series = Series { label: "data".into(), points: pts, markers: true, errors: errs };
-        Ok(Expr::Obj(Rc::new(Obj::Figure(Figure::new(vec![series], &show(&ms[0]), &show(&ms[1]), false)))))
+        // x = r cos, y = r sin: a picture of positions, same scale on both axes
+        let polar = show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
+        Ok(Expr::Obj(Rc::new(Obj::Figure(Figure::new(vec![series], &show(&ms[0]), &show(&ms[1]), polar)))))
     }
 
     /// odedata([f1 f2], [y1 y2], t, [y1_0 y2_0], t0, t1, n): a table of n+1 rows [t y1 y2]
