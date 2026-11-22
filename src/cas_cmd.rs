@@ -182,8 +182,8 @@ impl Session {
         let xs = names(x, "solve: the unknowns")?;
         let fx = self.eval_hidden(f, &xs)?;
         let eqs: Vec<Expr> = match fx {
-            Expr::Matrix(m) => m.into_iter().flatten().collect(),
-            e => vec![e],
+            Expr::Matrix(m) => m.into_iter().flatten().map(|e| crate::eval::equation_lhs(&e)).collect(),
+            e => vec![crate::eval::equation_lhs(&e)],
         };
         if eqs.len() == 1 && xs.len() == 1 {
             return cas::solve(&eqs[0], &xs[0]).map(row);
@@ -194,7 +194,7 @@ impl Session {
     fn fsolve(&mut self, args: &[Node]) -> R<Expr> {
         let [f, x, g] = args else { return Err("usage: fsolve(f, x, guess): a numeric root of f = 0 near the guess".into()) };
         let x = name(x, "fsolve: x")?;
-        let fx = self.eval_hidden(f, std::slice::from_ref(&x))?;
+        let fx = crate::eval::equation_lhs(&self.eval_hidden(f, std::slice::from_ref(&x))?);
         let free = numeric::free(&fx, &[x.as_str()]);
         if !free.is_empty() {
             return Err(format!("fsolve: give values to {} first", free.join(", ")));
@@ -217,6 +217,11 @@ impl Session {
         };
         let k = name(k, &format!("{}: k", fname))?;
         let (a, b) = (self.eval(a)?, self.eval(b)?);
+        if !product && (is_inf(&b) == 1 || !b.symbols().is_empty()) {
+            // closed forms: sum(k^2, k, 1, n), sum(1/2^k, k, 0, inf)
+            let fk = self.eval_hidden(f, std::slice::from_ref(&k))?;
+            return crate::extra_cmd::symbolic_sum(&fk, &k, &a, &b, is_inf(&b) == 1);
+        }
         let (a, b) = (integer(&a, fname)?, integer(&b, fname)?);
         if b - a > 100_000 {
             return Err(format!("{}: at most 100000 terms", fname));

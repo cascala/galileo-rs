@@ -137,6 +137,7 @@ fn fmt(e: &Expr) -> (String, u8) {
         Obj(_) | Matrix(_) => (latex(e), P_ATOM),
         Func(Func::Abs, a) => (format!("\\left|{}\\right|", fmt(a).0), P_ATOM),
         Func(f, a) => (format!("{}\\left({}\\right)", func_name(*f), fmt(a).0), P_ATOM),
+        Apply(f, v) if f == "==" && v.len() == 2 => (format!("{} = {}", fmt(&v[0]).0, fmt(&v[1]).0), 0),
         Apply(f, v) => {
             let args = v.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", ");
             let f = if f == "atan2" { "\\operatorname{atan2}".to_string() } else { apply_name(f) };
@@ -144,9 +145,23 @@ fn fmt(e: &Expr) -> (String, u8) {
         }
         Add(terms) => {
             let mut terms = terms.clone();
-            if let Some(k) = terms.iter().position(|t| !t.is_negative_term()) {
-                let t = terms.remove(k);
-                terms.insert(0, t);
+            // complex numbers read real part first: 3-2*i, not -2*i+3
+            let gaussian = crate::build::gauss(e).is_some();
+            if gaussian {
+                terms.rotate_right(1);
+            } else {
+                if let Some(k) = terms.iter().position(|t| !t.is_negative_term()) {
+                    let t = terms.remove(k);
+                    terms.insert(0, t);
+                }
+                // a + b*i: the imaginary part last
+                let (re, im): (Vec<Expr>, Vec<Expr>) = terms.into_iter().partition(|t| !crate::extra_cmd::has_i(t));
+                if !re.is_empty() && !im.is_empty() && im[0].is_negative_term() && !re.iter().any(|t| !t.is_negative_term()) {
+                    // keep a positive term first when the real part is all negative
+                    terms = im.into_iter().chain(re).collect();
+                } else {
+                    terms = re.into_iter().chain(im).collect();
+                }
             }
             let mut s = String::new();
             for (i, t) in terms.iter().enumerate() {

@@ -64,13 +64,28 @@ fn fmt(e: &Expr) -> (String, u8) {
             P_ATOM,
         ),
         Func(f, a) => (format!("{}({})", f.name(), fmt(a).0), P_ATOM),
+        Apply(f, v) if f == "==" && v.len() == 2 => (format!("{} == {}", fmt(&v[0]).0, fmt(&v[1]).0), 0),
         Apply(f, v) => (format!("{}({})", f, v.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", ")), P_ATOM),
         Add(terms) => {
             // lead with a positive term when there is one: b-a rather than -a+b
             let mut terms = terms.clone();
-            if let Some(k) = terms.iter().position(|t| !t.is_negative_term()) {
-                let t = terms.remove(k);
-                terms.insert(0, t);
+            // complex numbers read real part first: 3-2*i, not -2*i+3
+            let gaussian = crate::build::gauss(e).is_some();
+            if gaussian {
+                terms.rotate_right(1);
+            } else {
+                if let Some(k) = terms.iter().position(|t| !t.is_negative_term()) {
+                    let t = terms.remove(k);
+                    terms.insert(0, t);
+                }
+                // a + b*i: the imaginary part last
+                let (re, im): (Vec<Expr>, Vec<Expr>) = terms.into_iter().partition(|t| !crate::extra_cmd::has_i(t));
+                if !re.is_empty() && !im.is_empty() && im[0].is_negative_term() && !re.iter().any(|t| !t.is_negative_term()) {
+                    // keep a positive term first when the real part is all negative
+                    terms = im.into_iter().chain(re).collect();
+                } else {
+                    terms = re.into_iter().chain(im).collect();
+                }
             }
             let mut s = String::new();
             for (i, t) in terms.iter().enumerate() {

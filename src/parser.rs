@@ -33,6 +33,12 @@ pub enum Op {
     Solve,
     And,
     Or,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +46,8 @@ pub enum Stmt {
     Expr(Node),
     Assign(String, Node),
     MultiAssign(Vec<String>, Node),
+    /// f(x, y) := body (or f(x) = body): a user-defined function
+    Define(String, Vec<String>, Node),
     /// who, whos, clear, exit, ls, pwd, cd <dir>, help [name], load(<file>)
     Command(String, Option<String>),
 }
@@ -62,8 +70,8 @@ struct Token {
     space_before: bool,
 }
 
-const SYMS: [&str; 18] = [
-    "&&", "||", "+", "-", "*", "/", "^", "\\", "'", "(", ")", "[", "]", ",", ";", ":", "=", "!",
+const SYMS: [&str; 26] = [
+    "&&", "||", "==", "~=", "!=", "<=", ">=", ":=", "<", ">", "+", "-", "*", "/", "^", "\\", "'", "(", ")", "[", "]", ",", ";", ":", "=", "!",
 ];
 
 /// Commands whose argument is taken as raw text
@@ -115,6 +123,14 @@ fn lex(src: &str) -> Result<Vec<Token>, String> {
         } else if ch.is_alphabetic() || ch == '_' {
             while i < c.len() && (c[i].is_alphanumeric() || c[i] == '_' || (c[i] == '.' && c.get(i + 1).is_some_and(|d| d.is_alphabetic()))) {
                 i += 1;
+            }
+            // y'(x), y''(x): derivatives of a function, written with primes
+            let mut j = i;
+            while j < c.len() && c[j] == '\'' {
+                j += 1;
+            }
+            if j > i && c.get(j) == Some(&'(') {
+                i = j;
             }
             let name: String = c[start..i].iter().collect();
             if RAW.contains(&name.as_str()) {
@@ -239,9 +255,13 @@ impl P {
                 }
                 _ => {}
             }
-            if matches!(next, Some(Tok::Sym("="))) {
+            if matches!(next, Some(Tok::Sym("=")) | Some(Tok::Sym(":="))) {
                 self.i += 2;
                 return Ok(Stmt::Assign(name, self.expr()?));
+            }
+            if let Some((params, after)) = self.definition_head() {
+                self.i = after;
+                return Ok(Stmt::Define(name, params, self.expr()?));
             }
         }
         // [a, b] = ...
@@ -255,6 +275,32 @@ impl P {
             self.i = save;
         }
         Ok(Stmt::Expr(self.expr()?))
+    }
+
+    /// f(x, y) followed by := or = : the parameter names and the position after the =
+    fn definition_head(&self) -> Option<(Vec<String>, usize)> {
+        let t = |k: usize| self.t.get(self.i + k).map(|t| &t.tok);
+        if !matches!(t(1), Some(Tok::Sym("("))) || self.t.get(self.i + 1).is_some_and(|t| t.space_before) {
+            return None;
+        }
+        let mut k = 2;
+        let mut params = vec![];
+        loop {
+            match t(k) {
+                Some(Tok::Ident(p)) => params.push(p.clone()),
+                _ => return None,
+            }
+            k += 1;
+            match t(k) {
+                Some(Tok::Sym(",")) => k += 1,
+                Some(Tok::Sym(")")) => break,
+                _ => return None,
+            }
+        }
+        match t(k + 1) {
+            Some(Tok::Sym("=")) | Some(Tok::Sym(":=")) => Some((params, self.i + k + 2)),
+            _ => None,
+        }
     }
 
     fn try_name_list(&mut self) -> Option<Vec<String>> {
@@ -308,12 +354,18 @@ impl P {
         Some(match s {
             "||" => (Op::Or, 1, false),
             "&&" => (Op::And, 2, false),
-            "+" => (Op::Add, 3, false),
-            "-" => (Op::Sub, 3, false),
-            "*" => (Op::Mul, 4, false),
-            "/" => (Op::Div, 4, false),
-            "\\" => (Op::Solve, 4, false),
-            "^" => (Op::Pow, 6, true),
+            "==" => (Op::Eq, 3, false),
+            "~=" | "!=" => (Op::Ne, 3, false),
+            "<" => (Op::Lt, 3, false),
+            ">" => (Op::Gt, 3, false),
+            "<=" => (Op::Le, 3, false),
+            ">=" => (Op::Ge, 3, false),
+            "+" => (Op::Add, 4, false),
+            "-" => (Op::Sub, 4, false),
+            "*" => (Op::Mul, 5, false),
+            "/" => (Op::Div, 5, false),
+            "\\" => (Op::Solve, 5, false),
+            "^" => (Op::Pow, 7, true),
             _ => return None,
         })
     }
@@ -346,14 +398,14 @@ impl P {
     fn unary(&mut self) -> R<Node> {
         if self.eat("-") {
             // binds looser than ^ : -x^2 = -(x^2)
-            let operand = self.binary(5)?;
+            let operand = self.binary(6)?;
             return Ok(Node::Neg(Box::new(operand)));
         }
         if self.eat("+") {
-            return self.binary(5);
+            return self.binary(6);
         }
         if self.eat("!") {
-            let operand = self.binary(5)?;
+            let operand = self.binary(6)?;
             return Ok(Node::Call("not".into(), vec![operand]));
         }
         self.postfix()
@@ -519,22 +571,28 @@ fn src_prec(n: &Node) -> (String, u8) {
     match n {
         Node::Num(s) | Node::Ident(s) => (s.clone(), 9),
         Node::Str(s) => (format!("\"{}\"", s), 9),
-        Node::Neg(a) => (format!("-{}", wrap(src_prec(a), 6)), 5),
+        Node::Neg(a) => (format!("-{}", wrap(src_prec(a), 7)), 6),
         Node::Bin(op, a, b) => {
             let (sym, p, right) = match op {
                 Op::Or => ("||", 1, false),
                 Op::And => ("&&", 2, false),
-                Op::Add => ("+", 3, false),
-                Op::Sub => ("-", 3, false),
-                Op::Mul => ("*", 4, false),
-                Op::Div => ("/", 4, false),
-                Op::Solve => ("\\", 4, false),
-                Op::Pow => ("^", 6, true),
+                Op::Eq => (" == ", 3, false),
+                Op::Ne => (" ~= ", 3, false),
+                Op::Lt => (" < ", 3, false),
+                Op::Gt => (" > ", 3, false),
+                Op::Le => (" <= ", 3, false),
+                Op::Ge => (" >= ", 3, false),
+                Op::Add => ("+", 4, false),
+                Op::Sub => ("-", 4, false),
+                Op::Mul => ("*", 5, false),
+                Op::Div => ("/", 5, false),
+                Op::Solve => ("\\", 5, false),
+                Op::Pow => ("^", 7, true),
             };
             let (l, mut r) = if right { (p + 1, p) } else { (p, p + 1) };
             // a*(-b) reads better than a*-b
             if matches!(**b, Node::Neg(_)) {
-                r = r.max(6);
+                r = r.max(7);
             }
             (format!("{}{}{}", wrap(src_prec(a), l), sym, wrap(src_prec(b), r)), p)
         }

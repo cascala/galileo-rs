@@ -78,6 +78,9 @@ impl Session {
         if let Some(r) = self.cas_call(f, args) {
             return r;
         }
+        if let Some(r) = self.extra_call(f, args) {
+            return r;
+        }
         match f {
             "plot" => self.plot(args),
             "parametric" => self.parametric(args),

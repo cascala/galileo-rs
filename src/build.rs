@@ -53,7 +53,69 @@ fn scale(c: Number, e: Expr) -> Expr {
     }
 }
 
+/// a + b*i with numbers a, b (b may be 0)
+pub fn gauss(e: &Expr) -> Option<(Number, Number)> {
+    match e {
+        Num(n) => Some((*n, Number::zero())),
+        Const(Const::I) => Some((Number::zero(), Number::one())),
+        Mul(f) if f.len() == 2 && f[1] == Const(Const::I) => f[0].num().map(|n| (Number::zero(), n)),
+        Add(t) => {
+            let (mut re, mut im) = (Number::zero(), Number::zero());
+            for x in t {
+                let (a, b) = match x {
+                    Add(_) => return None,
+                    other => gauss(other)?,
+                };
+                re = re.add(a);
+                im = im.add(b);
+            }
+            Some((re, im))
+        }
+        _ => None,
+    }
+}
+
+pub fn from_gauss(re: Number, im: Number) -> Expr {
+    add(vec![Num(re), scale(im, Const(Const::I))])
+}
+
+fn gauss_mul(a: (Number, Number), b: (Number, Number)) -> (Number, Number) {
+    (a.0.mul(b.0).sub(a.1.mul(b.1)), a.0.mul(b.1).add(a.1.mul(b.0)))
+}
+
+/// z^n for a Gaussian number z and a (not too large) integer n
+fn gauss_pow(z: (Number, Number), n: i128) -> Option<(Number, Number)> {
+    let base = if n < 0 {
+        let norm = z.0.mul(z.0).add(z.1.mul(z.1));
+        (z.0.div(norm)?, z.1.neg().div(norm)?)
+    } else {
+        z
+    };
+    let mut acc = (Number::one(), Number::zero());
+    for _ in 0..n.abs() {
+        acc = gauss_mul(acc, base);
+    }
+    Some(acc)
+}
+
+/// a Gaussian number that is not real and not just a multiple of i
+fn complex_sum(e: &Expr) -> bool {
+    matches!(e, Add(_)) && gauss(e).is_some_and(|(_, b)| !b.is_zero())
+}
+
 pub fn mul(factors: Vec<Expr>) -> Expr {
+    // (2+3*i)*(1-i) = 5+i: complex numbers multiply out
+    if factors.iter().any(complex_sum) {
+        let (zs, rest): (Vec<Expr>, Vec<Expr>) = factors.into_iter().partition(|f| gauss(f).is_some());
+        let z = zs.iter().fold((Number::one(), Number::zero()), |acc, f| gauss_mul(acc, gauss(f).unwrap()));
+        let mut out = rest;
+        out.push(from_gauss(z.0, z.1));
+        return mul_inner(out);
+    }
+    mul_inner(factors)
+}
+
+fn mul_inner(factors: Vec<Expr>) -> Expr {
     let mut coeff = Number::one();
     let mut groups: Vec<(Expr, Expr)> = vec![];
     let mut stack = factors;
@@ -90,7 +152,7 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
     }
     if again {
         out.push(Num(coeff));
-        return mul(out);
+        return mul_inner(out);
     }
     if coeff.is_zero() && coeff.is_exact() {
         return Expr::zero();
@@ -144,6 +206,11 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
                     ]);
                 }
             }
+            b if en.is_integer() && en.is_exact() && complex_sum(b) && en.as_int().is_some_and(|n| n.abs() <= 64) => {
+                if let Some(z) = gauss_pow(gauss(b).unwrap(), en.as_int().unwrap()) {
+                    return from_gauss(z.0, z.1);
+                }
+            }
             Const(Const::I) if en.is_integer() && en.is_exact() => {
                 return match en.as_int().unwrap().rem_euclid(4) {
                     0 => Expr::one(),
@@ -167,6 +234,12 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
     if b == Const(Const::E) {
         if let Func(Func::Log, x) = &e {
             return (**x).clone();
+        }
+        // Euler: e^(i*k*pi) = cos(k*pi) + i*sin(k*pi) when both are known exactly
+        if let Some(k) = i_pi_multiple(&e) {
+            if let (Some(c), Some(s)) = (sin_pi(k.add(Number::rat(1, 2).unwrap())), sin_pi(k)) {
+                return add(vec![c, mul(vec![s, Const(Const::I)])]);
+            }
         }
     }
     Pow(Box::new(b), Box::new(e))
@@ -226,6 +299,22 @@ fn pi_multiple(e: &Expr) -> Option<Number> {
     }
 }
 
+/// `k*i*pi` with rational k -> Some(k)
+fn i_pi_multiple(e: &Expr) -> Option<Number> {
+    let Mul(f) = e else { return None };
+    let mut k = Number::one();
+    let (mut has_i, mut has_pi) = (false, false);
+    for x in f {
+        match x {
+            Num(n) if n.is_exact() => k = k.mul(*n),
+            Const(Const::I) if !has_i => has_i = true,
+            Const(Const::Pi) if !has_pi => has_pi = true,
+            _ => return None,
+        }
+    }
+    if has_i && has_pi { Some(k) } else { None }
+}
+
 /// exact sin(k*pi) for k with denominator 1, 2, 3, 4 or 6
 fn sin_pi(k: Number) -> Option<Expr> {
     let (n, d) = (k.numer()?, k.denom()?);
@@ -233,7 +322,14 @@ fn sin_pi(k: Number) -> Option<Expr> {
     let twelfths = (n * (12 / if 12 % d == 0 { d } else { return None })).rem_euclid(24);
     let s3 = || mul(vec![rat(1, 2), sqrt(Expr::int(3))]);
     let s2 = || mul(vec![rat(1, 2), sqrt(Expr::int(2))]);
+    // sin(pi/12) = (sqrt(6) - sqrt(2))/4, sin(5*pi/12) = (sqrt(6) + sqrt(2))/4
+    let s15 = || add(vec![mul(vec![rat(1, 4), sqrt(Expr::int(6))]), mul(vec![rat(-1, 4), sqrt(Expr::int(2))])]);
+    let s75 = || add(vec![mul(vec![rat(1, 4), sqrt(Expr::int(6))]), mul(vec![rat(1, 4), sqrt(Expr::int(2))])]);
     let v = match twelfths {
+        1 | 11 => s15(),
+        5 | 7 => s75(),
+        13 | 23 => neg(s15()),
+        17 | 19 => neg(s75()),
         0 | 12 => Expr::zero(),
         2 | 10 => rat(1, 2),
         3 | 9 => s2(),
@@ -246,6 +342,46 @@ fn sin_pi(k: Number) -> Option<Expr> {
         _ => return None,
     };
     Some(v)
+}
+
+/// exact tan(k*pi) for k a multiple of 1/12 (not at the poles)
+fn tan_pi(k: Number) -> Option<Expr> {
+    let (n, d) = (k.numer()?, k.denom()?);
+    if 12 % d != 0 {
+        return None;
+    }
+    let t = (n * (12 / d)).rem_euclid(12);
+    let r3 = || sqrt(Expr::int(3));
+    let v = match t {
+        0 => Expr::zero(),
+        1 => sub(Expr::int(2), r3()),
+        2 => mul(vec![rat(1, 3), r3()]),
+        3 => Expr::one(),
+        4 => r3(),
+        5 => add2(Expr::int(2), r3()),
+        7 => neg(add2(Expr::int(2), r3())),
+        8 => neg(r3()),
+        9 => Expr::int(-1),
+        10 => mul(vec![rat(-1, 3), r3()]),
+        11 => neg(sub(Expr::int(2), r3())),
+        _ => return None,
+    };
+    Some(v)
+}
+
+/// asin(x) for the textbook values x = 1/2, sqrt(2)/2, sqrt(3)/2 (x >= 0)
+fn asin_known(x: &Expr) -> Option<Expr> {
+    let half = |e: Expr| mul(vec![rat(1, 2), e]);
+    let k = if *x == rat(1, 2) {
+        rat(1, 6)
+    } else if *x == half(sqrt(Expr::int(2))) {
+        rat(1, 4)
+    } else if *x == half(sqrt(Expr::int(3))) {
+        rat(1, 3)
+    } else {
+        return None;
+    };
+    Some(mul(vec![k, pi()]))
 }
 
 pub fn func(f: Func, x: Expr) -> Expr {
@@ -295,6 +431,9 @@ pub fn func(f: Func, x: Expr) -> Expr {
                 if k.denom() == Some(4) {
                     return Expr::int(if k.numer().unwrap().rem_euclid(4) == 1 { 1 } else { -1 });
                 }
+                if let Some(v) = tan_pi(k) {
+                    return v;
+                }
             }
         }
         Asin => {
@@ -304,8 +443,8 @@ pub fn func(f: Func, x: Expr) -> Expr {
             if x.is_one() {
                 return mul(vec![rat(1, 2), pi()]);
             }
-            if x == rat(1, 2) {
-                return mul(vec![rat(1, 6), pi()]);
+            if let Some(v) = asin_known(&x) {
+                return v;
             }
         }
         Acos => {
@@ -318,8 +457,11 @@ pub fn func(f: Func, x: Expr) -> Expr {
             if x == Expr::int(-1) {
                 return pi();
             }
-            if x == rat(1, 2) {
-                return mul(vec![rat(1, 3), pi()]);
+            if let Some(v) = asin_known(&x) {
+                return sub(mul(vec![rat(1, 2), pi()]), v);
+            }
+            if let Some(v) = asin_known(&neg(x.clone())) {
+                return add2(mul(vec![rat(1, 2), pi()]), v);
             }
         }
         Atan => {
@@ -328,6 +470,12 @@ pub fn func(f: Func, x: Expr) -> Expr {
             }
             if x.is_one() {
                 return mul(vec![rat(1, 4), pi()]);
+            }
+            if x == sqrt(Expr::int(3)) {
+                return mul(vec![rat(1, 3), pi()]);
+            }
+            if x == mul(vec![rat(1, 3), sqrt(Expr::int(3))]) {
+                return mul(vec![rat(1, 6), pi()]);
             }
         }
         Log => {
@@ -346,6 +494,10 @@ pub fn func(f: Func, x: Expr) -> Expr {
         Abs => {
             if let Num(n) = x {
                 return Num(n.abs());
+            }
+            // |a + b*i| = sqrt(a^2 + b^2)
+            if let Some((a, b)) = gauss(&x) {
+                return sqrt(Num(a.mul(a).add(b.mul(b))));
             }
             if let Const(Const::Pi | Const::E) = x {
                 return x;

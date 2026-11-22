@@ -39,6 +39,10 @@ pub struct Session {
     pub(crate) vars: BTreeMap<String, Expr>,
     /// names that evaluate to themselves for now (plot variables, coordinates)
     pub(crate) hidden: Vec<String>,
+    /// user-defined functions: name -> (parameters, body)
+    pub(crate) funcs: BTreeMap<String, (Vec<String>, Node)>,
+    /// how deeply user functions are calling each other
+    pub(crate) depth: usize,
 }
 
 impl Default for Session {
@@ -60,7 +64,7 @@ fn builtins() -> BTreeMap<String, Expr> {
 
 impl Session {
     pub fn new() -> Session {
-        Session { vars: builtins(), hidden: vec![] }
+        Session { vars: builtins(), hidden: vec![], funcs: BTreeMap::new(), depth: 0 }
     }
 
     /// names the user defined
@@ -161,6 +165,13 @@ impl Session {
                 Ok(Output::Assigned(pairs))
             }
             Stmt::Command(c, arg) => self.command(c, arg.as_deref()),
+            Stmt::Define(name, params, body) => {
+                if Func::from_name(name).is_some() || ["exp", "sqrt"].contains(&name.as_str()) {
+                    return Err(format!("{} is a built-in function; pick another name", name));
+                }
+                self.funcs.insert(name.clone(), (params.clone(), body.clone()));
+                Ok(Output::Text(format!("{}({}) := {}", name, params.join(", "), crate::parser::source(body))))
+            }
         }
     }
 
@@ -174,10 +185,20 @@ impl Session {
                     .filter(|(k, v)| b.get(*k) != Some(v))
                     .map(|(k, v)| format!("{}:\t{}", k, type_name(v)))
                     .collect();
-                Ok(Output::Text(format!("Defined variables:\n{}", lines.join("\n"))))
+                let mut text = format!("Defined variables:\n{}", lines.join("\n"));
+                if !self.funcs.is_empty() {
+                    let fs: Vec<String> = self
+                        .funcs
+                        .iter()
+                        .map(|(k, (p, b))| format!("{}({}) := {}", k, p.join(", "), crate::parser::source(b)))
+                        .collect();
+                    text = format!("{}\nDefined functions:\n{}", text, fs.join("\n"));
+                }
+                Ok(Output::Text(text))
             }
             "clear" => {
                 self.vars = builtins();
+                self.funcs.clear();
                 Ok(Output::Nothing)
             }
             "exit" | "quit" => Ok(Output::Exit),
@@ -235,7 +256,10 @@ impl Session {
                     _ => {}
                 }
                 let b = self.eval(b)?;
-                arith(*op, a, b)?
+                match op {
+                    Op::Eq | Op::Ne | Op::Lt | Op::Gt | Op::Le | Op::Ge => compare(*op, a, b)?,
+                    _ => arith(*op, a, b)?,
+                }
             }
             Node::Range(a, step, b) => {
                 let a = self.eval(a)?;
@@ -315,6 +339,23 @@ impl Session {
         let arity = |n: usize| -> R<()> {
             if args.len() == n { Ok(()) } else { Err(format!("{} takes {} argument{}", f, n, if n == 1 { "" } else { "s" })) }
         };
+        if self.funcs.contains_key(f) {
+            return self.call_user(f, args);
+        }
+        if f.ends_with('\'') {
+            return self.call_primed(f, args);
+        }
+        if f == "if" {
+            if args.len() != 3 {
+                return Err("usage: if(condition, value if true, value if false)".into());
+            }
+            let c = self.eval(&args[0])?;
+            return match c {
+                Expr::Bool(b) => self.eval(&args[if b { 1 } else { 2 }]),
+                Expr::Num(n) => self.eval(&args[if n.is_zero() { 2 } else { 1 }]),
+                other => Err(format!("if: can't tell whether {} is true or false", show(&other))),
+            };
+        }
         if let Some(func) = Func::from_name(f) {
             arity(1)?;
             let a = self.eval(&args[0])?;
@@ -344,7 +385,11 @@ impl Session {
                 Ok(match f {
                     "simplify" => calc::simplify(&a),
                     "expand" => calc::expand(&a),
-                    "factor" => crate::cas::factor_poly(&a).unwrap_or_else(|| calc::factor(&a)),
+                    "factor" => match a.num().filter(|n| n.is_exact()).and_then(|n| n.as_int()) {
+                        // factor(360) = 2^3 * 3^2 * 5
+                        Some(n) if n.abs() > 1 => Expr::Str(crate::extra_cmd::factored_text(n)?),
+                        _ => crate::cas::factor_poly(&a).unwrap_or_else(|| calc::factor(&a)),
+                    },
                     "eval" => calc::evalf(&a),
                     "complexity" => Expr::int(a.size() as i128),
                     _ => Expr::Str(structure(&a)),
@@ -465,6 +510,67 @@ impl Session {
                 best.map(|b| b.1).ok_or_else(|| format!("{} needs arguments", f))
             }
             _ => self.command_call(f, args),
+        }
+    }
+
+    /// f(a, b) for a user-defined f: the body evaluated with the parameters bound
+    fn call_user(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        let (params, body) = self.funcs.get(f).cloned().unwrap();
+        if params.len() != args.len() {
+            return Err(format!("{} takes {} argument{}", f, params.len(), if params.len() == 1 { "" } else { "s" }));
+        }
+        let mut vals = vec![];
+        for a in args {
+            vals.push(self.eval(a)?);
+        }
+        if self.depth >= 2000 {
+            return Err(format!("{}: too many nested calls (does the recursion stop?)", f));
+        }
+        let saved: Vec<Option<Expr>> = params.iter().map(|p| self.vars.get(p).cloned()).collect();
+        let hidden = self.hidden.clone();
+        self.hidden.retain(|h| !params.contains(h));
+        // values that mention a parameter name (f(x+1) inside a function of x)
+        // must not refer back to themselves
+        for (p, v) in params.iter().zip(vals) {
+            self.vars.insert(p.clone(), v);
+        }
+        self.depth += 1;
+        let r = self.eval(&body);
+        self.depth -= 1;
+        self.hidden = hidden;
+        for (p, v) in params.iter().zip(saved) {
+            match v {
+                Some(v) => self.vars.insert(p.clone(), v),
+                None => self.vars.remove(p),
+            };
+        }
+        r
+    }
+
+    /// f'(x), y''(t): derivatives of a user function, or of an undefined one
+    fn call_primed(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        let base = f.trim_end_matches('\'');
+        let order = f.len() - base.len();
+        match self.funcs.get(base).cloned() {
+            Some((params, body)) => {
+                if params.len() != 1 || args.len() != 1 {
+                    return Err(format!("{}: primes work for functions of one variable", f));
+                }
+                let p = &params[0];
+                let mut d = self.eval_hidden(&body, std::slice::from_ref(p))?;
+                for _ in 0..order {
+                    d = calc::deriv(&d, p);
+                }
+                let v = self.eval(&args[0])?;
+                Ok(calc::subst(&d, p, &v))
+            }
+            None => {
+                let mut vals = vec![];
+                for a in args {
+                    vals.push(self.eval(a)?);
+                }
+                Ok(Expr::Apply(f.to_string(), vals))
+            }
         }
     }
 
@@ -628,8 +734,67 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
         (Op::Mul, x, y) => mul2(x, y),
         (Op::Div, x, y) => div(x, y),
         (Op::Pow, x, y) => pow(x, y),
-        (Op::And | Op::Or, ..) => unreachable!(),
+        (Op::And | Op::Or | Op::Eq | Op::Ne | Op::Lt | Op::Gt | Op::Le | Op::Ge, ..) => {
+            return Err("comparisons are not arithmetic".into());
+        }
     })
+}
+
+/// a == b, a < b, ...: true or false when that can be decided; a symbolic
+/// a == b stays an equation (for solve, dsolve and implicitplot)
+pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
+    if let (Expr::Bool(_), _) | (_, Expr::Bool(_)) | (Expr::Str(_), _) | (_, Expr::Str(_)) = (&a, &b) {
+        return match op {
+            Op::Eq => Ok(Expr::Bool(a == b)),
+            Op::Ne => Ok(Expr::Bool(a != b)),
+            _ => Err("only numbers can be ordered".into()),
+        };
+    }
+    if let (Expr::Matrix(_), _) | (_, Expr::Matrix(_)) = (&a, &b) {
+        return match op {
+            Op::Eq => Ok(Expr::Bool(a == b)),
+            Op::Ne => Ok(Expr::Bool(a != b)),
+            _ => Err("matrices can't be ordered".into()),
+        };
+    }
+    let d = calc::simplify(&sub(a.clone(), b.clone()));
+    let num = |e: &Expr| calc::evalf(e).num().map(|n| n.to_f64());
+    match op {
+        Op::Eq | Op::Ne => {
+            let same = if d.is_zero() {
+                Some(true)
+            } else if d.symbols().is_empty() && !d.contains_sym("i") {
+                num(&d).map(|v| v.abs() < 1e-12 * (1.0 + num(&a).unwrap_or(0.0).abs()))
+            } else {
+                None
+            };
+            match (same, op) {
+                (Some(s), Op::Eq) => Ok(Expr::Bool(s)),
+                (Some(s), _) => Ok(Expr::Bool(!s)),
+                (None, Op::Eq) => Ok(Expr::Apply("==".into(), vec![a, b])),
+                (None, _) => Err(format!("can't decide whether {} ~= {}", show(&a), show(&b))),
+            }
+        }
+        _ => {
+            let (Some(x), Some(y)) = (num(&a), num(&b)) else {
+                return Err(format!("can't compare {} and {}: they must be numbers", show(&a), show(&b)));
+            };
+            Ok(Expr::Bool(match op {
+                Op::Lt => x < y,
+                Op::Gt => x > y,
+                Op::Le => x <= y,
+                _ => x >= y,
+            }))
+        }
+    }
+}
+
+/// An equation a == b as the expression a - b (other expressions unchanged)
+pub fn equation_lhs(e: &Expr) -> Expr {
+    match e {
+        Expr::Apply(f, v) if f == "==" && v.len() == 2 => sub(v[0].clone(), v[1].clone()),
+        other => other.clone(),
+    }
 }
 
 /// Reject division by an exact zero anywhere in the result
