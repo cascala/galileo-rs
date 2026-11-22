@@ -48,6 +48,15 @@ fn jnums<'a>(it: impl IntoIterator<Item = &'a f64>) -> String {
     format!("[{}]", v.join(","))
 }
 
+/// Numbers for large point clouds, to 5 significant digits (keeps notebooks small)
+fn short_nums(v: &[f64], short: bool) -> String {
+    if !short {
+        return jnums(v);
+    }
+    let parts: Vec<String> = v.iter().map(|d| if d.is_finite() { format!("{}", format!("{:.4e}", d).parse::<f64>().unwrap_or(*d)) } else { "null".into() }).collect();
+    format!("[{}]", parts.join(","))
+}
+
 fn obj(fields: &[(&str, String)]) -> String {
     let v: Vec<String> = fields.iter().map(|(k, v)| format!("{}:{}", jstr(k), v)).collect();
     format!("{{{}}}", v.join(","))
@@ -234,9 +243,9 @@ impl Figure {
                         ("type", jstr("scatter")),
                         ("mode", jstr("markers")),
                         ("name", jstr(&s.label)),
-                        ("x", jnums(&pts.iter().map(|p| p.0).collect::<Vec<_>>())),
-                        ("y", jnums(&pts.iter().map(|p| p.1).collect::<Vec<_>>())),
-                        ("marker", obj(&[("color", jstr(PALETTE[i % PALETTE.len()])), ("size", "8".into())])),
+                        ("x", short_nums(&pts.iter().map(|p| p.0).collect::<Vec<_>>(), pts.len() > 1500)),
+                        ("y", short_nums(&pts.iter().map(|p| p.1).collect::<Vec<_>>(), pts.len() > 1500)),
+                        ("marker", obj(&[("color", jstr(PALETTE[i % PALETTE.len()])), ("size", if pts.len() > 1500 { "2" } else { "8" }.into())])),
                     ];
                     if !s.errors.is_empty() {
                         fields.push((
@@ -377,6 +386,18 @@ impl Figure {
         s.push_str(r#"<g clip-path="url(#plotarea)" fill="none" stroke-width="2" stroke-linejoin="round">"#);
         let span = b.y1 - b.y0;
         for (i, ser) in self.series.iter().enumerate() {
+            if ser.markers && ser.points.len() > 1500 {
+                // many points (a fractal, a bifurcation diagram): tiny squares in one path
+                let c = PALETTE[i % PALETTE.len()];
+                let mut d = String::new();
+                for &(x, y) in &ser.points {
+                    if finite(x) && finite(y) {
+                        let _ = write!(d, "M{:.1},{:.1}h2v2h-2z", sx(x) - 1.0, sy(y) - 1.0);
+                    }
+                }
+                let _ = write!(s, r#"<path d="{d}" fill="{c}" stroke="none"/>"#);
+                continue;
+            }
             if ser.markers {
                 let c = PALETTE[i % PALETTE.len()];
                 for (k, &(x, y)) in ser.points.iter().enumerate() {

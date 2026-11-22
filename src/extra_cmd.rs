@@ -882,6 +882,8 @@ impl Session {
             "perm" | "compose" | "pinverse" | "porder" | "psign" | "cycles" | "generate" | "cayley" => self.perms(f, args),
             "dsolve" => self.dsolve(args),
             "letters" | "word" | "encode" | "decode" => self.text_cmd(f, args),
+            "orbitdata" => self.orbitdata(args),
+            "mandelbrot" | "julia" => self.escape_set(f, args),
             "rows" | "cols" | "length" => (|| {
                 let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
                 let (r, c) = match self.eval(a)? {
@@ -1137,6 +1139,115 @@ impl Session {
             return Err("table: each entry must be a number, an expression or a row".into());
         }
         Ok(row(out))
+    }
+
+    fn num_args(&mut self, f: &str, args: &[Node]) -> R<Vec<f64>> {
+        let mut out = vec![];
+        for a in args {
+            let v = numeric::value(&self.eval(a)?);
+            if !v.is_finite() {
+                return Err(format!("{}: {} is not a number", f, show(&self.eval(a)?)));
+            }
+            out.push(v);
+        }
+        Ok(out)
+    }
+
+    /// orbitdata(rule, x, x0, r, r0, r1, nr, skip, keep): for nr+1 values of r
+    /// from r0 to r1, iterate x -> rule(x, r) from x0, skip the first steps and
+    /// keep the next ones, as rows [r x]. Computed with decimals, fast.
+    fn orbitdata(&mut self, args: &[Node]) -> R<Expr> {
+        let usage = "usage: orbitdata(rule, x, x0, r, r0, r1, nr, skip, keep): rows [r x] of the orbits of x -> rule for nr+1 values of r";
+        let [rule, x, x0, r, rest @ ..] = args else { return Err(usage.into()) };
+        if rest.len() != 5 {
+            return Err(usage.into());
+        }
+        let (xn, rn) = (name(x, "orbitdata: x")?, name(r, "orbitdata: r")?);
+        let body = self.eval_hidden(rule, &[xn.clone(), rn.clone()])?;
+        let code = numeric::compile(&body, &[xn.as_str(), rn.as_str()]);
+        let mut nums = self.num_args("orbitdata", std::slice::from_ref(x0))?;
+        nums.extend(self.num_args("orbitdata", rest)?);
+        let (start, r0, r1) = (nums[0], nums[1], nums[2]);
+        let (nr, skip, keep) = (nums[3] as usize, nums[4] as usize, nums[5] as usize);
+        if nr == 0 || keep == 0 || (nr + 1) * keep > 200_000 || skip > 1_000_000 {
+            return Err("orbitdata: at most 200000 points (nr+1 times keep)".into());
+        }
+        let mut rows = vec![];
+        for j in 0..=nr {
+            let rv = r0 + (r1 - r0) * j as f64 / nr as f64;
+            let mut xv = start;
+            for _ in 0..skip {
+                xv = numeric::run(&code, &[xv, rv]);
+            }
+            for _ in 0..keep {
+                xv = numeric::run(&code, &[xv, rv]);
+                if xv.is_finite() && xv.abs() < 1e12 {
+                    rows.push(vec![Expr::float(rv), Expr::float(xv)]);
+                }
+            }
+        }
+        Ok(Expr::Matrix(rows))
+    }
+
+    /// mandelbrot(re0, re1, im0, im1, n) and julia(c, re0, re1, im0, im1, n):
+    /// the grid points (n across) whose orbit under z -> z^2 + c stays within
+    /// |z| <= 2 for 200 steps, as rows [re im].
+    fn escape_set(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        let usage = if f == "mandelbrot" {
+            "usage: mandelbrot(re0, re1, im0, im1, n): the points c of an n-wide grid for which z -> z^2 + c, from z = 0, stays bounded"
+        } else {
+            "usage: julia(c, re0, re1, im0, im1, n): the points z0 of an n-wide grid whose orbit under z -> z^2 + c stays bounded"
+        };
+        let (c, rest) = if f == "julia" {
+            let Some((c, rest)) = args.split_first() else { return Err(usage.into()) };
+            let cv = self.eval(c)?;
+            let (re, im) = parts(&cv)?;
+            let (re, im) = (numeric::value(&calc::evalf(&re)), numeric::value(&calc::evalf(&im)));
+            if !(re.is_finite() && im.is_finite()) {
+                return Err(format!("julia: c must be a number, got {}", show(&cv)));
+            }
+            (Some((re, im)), rest)
+        } else {
+            (None, args)
+        };
+        if rest.len() != 5 {
+            return Err(usage.into());
+        }
+        let v = self.num_args(f, rest)?;
+        let (re0, re1, im0, im1) = (v[0], v[1], v[2], v[3]);
+        let nx = v[4] as usize;
+        let ny = ((nx as f64) * (im1 - im0) / (re1 - re0)).round().max(1.0) as usize;
+        if nx < 2 || nx * ny > 400_000 {
+            return Err(format!("{}: n from 2 to about 600", f));
+        }
+        let mut rows = vec![];
+        for j in 0..=ny {
+            let y = im0 + (im1 - im0) * j as f64 / ny as f64;
+            for i in 0..=nx {
+                let xv = re0 + (re1 - re0) * i as f64 / nx as f64;
+                let ((mut zr, mut zi), (cr, ci)) = match c {
+                    None => ((0.0, 0.0), (xv, y)),
+                    Some(c) => ((xv, y), c),
+                };
+                let mut inside = true;
+                for _ in 0..200 {
+                    let t = zr * zr - zi * zi + cr;
+                    zi = 2.0 * zr * zi + ci;
+                    zr = t;
+                    if zr * zr + zi * zi > 4.0 {
+                        inside = false;
+                        break;
+                    }
+                }
+                if inside {
+                    rows.push(vec![Expr::float(xv), Expr::float(y)]);
+                }
+            }
+        }
+        if rows.is_empty() {
+            return Err(format!("{}: no point of the grid stays bounded", f));
+        }
+        Ok(Expr::Matrix(rows))
     }
 
     fn iterate(&mut self, args: &[Node]) -> R<Expr> {

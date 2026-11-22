@@ -365,13 +365,15 @@ impl Session {
                     .into_iter()
                     .map(|(l, pts)| Series {
                         label: l,
-                        points: ode::thin(&pts, ode::MAX_PLOT_POINTS)
-                            .iter()
-                            .map(|(t, y)| {
-                                let a = at(*t, y);
-                                (run(&fs[0], &a), run(&fs[1], &a))
-                            })
-                            .collect(),
+                        points: ode::thin_path(
+                            &pts.iter()
+                                .map(|(t, y)| {
+                                    let a = at(*t, y);
+                                    (run(&fs[0], &a), run(&fs[1], &a))
+                                })
+                                .collect::<Vec<_>>(),
+                            2 * ode::MAX_PLOT_POINTS,
+                        ),
                         ..Default::default()
                     })
                     .collect();

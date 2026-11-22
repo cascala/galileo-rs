@@ -125,10 +125,13 @@ pub const ENTRIES: &[Entry] = &[
     e!("rows", "Matrices", "rows(A), cols(A), length(v)", "The number of rows or columns of a table; length is the number of entries of a list (the larger of the two).", "rows(generate([2 3 1]))"),
     e!("rref", "Matrices", "rref(A), rank(A), null(A)", "Row reduction: rref is the reduced row echelon form, rank the number of independent rows, null a basis of the solutions of A*x = 0 (one vector per column; empty when x = 0 is the only solution).", "rref([1 2 3; 4 5 6; 7 8 9])"),
     e!("eigvec", "Matrices", "eigvec(A), [V, D] = eig(A)", "Eigenvectors, one per column, for exact eigenvalues. [V, D] = eig(A) gives the eigenvectors V and the diagonal matrix D of eigenvalues, so that A = V*D*inv(V).", "[V, D] = eig([2 1; 1 2])"),
+    e!("orbitdata", "Calculus", "orbitdata(rule, x, x0, r, r0, r1, nr, skip, keep)", "For nr+1 values of the parameter r from r0 to r1: iterate x -> rule (an expression in x and r) from x0, throw away the first skip values and keep the next keep values. Returns rows [r x] for scatter: a bifurcation diagram. Computed with decimals.", "scatter(orbitdata(r*x*(1-x), x, 0.5, r, 2.8, 4, 200, 500, 25), [r x])"),
+    e!("mandelbrot", "Plotting", "mandelbrot(re0, re1, im0, im1, n), julia(c, re0, re1, im0, im1, n)", "The points of a grid n points wide whose orbit under z -> z^2 + c stays within |z| <= 2 for 200 steps, as rows [re im] for scatter. mandelbrot varies c (starting from z = 0); julia fixes c and varies the start z.", "scatter(mandelbrot(-2.2, 0.8, -1.2, 1.2, 180), [re im])"),
     e!("column", "Matrices", "column(A, k)", "Column k of a matrix (counting from 1), as a column vector.", "column([1 2; 3 4], 2)"),
 ];
 
 const ALIASES: &[(&str, &str)] = &[
+    ("julia", "mandelbrot"),
     ("rank", "rref"),
     ("null", "rref"),
     ("cols", "rows"),
