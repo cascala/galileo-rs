@@ -85,6 +85,24 @@ pub fn factored_text(n: i128) -> R<String> {
 
 // ---------- complex numbers ----------
 
+/// a sum of number * x^k terms in a single variable x
+pub fn univariate_poly(e: &Expr) -> bool {
+    let syms = e.symbols();
+    if syms.len() != 1 {
+        return false;
+    }
+    let x = Expr::sym(&syms[0]);
+    let mono = |t: &Expr| -> bool {
+        let power = |f: &Expr| *f == x || matches!(f, Expr::Pow(b, k) if **b == x && k.num().is_some_and(|n| n.is_integer() && !n.is_negative()));
+        match t {
+            Expr::Num(_) => true,
+            Expr::Mul(f) => f.len() == 2 && f[0].is_number() && power(&f[1]),
+            other => power(other),
+        }
+    };
+    matches!(e, Expr::Add(v) if v.iter().all(mono))
+}
+
 pub fn has_i(e: &Expr) -> bool {
     match e {
         Expr::Const(Const::I) => true,
@@ -582,7 +600,7 @@ pub fn symbolic_sum(f: &Expr, k: &str, a: &Expr, b: &Expr, b_inf: bool) -> R<Exp
                 terms.push(t);
             }
             let poly = simplify(&expand(&add(terms)));
-            let r = subst(&poly, "n__", b);
+            let r = simplify(&expand(&subst(&poly, "n__", b)));
             let fct = cas::factor_poly(&r).unwrap_or_else(|| calc::factor(&r));
             return Ok(if fct.size() <= r.size() { fct } else { r });
         }

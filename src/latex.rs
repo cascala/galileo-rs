@@ -150,7 +150,9 @@ fn fmt(e: &Expr) -> (String, u8) {
             if gaussian {
                 terms.rotate_right(1);
             } else {
-                if let Some(k) = terms.iter().position(|t| !t.is_negative_term()) {
+                // polynomials in one variable keep descending powers: -x^3/6 + x
+                let poly = terms.len() >= 3 && crate::extra_cmd::univariate_poly(e);
+                if let Some(k) = terms.iter().position(|t| !t.is_negative_term()).filter(|_| !poly) {
                     let t = terms.remove(k);
                     terms.insert(0, t);
                 }
