@@ -179,7 +179,7 @@ impl Session {
                 // `ans` means the last result at the time of the definition, not when
                 // the function is called: d(x) := ans after deriv(f(x), x) is the derivative
                 let body = match self.vars.get("ans").cloned() {
-                    Some(v) if !params.iter().any(|p| p == "ans") => replace_ident(body, "ans", &expr_node(&v)?),
+                    Some(v) if !params.iter().any(|p| p == "ans") && uses_ident(body, "ans") => replace_ident(body, "ans", &expr_node(&v)?),
                     _ => body.clone(),
                 };
                 let text = format!("{}({}) := {}", name, params.join(", "), crate::parser::source(&body));
@@ -920,6 +920,20 @@ fn expr_node(v: &Expr) -> R<Node> {
     }
 }
 
+fn uses_ident(n: &Node, name: &str) -> bool {
+    let u = |m: &Node| uses_ident(m, name);
+    match n {
+        Node::Ident(s) => s == name,
+        Node::Neg(a) | Node::Transpose(a) => u(a),
+        Node::Bin(_, a, b) => u(a) || u(b),
+        Node::Range(a, s, b) => u(a) || s.as_deref().is_some_and(u) || u(b),
+        Node::Call(_, args) => args.iter().any(u),
+        Node::Index(a, args) => u(a) || args.iter().any(u),
+        Node::Matrix(m) => m.iter().flatten().any(u),
+        _ => false,
+    }
+}
+
 /// body with every use of the name replaced by node
 fn replace_ident(body: &Node, name: &str, node: &Node) -> Node {
     let r = |n: &Node| replace_ident(n, name, node);
@@ -1035,6 +1049,7 @@ mod tests {
         assert!(out.contains("d(x) := 6*x+9"));
         assert!(run("m = [1 2; 3 4]; m*2; g(k) := k*ans; g(2)").ends_with("4\t8\n12\t16"));
         assert_eq!(run("h(ans) := ans + 1; h(1)").lines().last().unwrap(), "2");
+        assert_eq!(run("p = plot(x, x, 0, 1); q(x) := x + 1; q(1)").lines().last().unwrap(), "2");
         assert_eq!(run("2^200"), "1606938044258990275541962092341162602522202993782792835301376");
         assert_eq!(run("mod(3^100, 7)"), "4");
         assert_eq!(run("isprime(2^521 - 1)"), "true");
