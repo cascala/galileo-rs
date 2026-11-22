@@ -186,7 +186,14 @@ impl Session {
             e => vec![crate::eval::equation_lhs(&e)],
         };
         if eqs.len() == 1 && xs.len() == 1 {
-            return cas::solve(&eqs[0], &xs[0]).map(row);
+            let r = cas::solve(&eqs[0], &xs[0]);
+            if r.is_err() {
+                // sin(x) = 1/2 and friends: the solutions in [0, 2 pi)
+                if let Some(t) = crate::extra_cmd::solve_trig(&eqs[0], &xs[0]) {
+                    return t.map(row);
+                }
+            }
+            return r.map(row);
         }
         cas::solve_linear(&eqs, &xs).map(row)
     }

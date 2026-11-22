@@ -291,6 +291,85 @@ pub fn trig_reduce(e: &Expr) -> Expr {
     }
 }
 
+/// Solutions of an equation in one trigonometric function of x, such as
+/// 2 sin(x) - 1 = 0 or cos(x)^2 = 1/4: the solutions with 0 <= x < 2 pi
+pub fn solve_trig(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
+    fn find(e: &Expr, x: &str, out: &mut Vec<Func>) {
+        match e {
+            Expr::Func(fun @ (Func::Sin | Func::Cos | Func::Tan), a) if **a == Expr::sym(x) => {
+                if !out.contains(fun) {
+                    out.push(*fun);
+                }
+            }
+            _ => {
+                let _ = e.map_children(&mut |c| {
+                    find(c, x, out);
+                    c.clone()
+                });
+            }
+        }
+    }
+    let mut fs = vec![];
+    find(f, x, &mut fs);
+    if fs.len() != 1 {
+        return None;
+    }
+    let fun = fs[0];
+    let u = "u__";
+    fn replace(e: &Expr, from: &Expr, to: &Expr) -> Expr {
+        if e == from { to.clone() } else { e.map_children(&mut |c| replace(c, from, to)) }
+    }
+    let g = replace(f, &func(fun, Expr::sym(x)), &Expr::sym(u));
+    if g.contains_sym(x) {
+        return None;
+    }
+    let roots = match cas::solve(&g, u) {
+        Ok(r) => r,
+        Err(e) => return Some(Err(e)),
+    };
+    let two_pi = mul2(Expr::int(2), pi());
+    let norm = |t: Expr| -> Expr {
+        let v = numeric::value(&t);
+        let k = (v / (2.0 * std::f64::consts::PI)).floor();
+        let r = simplify(&sub(t, mul2(Expr::int(k as i128), two_pi.clone())));
+        if (numeric::value(&r) - 2.0 * std::f64::consts::PI).abs() < 1e-12 { Expr::zero() } else { r }
+    };
+    let mut out: Vec<Expr> = vec![];
+    for r in roots {
+        let v = numeric::value(&r);
+        if !v.is_finite() || has_i(&r) {
+            continue;
+        }
+        let cands = match fun {
+            Func::Sin if v.abs() <= 1.0 + 1e-12 => {
+                let a = func(Func::Asin, r.clone());
+                vec![a.clone(), sub(pi(), a)]
+            }
+            Func::Cos if v.abs() <= 1.0 + 1e-12 => {
+                let a = func(Func::Acos, r.clone());
+                vec![a.clone(), neg(a)]
+            }
+            Func::Tan => {
+                let a = func(Func::Atan, r.clone());
+                vec![a.clone(), add2(a, pi())]
+            }
+            _ => vec![],
+        };
+        let float = r.num().is_some_and(|n| !n.is_exact());
+        for c in cands {
+            let c = if float { calc::evalf(&norm(c)) } else { norm(c) };
+            if !out.iter().any(|o| (numeric::value(o) - numeric::value(&c)).abs() < 1e-12) {
+                out.push(c);
+            }
+        }
+    }
+    out.sort_by(|a, b| numeric::value(a).total_cmp(&numeric::value(b)));
+    if out.is_empty() {
+        return Some(Err("no solution".into()));
+    }
+    Some(Ok(out))
+}
+
 // ---------- implicit curves (marching squares) ----------
 
 fn contour(f: &dyn Fn(f64, f64) -> f64, x0: f64, x1: f64, y0: f64, y1: f64, n: usize) -> Vec<(f64, f64)> {
@@ -1399,6 +1478,11 @@ mod tests {
         assert_eq!(run("compose([2,3,1],[2,3,1])"), "3\t1\t2");
         assert_eq!(run("cycles(perm(\"(1 2 3)(4 5)\", 5))"), "(1 2 3)(4 5)");
         assert_eq!(run("size(generate([2,3,1],[2,1,3]))"), "6\t3");
+    }
+    #[test]
+    fn trig_equations() {
+        assert_eq!(run("solve(sin(x) == 1/2, x)"), "pi/6\t5*pi/6");
+        assert_eq!(run("solve(2*sin(x)^2 - sin(x) - 1, x)"), "pi/2\t7*pi/6\t11*pi/6");
     }
     #[test]
     fn odes() {
