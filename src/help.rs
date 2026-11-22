@@ -118,6 +118,7 @@ pub const ENTRIES: &[Entry] = &[
     e!("best", "Discovery", "best(d)", "The formula discover marked as best, as an expression you can use further.", "best(discover([1 1; 2 4; 3 9], [x y]))"),
     e!("scatter", "Plotting", "scatter(data, [x y]) or scatter(data, [names...], [X Y]) (, sigma)", "Plots observations as points. data has one row per observation; the names label its columns. With two columns the first goes across and the second up; otherwise give [X Y], two expressions in the column names, such as [log(a) log(T)] for a log-log plot. A last argument with one uncertainty per row (for the last column) draws error bars. Combine with show(scatter(...), plot(...)) to draw a fitted curve through the data.", "scatter([1 1; 2 4; 3 9], [x y])"),
     e!("odedata", "Calculus", "odedata(rhs, unknowns, t, start, t0, t1, n)", "Like odesolve, but returns the whole solution as a table with n+1 rows [t y1 y2 ...], evenly spaced from t0 to t1, ready for scatter or discover.", "odedata([v, -x], [x v], t, [1 0], 0, 6, 60)"),
+    e!("transform", "Matrices", "transform(data, [names], [expr1 expr2 ...])", "Makes a new table from a data table: the names label the columns of data, and each expression (in those names) gives one column of the result, computed row by row. Use it to change units, take logarithms or compute 1/r.", "transform([1 2; 2 4], [x y], [x 1/y])"),
     e!("column", "Matrices", "column(A, k)", "Column k of a matrix (counting from 1), as a column vector.", "column([1 2; 3 4], 2)"),
 ];
 

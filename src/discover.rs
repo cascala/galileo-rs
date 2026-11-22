@@ -130,17 +130,19 @@ fn recognize(c: f64, sd: f64) -> (Expr, bool) {
     let tol = (2.0 * sd).max(1e-8 * c.abs());
     let rel = tol / c.abs();
     if c != 0.0 && rel < 0.05 {
+        // fractions only when the constant is known well (otherwise 0.6627 "is" 2/3)
+        let qmax = if rel < 1e-3 { 12 } else { 1 };
         let mut ks: Vec<(f64, Expr, usize)> = vec![(1.0, Expr::one(), 0)];
         if rel < 1e-3 {
             ks.push((std::f64::consts::PI, pi(), 2));
-            ks.push((std::f64::consts::PI.powi(2), pow(pi(), Expr::int(2)), 3));
+            ks.push((std::f64::consts::PI.powi(2), pow(pi(), Expr::int(2)), 2));
             ks.push((2f64.sqrt(), sqrt(Expr::int(2)), 3));
             ks.push((3f64.sqrt(), sqrt(Expr::int(3)), 3));
         }
         let allowed = 2 + (-rel.log10()).floor().max(0.0) as usize;
         let mut best: Option<(usize, Expr)> = None;
         for (k, ke, kc) in &ks {
-            for q in 1..=12i128 {
+            for q in 1..=qmax {
                 let p = (c * q as f64 / k).round();
                 if p == 0.0 || p.abs() > 1e4 {
                     continue;
@@ -149,7 +151,7 @@ fn recognize(c: f64, sd: f64) -> (Expr, bool) {
                 if gcd(p, q) != 1 || (p as f64 / q as f64 * k - c).abs() > tol {
                     continue;
                 }
-                let cost = digits(p) + if q > 1 { digits(q) } else { 0 } + kc;
+                let cost = 3 * digits(p) - 1 + if q > 1 { digits(q) } else { 0 } + kc;
                 if cost <= allowed && best.as_ref().is_none_or(|b| cost < b.0) {
                     best = Some((cost, mul(vec![rat(p, q), ke.clone()])));
                 }
@@ -362,16 +364,16 @@ impl Session {
             }
             let t: Vec<f64> = rows.iter().map(|r| r[0]).collect();
             let u: Vec<f64> = rows.iter().map(|r| r[last]).collect();
-            let h = (t[t.len() - 1] - t[0]) / (t.len() - 1) as f64;
-            let uniform = t.windows(2).all(|w| ((w[1] - w[0]) - h).abs() <= 1e-6 * h.abs());
-            // five-point stencils on an even grid (error ~ h^4), three points otherwise
-            let (dy, cut) = if uniform && t.len() >= 7 {
+            // five-point estimates (an interpolating quartic through each row and its
+            // two neighbours on each side, error ~ h^3), three points for short tables
+            let (dy, cut) = if t.len() >= 7 {
                 let d: Vec<f64> = (2..t.len() - 2)
                     .map(|i| {
-                        if order == 1 {
-                            (u[i - 2] - 8.0 * u[i - 1] + 8.0 * u[i + 1] - u[i + 2]) / (12.0 * h)
-                        } else {
-                            (-u[i - 2] + 16.0 * u[i - 1] - 30.0 * u[i] + 16.0 * u[i + 1] - u[i + 2]) / (12.0 * h * h)
+                        let a: Vec<Vec<f64>> = (i - 2..=i + 2).map(|j| (0..5).map(|k| (t[j] - t[i]).powi(k)).collect()).collect();
+                        let yy: Vec<f64> = (i - 2..=i + 2).map(|j| u[j]).collect();
+                        match wls(&a, &yy, &[1.0; 5]) {
+                            Some((c, _)) => if order == 1 { c[1] } else { 2.0 * c[2] },
+                            None => f64::NAN,
                         }
                     })
                     .collect();
@@ -451,6 +453,8 @@ struct Cand {
     err: f64,
     /// leave-one-out error: how well the formula predicts each row from the others
     cv: f64,
+    /// number of fitted constants
+    params: usize,
 }
 
 fn default_library(t: &Table) -> Vec<Expr> {
@@ -562,33 +566,62 @@ fn linear_candidates(t: &Table, terms: &[Expr], cols: &[Vec<f64>], kmax: usize, 
             // without uncertainties, the misfit itself bounds how well a coefficient is known
             let e0 = if t.sigma.is_some() { 0.0 } else { t.misfit(&pred, k) };
             let yrms = (t.y.iter().map(|v| v * v).sum::<f64>() / n as f64).sqrt();
-            let mut parts = vec![];
             let mut floats = vec![];
+            let mut exact: Vec<Option<Expr>> = vec![];
+            let mut sds = vec![];
             for j in 0..k {
                 let crms = ((0..n).map(|i| a[i][j] * a[i][j]).sum::<f64>() / n as f64).sqrt().max(1e-300);
                 let sd0 = (var[j] * s2).sqrt();
-                let sd = if t.sigma.is_some() { sd0 } else { (3.0 * sd0).max(3.0 * e0 * yrms / crms).max(t.fd_err / crms) };
-                let (ce, _) = recognize(c[j], sd);
-                let _ = &ce;
-                if ce.is_zero() {
-                    continue;
-                }
-                parts.push(mul2(ce, terms[s[j]].clone()));
+                let scale = if t.relative() { c[j].abs() } else { yrms / crms };
+                let sd = if t.sigma.is_some() { sd0 } else { (3.0 * sd0).max(3.0 * e0 * scale / (n as f64).sqrt()).max(t.fd_err / crms) };
+                let (ce, ok) = recognize(c[j], sd);
+                exact.push(if ok { Some(ce) } else { None });
+                sds.push(sd);
                 floats.push(mul2(Expr::float(round_sig(c[j], sd0.max(1e-12 * c[j].abs()))), terms[s[j]].clone()));
             }
-            let mut f = add(parts);
-            let mut err = t.misfit(&t.predict(&f), k);
-            // keep exact constants only when they don't spoil the fit
+            // fix a subset of the recognised constants and refit the others; keep the largest
+            // subset that doesn't spoil the fit
             let ff = add(floats);
             let ef = t.misfit(&t.predict(&ff), k);
-            let mut cv = cv;
-            if err > (1.5 * ef).max(1e-6) {
-                f = ff;
-                err = ef;
-            } else {
-                cv = cv.max(err);
+            let rec: Vec<usize> = (0..k).filter(|&j| exact[j].is_some()).collect();
+            let mut best_f: (usize, f64, Expr) = (0, ef, ff);
+            for mask in 1u32..(1u32 << rec.len()) {
+                let fixed: Vec<usize> = (0..rec.len()).filter(|b| mask & (1 << b) != 0).map(|b| rec[b]).collect();
+                if fixed.len() < best_f.0 {
+                    continue;
+                }
+                let free: Vec<usize> = (0..k).filter(|j| !fixed.contains(j)).collect();
+                let mut cf = c.clone();
+                if !free.is_empty() {
+                    let yy: Vec<f64> = (0..n)
+                        .map(|i| t.y[i] - fixed.iter().map(|&j| numeric::value(exact[j].as_ref().unwrap()) * a[i][j]).sum::<f64>())
+                        .collect();
+                    let aa: Vec<Vec<f64>> = (0..n).map(|i| free.iter().map(|&j| a[i][j]).collect()).collect();
+                    let Some((c2, _)) = wls(&aa, &yy, &w) else { continue };
+                    for (m, &j) in free.iter().enumerate() {
+                        cf[j] = c2[m];
+                    }
+                }
+                let mut parts = vec![];
+                for j in 0..k {
+                    let ce = if fixed.contains(&j) {
+                        exact[j].clone().unwrap()
+                    } else {
+                        Expr::float(round_sig(cf[j], sds[j].max(1e-12 * cf[j].abs())))
+                    };
+                    if !ce.is_zero() {
+                        parts.push(mul2(ce, terms[s[j]].clone()));
+                    }
+                }
+                let f = add(parts);
+                let e = t.misfit(&t.predict(&f), k);
+                if e <= (1.5 * ef).max(1e-6) && (fixed.len() > best_f.0 || e < best_f.1) {
+                    best_f = (fixed.len(), e, f);
+                }
             }
-            out.push(Cand { complexity: complexity(&f), formula: f, err, cv });
+            let (nfixed, err, f) = best_f;
+            let cv = if nfixed > 0 { cv.max(err) } else { cv };
+            out.push(Cand { complexity: complexity(&f), formula: f, err, cv, params: k });
         }
     }
 }
@@ -644,7 +677,7 @@ fn power_candidates(t: &Table, out: &mut Vec<Cand>, notes: &mut Vec<String>) {
                 let sw: f64 = lw.iter().sum();
                 let m = (0..n).map(|i| lw[i] * r[i]).sum::<f64>() / sw;
                 let v = (0..n).map(|i| lw[i] * (r[i] - m).powi(2)).sum::<f64>() / sw;
-                let sd = if t.sigma.is_some() { (1.0 / sw).sqrt().max((v / (n as f64 - 1.0).max(1.0)).sqrt()) } else { v.sqrt() };
+                let sd = if t.sigma.is_some() { (1.0 / sw).sqrt().max((v / (n as f64 - 1.0).max(1.0)).sqrt()) } else { (v / (n as f64 - 1.0).max(1.0)).sqrt() };
                 (m, sd)
             }
         };
@@ -662,7 +695,7 @@ fn power_candidates(t: &Table, out: &mut Vec<Cand>, notes: &mut Vec<String>) {
         if let Some(f) = build(cmb, None) {
             let err = t.misfit(&t.predict(&f), 1);
             let cv = err * (n as f64 / (n - 1) as f64).sqrt();
-            out.push(Cand { complexity: complexity(&f), formula: f, err, cv });
+            out.push(Cand { complexity: complexity(&f), formula: f, err, cv, params: 1 });
         }
     }
     // the free fit, exponents as decimals
@@ -670,7 +703,7 @@ fn power_candidates(t: &Table, out: &mut Vec<Cand>, notes: &mut Vec<String>) {
     if let Some(f) = build(&free, None) {
         let err = t.misfit(&t.predict(&f), p);
         let cv = err * (n as f64 / (n - p).max(1) as f64).sqrt();
-        out.push(Cand { complexity: complexity(&f), formula: f, err, cv });
+        out.push(Cand { complexity: complexity(&f), formula: f, err, cv, params: p });
     }
 }
 
@@ -688,6 +721,7 @@ impl Session {
             "scatter" => self.scatter(args),
             "odedata" => self.odedata(args),
             "column" => self.column(args),
+            "transform" => self.transform(args),
             "best" => match args {
                 [d] => match self.eval(d) {
                     Ok(Expr::Obj(o)) => match &*o {
@@ -796,10 +830,13 @@ impl Session {
             }
         }
         front.truncate(10);
-        let emin = front.iter().map(|c| c.err).fold(f64::INFINITY, f64::min);
-        let cvmin = front.iter().map(|c| c.cv).fold(f64::INFINITY, f64::min);
+        // only formulas with at least two observations per fitted constant can be "best"
+        let n_obs = t.y.len();
+        let allowed = |c: &Cand| 2 * c.params < n_obs || c.params <= 1;
+        let emin = front.iter().filter(|c| allowed(c)).map(|c| c.err).fold(f64::INFINITY, f64::min);
+        let cvmin = front.iter().filter(|c| allowed(c)).map(|c| c.cv).fold(f64::INFINITY, f64::min);
         let ok = |c: &Cand| {
-            if t.sigma.is_some() { c.err <= (1.5 * emin).max(emin + 1.0) } else { c.cv <= (1.25 * cvmin).max(1e-7) }
+            allowed(c) && if t.sigma.is_some() { c.err <= (1.5 * emin).max(emin + 1.0) } else { c.cv <= (2.0 * cvmin).max(1e-7) }
         };
         let best = front.iter().position(ok).unwrap_or(0);
 
@@ -825,9 +862,9 @@ impl Session {
             ));
         }
         let rule = if t.sigma.is_some() {
-            "  * best: the simplest formula whose chi2/dof is close to the smallest one".to_string()
+            "  * best: the simplest formula whose chi2/dof is close to the smallest one (at least two observations per fitted constant)".to_string()
         } else {
-            "  * best: the simplest formula that predicts left-out rows nearly as well as any (leave-one-out test)".to_string()
+            "  * best: the simplest formula that predicts left-out rows at most twice as badly as the best one (leave-one-out test, at least two observations per fitted constant)".to_string()
         };
         tx.push(rule.clone());
         for nt in &notes {
@@ -1546,6 +1583,32 @@ impl Session {
         if out.len() < k + 1 {
             return Err(format!("odedata: the solution breaks down at t = {}", fmt(traj.last().map_or(a, |p| p.0))));
         }
+        Ok(Expr::Matrix(out))
+    }
+
+    /// transform(data, [a T], [a/149.6 T^2]): a new table, one column per expression of the named columns
+    fn transform(&mut self, args: &[Node]) -> R<Expr> {
+        let [d, vars, exprs] = args else {
+            return Err("usage: transform(data, [names], [expr1 expr2 ...]) makes a new table whose columns are the expressions, computed row by row".into());
+        };
+        let (names, _, _) = var_specs(vars)?;
+        let rows = numbers_of(&self.eval(d)?, "transform: the data")?;
+        if rows.first().map_or(0, |r| r.len()) != names.len() {
+            return Err(format!("transform: give one name per column of the data ({} columns)", rows.first().map_or(0, |r| r.len())));
+        }
+        let es: Vec<Expr> = match self.eval_hidden(exprs, &names)? {
+            Expr::Matrix(m) => m.into_iter().flatten().collect(),
+            e => vec![e],
+        };
+        let nm: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        for e in &es {
+            let free = numeric::free(e, &nm);
+            if !free.is_empty() {
+                return Err(format!("transform: {} is not a column; the columns are {}", free[0], names.join(", ")));
+            }
+        }
+        let codes: Vec<numeric::Code> = es.iter().map(|e| compile(e, &nm)).collect();
+        let out: Vec<Vec<Expr>> = rows.iter().map(|r| codes.iter().map(|c| Expr::float(run(c, r))).collect()).collect();
         Ok(Expr::Matrix(out))
     }
 
