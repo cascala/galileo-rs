@@ -262,7 +262,13 @@ impl Figure {
             ("xaxis", obj(&[("title", obj(&[("text", jstr(&self.x_label))])), ("zeroline", "true".into())])),
             ("yaxis", obj(&yaxis)),
             ("showlegend", "true".into()),
-            ("legend", obj(&[("x", "0.01".into()), ("y", "0.99".into()), ("bgcolor", jstr("rgba(255,255,255,0.8)"))])),
+            ("legend", {
+                let (w, h) = self.legend_size();
+                let corner = self.legend_corner(&b, (w + 8.0) / 560.0, (h + 8.0) / 336.0);
+                let (x, xa) = if corner % 2 == 0 { ("0.01", "left") } else { ("0.99", "right") };
+                let (y, ya) = if corner < 2 { ("0.99", "top") } else { ("0.01", "bottom") };
+                obj(&[("x", x.into()), ("y", y.into()), ("xanchor", jstr(xa)), ("yanchor", jstr(ya)), ("bgcolor", jstr("rgba(255,255,255,0.8)"))])
+            }),
             (
                 "margin",
                 obj(&[
@@ -280,6 +286,41 @@ impl Figure {
             ),
         ]);
         obj(&[("data", format!("[{}]", traces.join(","))), ("layout", layout)])
+    }
+
+    /// Which corner of the plot area the legend covers least data in:
+    /// 0 top left, 1 top right, 2 bottom left, 3 bottom right. The box size is
+    /// given as a fraction of the plot area.
+    fn legend_corner(&self, b: &Bounds, fw: f64, fh: f64) -> usize {
+        let mut count = [0usize; 4];
+        for ser in &self.series {
+            for &(x, y) in &ser.points {
+                if !(finite(x) && finite(y)) {
+                    continue;
+                }
+                let u = (x - b.x0) / (b.x1 - b.x0);
+                let v = (y - b.y0) / (b.y1 - b.y0);
+                let (left, right, top, bottom) = (u <= fw, u >= 1.0 - fw, v >= 1.0 - fh, v <= fh);
+                count[0] += (left && top) as usize;
+                count[1] += (right && top) as usize;
+                count[2] += (left && bottom) as usize;
+                count[3] += (right && bottom) as usize;
+            }
+        }
+        // prefer the top left unless another corner is clearly emptier
+        let mut best = 0;
+        for k in 1..4 {
+            if count[k] < count[best] && count[k] + 2 < count[0] {
+                best = k;
+            }
+        }
+        best
+    }
+
+    /// The legend box in the SVG: width and height in pixels
+    fn legend_size(&self) -> (f64, f64) {
+        let w = 46 + 7 * self.series.iter().map(|s| s.label.chars().count()).max().unwrap_or(0);
+        (w as f64, (18 * self.series.len() + 2) as f64)
     }
 
     pub fn svg(&self) -> String {
@@ -369,30 +410,30 @@ impl Figure {
             let _ = write!(s, r##"<text x="14" y="{y:.2}" text-anchor="middle" fill="#111827" transform="rotate(-90 14 {y:.2})">{}</text>"##, esc(&self.y_label));
         }
         if !self.series.is_empty() {
-            let w = 46 + 7 * self.series.iter().map(|s| s.label.chars().count()).max().unwrap_or(0);
+            let (w, h) = self.legend_size();
+            let corner = self.legend_corner(&b, (w + 8.0) / pw, (h + 8.0) / ph);
+            let lx = if corner % 2 == 0 { ml + 4.0 } else { ml + pw - 4.0 - w };
+            let ly = if corner < 2 { mt + 4.0 } else { mt + ph - 4.0 - h };
             let _ = write!(
                 s,
                 r##"<rect x="{:.2}" y="{:.2}" width="{}" height="{}" fill="white" fill-opacity="0.85" stroke="#e5e7eb"/>"##,
-                ml + 4.0,
-                mt + 4.0,
-                w,
-                18 * self.series.len() + 2
+                lx, ly, w, h
             );
-        }
-        for (i, ser) in self.series.iter().enumerate() {
-            let y = mt + 14.0 + i as f64 * 18.0;
-            let c = PALETTE[i % PALETTE.len()];
-            if ser.markers {
-                let _ = write!(s, r#"<circle cx="{:.2}" cy="{y:.2}" r="4" fill="{c}"/>"#, ml + 20.0);
-            } else {
-                let _ = write!(s, r#"<line x1="{:.2}" y1="{y:.2}" x2="{:.2}" y2="{y:.2}" stroke="{c}" stroke-width="2"/>"#, ml + 10.0, ml + 30.0);
+            for (i, ser) in self.series.iter().enumerate() {
+                let y = ly + 10.0 + i as f64 * 18.0;
+                let c = PALETTE[i % PALETTE.len()];
+                if ser.markers {
+                    let _ = write!(s, r#"<circle cx="{:.2}" cy="{y:.2}" r="4" fill="{c}"/>"#, lx + 16.0);
+                } else {
+                    let _ = write!(s, r#"<line x1="{:.2}" y1="{y:.2}" x2="{:.2}" y2="{y:.2}" stroke="{c}" stroke-width="2"/>"#, lx + 6.0, lx + 26.0);
+                }
+                let _ = write!(
+                    s,
+                    r##"<text x="{:.2}" y="{y:.2}" dy="4" fill="#111827" paint-order="stroke" stroke="white" stroke-width="3">{}</text>"##,
+                    lx + 32.0,
+                    esc(&ser.label)
+                );
             }
-            let _ = write!(
-                s,
-                r##"<text x="{:.2}" y="{y:.2}" dy="4" fill="#111827" paint-order="stroke" stroke="white" stroke-width="3">{}</text>"##,
-                ml + 36.0,
-                esc(&ser.label)
-            );
         }
         s.push_str("</svg>");
         s

@@ -469,6 +469,12 @@ impl Session {
                     Some(Node::Str(s)) => s.clone(),
                     Some(n) => show(&self.eval(n)?),
                 };
+                // a vector's length, exact: norm([1 1]) = sqrt(2)
+                let (r, c) = linalg::dims(&m);
+                if (r == 1 || c == 1) && p == "2" {
+                    let sq = m.iter().flatten().map(|x| build::pow(x.clone(), Expr::int(2))).collect();
+                    return Ok(calc::simplify(&build::sqrt(calc::simplify(&build::add(sq)))));
+                }
                 linalg::norm(&m, &p)
             }
             "eye" | "ones" | "zeros" | "rand" => {

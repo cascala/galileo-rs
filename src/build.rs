@@ -404,7 +404,7 @@ fn asin_known(x: &Expr) -> Option<Expr> {
     let half = |e: Expr| mul(vec![rat(1, 2), e]);
     let k = if *x == rat(1, 2) {
         rat(1, 6)
-    } else if *x == half(sqrt(Expr::int(2))) {
+    } else if *x == half(sqrt(Expr::int(2))) || *x == pow(sqrt(Expr::int(2)), Expr::int(-1)) {
         rat(1, 4)
     } else if *x == half(sqrt(Expr::int(3))) {
         rat(1, 3)
