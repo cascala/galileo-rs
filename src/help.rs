@@ -20,7 +20,7 @@ pub const ENTRIES: &[Entry] = &[
     e!("clear", "Basics", "clear", "Removes all variables you defined.", "clear"),
     e!("eval", "Basics", "eval(expr)", "Evaluates an expression numerically, for example a fraction or a constant like pi.", "eval(5/4)"),
     e!("info", "Basics", "info(expr)", "Shows the internal structure of an expression.", "info(x^2+1)"),
-    e!("load", "Basics", "load(file), load(RSA)", "Runs the Galileo statements in a file. load(RSA) instead defines the RSA Factoring Challenge numbers: RSA100, RSA110, ... RSA617 by decimal digits and RSA576, RSA640, RSA704, RSA768, RSA896, RSA1024, RSA1536, RSA2048 by bits, with the two primes of each factored one as RSA100p and RSA100q and so on. RSA250 is the last with factors included; RSA260 and RSA896 were factored in September 2026.", "load(RSA)"),
+    e!("load", "Basics", "load(file), load(RSA)", "Runs the Galileo statements in a file. load(RSA) instead defines the RSA Factoring Challenge numbers: RSA100, RSA110, ... RSA617 by decimal digits and RSA576, RSA640, RSA704, RSA768, RSA896, RSA1024, RSA1536, RSA2048 by bits, with the two primes of each factored one as RSA100p and RSA100q and so on. Factors are included up to RSA250, plus RSA270 and RSA896 (RSA-896, factored in September 2026, is the largest so far); RSA260 was factored in September 2026 too, but its factors are not included yet.", "load(RSA)"),
     e!("sin", "Functions", "sin(x), cos(x), tan(x)", "Trigonometric functions, in radians. Exact at multiples of pi/12 (15 degrees).", "sin(pi/6)"),
     e!("asin", "Functions", "asin(x), acos(x), atan(x)", "Inverse trigonometric functions.", "asin(1)"),
     e!("exp", "Functions", "exp(x)", "Exponential function.", "exp(1)"),
