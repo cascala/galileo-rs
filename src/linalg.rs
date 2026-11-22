@@ -102,6 +102,51 @@ fn pivot_row(m: &Mat, col: usize, from: usize) -> Option<usize> {
     best.map(|b| b.0)
 }
 
+/// Reduced row echelon form, and the pivot columns.
+pub fn rref(a: &Mat) -> (Mat, Vec<usize>) {
+    let mut m = a.clone();
+    let (n, w) = dims(&m);
+    let mut pivots = vec![];
+    let mut row = 0;
+    for col in 0..w {
+        if row == n {
+            break;
+        }
+        let Some(piv) = pivot_row(&m, col, row) else { continue };
+        m.swap(row, piv);
+        let p = m[row][col].clone();
+        m[row] = m[row].iter().map(|x| simplify(&div(x.clone(), p.clone()))).collect();
+        for r in 0..n {
+            if r != row && !is_zero(&m[r][col]) {
+                let f = m[r][col].clone();
+                for c in 0..w {
+                    m[r][c] = simplify(&sub(m[r][c].clone(), mul2(f.clone(), m[row][c].clone())));
+                }
+            }
+        }
+        pivots.push(col);
+        row += 1;
+    }
+    (m, pivots)
+}
+
+/// A basis of the solutions of a*x = 0, one vector per column.
+pub fn nullspace(a: &Mat) -> Mat {
+    let (r, pivots) = rref(a);
+    let w = dims(a).1;
+    let free: Vec<usize> = (0..w).filter(|c| !pivots.contains(c)).collect();
+    let mut cols: Vec<Vec<Expr>> = vec![];
+    for &f in &free {
+        let mut v = vec![Expr::zero(); w];
+        v[f] = Expr::one();
+        for (i, &p) in pivots.iter().enumerate() {
+            v[p] = simplify(&neg(r[i][f].clone()));
+        }
+        cols.push(v);
+    }
+    transpose(&cols)
+}
+
 pub fn inverse(a: &Mat) -> R<Mat> {
     let (n, m) = dims(a);
     if n != m {

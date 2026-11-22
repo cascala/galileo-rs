@@ -156,7 +156,14 @@ impl Session {
                             _ => return Err("lu returns 2 or 3 values".into()),
                         }
                     }
-                    _ => return Err("only lu(...) returns several values".into()),
+                    Node::Call(f, args) if f == "eig" && args.len() == 1 && names.len() == 2 => {
+                        let m = self.matrix_arg(&args[0], "eig")?;
+                        let (v, vals) = crate::cas_cmd::eigvec(&m)?;
+                        let n = vals.len();
+                        let d: Vec<Vec<Expr>> = (0..n).map(|i| (0..n).map(|j| if i == j { vals[i].clone() } else { Expr::zero() }).collect()).collect();
+                        vec![Expr::Matrix(v), Expr::Matrix(d)]
+                    }
+                    _ => return Err("only lu(...) and eig(...) return several values".into()),
                 };
                 let pairs: Vec<(String, Expr)> = names.iter().cloned().zip(vals).collect();
                 for (n, v) in &pairs {
@@ -972,6 +979,9 @@ mod tests {
         assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
         assert_eq!(run("[1 true]"), "1\ttrue");
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
+        assert_eq!(run("rank([1 2 3; 4 5 6; 7 8 9])"), "2");
+        assert_eq!(run("null([1 2 3; 4 5 6; 7 8 9])"), "1\n-2\n1");
+        assert_eq!(run("eigvec([2 1; 1 2])"), "-1\t1\n1\t1");
         assert_eq!(run("v = [3 5 7]; v(2)").lines().last().unwrap(), "5");
         assert_eq!(run("A = [1 2; 3 4]; A(2, 1)").lines().last().unwrap(), "3");
         assert_eq!(run("A = [1 2; 3 4]; A(2)").lines().last().unwrap(), "3\t4");

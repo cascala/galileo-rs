@@ -71,6 +71,42 @@ fn modulo(va: &Expr, vb: &Expr) -> R<Expr> {
     Ok(Expr::float(x - y * (x / y).floor()))
 }
 
+/// Eigenvectors (columns) and the matching eigenvalues, from the null space
+/// of A - λI for each distinct exact eigenvalue.
+pub(crate) fn eigvec(m: &linalg::Mat) -> R<(linalg::Mat, Vec<Expr>)> {
+    let (r, c) = linalg::dims(m);
+    if r != c {
+        return Err("eigvec needs a square matrix".into());
+    }
+    let p = charpoly(m, "λ")?;
+    let co = cas::poly_coeffs(&p, "λ").ok_or("eigvec: no characteristic polynomial")?;
+    let Expr::Matrix(roots) = cas::poly_roots(&co).map(|v| Expr::Matrix(vec![v]))? else { unreachable!() };
+    let mut distinct: Vec<Expr> = vec![];
+    for l in roots.into_iter().flatten() {
+        if !distinct.iter().any(|d| simplify(&sub(d.clone(), l.clone())).is_zero()) {
+            distinct.push(l);
+        }
+    }
+    let mut cols: Vec<Vec<Expr>> = vec![];
+    let mut vals = vec![];
+    for l in distinct {
+        if !l.num().map_or(true, |n| n.is_exact()) {
+            return Err("eigvec: the eigenvalues are only known numerically".into());
+        }
+        let shifted: linalg::Mat = (0..r).map(|i| (0..r).map(|j| if i == j { simplify(&sub(m[i][j].clone(), l.clone())) } else { m[i][j].clone() }).collect()).collect();
+        let n = linalg::nullspace(&shifted);
+        for k in 0..linalg::dims(&n).1 {
+            // scale so the entries are as simple as possible: last nonzero entry 1
+            cols.push((0..r).map(|i| n[i][k].clone()).collect());
+            vals.push(l.clone());
+        }
+    }
+    if cols.is_empty() {
+        return Err("eigvec: no exact eigenvectors found".into());
+    }
+    Ok((linalg::transpose(&cols), vals))
+}
+
 fn exact_int(e: &Expr) -> Option<i128> {
     e.num().filter(|n| n.is_exact()).and_then(|n| n.as_int())
 }
@@ -102,7 +138,7 @@ impl Session {
             "solve" => self.solve(args),
             "fsolve" => self.fsolve(args),
             "sum" | "prod" | "product" => self.sum(f != "sum", args),
-            "factorial" | "floor" | "ceil" | "round" | "numer" | "denom" | "trace" | "size" | "eig" => self.unary(f, args),
+            "factorial" | "floor" | "ceil" | "round" | "numer" | "denom" | "trace" | "size" | "eig" | "rref" | "rank" | "null" | "eigvec" => self.unary(f, args),
             "binomial" | "mod" | "gcd" | "lcm" | "dot" | "cross" | "charpoly" | "degree" => self.binary(f, args),
             "coeff" => self.coeff(args),
             "polarplot" => self.polarplot(args),
@@ -296,6 +332,21 @@ impl Session {
             "numer" | "denom" => {
                 let (n, d) = calc::num_den(&calc::together(&v));
                 Ok(if f == "numer" { n } else { d })
+            }
+            "rref" | "rank" | "null" => {
+                let Expr::Matrix(m) = v else { return Err(format!("{} needs a matrix", f)) };
+                match f {
+                    "rref" => Ok(Expr::Matrix(linalg::rref(&m).0)),
+                    "rank" => Ok(Expr::int(linalg::rref(&m).1.len() as i128)),
+                    _ => {
+                        let n = linalg::nullspace(&m);
+                        Ok(if n.is_empty() { Expr::Matrix(vec![]) } else { Expr::Matrix(n) })
+                    }
+                }
+            }
+            "eigvec" => {
+                let Expr::Matrix(m) = v else { return Err("eigvec needs a square matrix".into()) };
+                eigvec(&m).map(|(vecs, _)| Expr::Matrix(vecs))
             }
             "trace" | "size" | "eig" => {
                 let m = match v {
