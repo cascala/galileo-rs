@@ -446,7 +446,12 @@ impl Session {
             Some(m) => {
                 let ms = flat(self.eval_hidden(m, &all)?);
                 let polar = ms.len() == 2 && show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
-                self.figure(vec![("solution".into(), traj)], &all, ms, polar)
+                // name the curve after what is drawn vertically (or the whole map in 3D)
+                let name = match ms.len() {
+                    2 => show(&ms[1]),
+                    _ => "solution".into(),
+                };
+                self.figure(vec![(name, traj)], &all, ms, polar)
             }
         }
     }
