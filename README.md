@@ -123,6 +123,7 @@ cargo build --release --target wasm32-unknown-unknown --lib
 | `src/build.rs` | Smart constructors (`add`, `mul`, `pow`, `func`) that keep expressions canonical |
 | `src/print.rs` | Printer (fractions, signs, `sqrt`, `exp`) |
 | `src/calc.rs` | `deriv`, `expand`, `factor`, `simplify`, substitution, numeric evaluation |
+| `src/algfactor.rs`, `src/factor_cmd.rs` | Polynomial factoring over the integers (Zassenhaus), cyclotomic polynomials, Aurifeuillean factors, algebraic splitting of `a^n ± b^n`; `cyclotomic`, `algfactor`, `factorsearch` |
 | `src/linalg.rs` | Matrices: product, inverse, determinant, LU, solve, norms |
 | `src/parser.rs` | Lexer and Pratt parser |
 | `src/eval.rs` | Sessions: variables, commands, built-in functions |

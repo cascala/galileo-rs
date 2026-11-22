@@ -20,6 +20,8 @@ pub mod commands;
 pub mod cas;
 pub mod cas_cmd;
 pub mod numtheory;
+pub mod algfactor;
+pub mod factor_cmd;
 pub mod extra_cmd;
 pub mod discover;
 pub mod display;

@@ -405,10 +405,12 @@ impl Session {
                     "simplify" => calc::simplify(&a),
                     "expand" => calc::expand(&a),
                     "factor" => match a.num().and_then(|n| n.as_bigint()) {
-                        // factor(360) = 2^3 * 3^2 * 5
-                        Some(n) if n.bits() > 1 => Expr::Str(crate::extra_cmd::factored_text(&n).map_err(|e| format!("factor: {}", e))?),
+                        // factor(360) = 2^3 * 3^2 * 5; a^n ± b^n splits algebraically first
+                        Some(n) if n.bits() > 1 => Expr::Str(self.factor_integer(&args[0], &n).map_err(|e| format!("factor: {}", e))?),
                         _ if crate::extra_cmd::is_huge(&a) => return Err(crate::extra_cmd::not_whole(&a, "factor")),
-                        _ => crate::cas::factor_poly(&a).unwrap_or_else(|| calc::factor(&a)),
+                        _ => crate::factor_cmd::factor_poly(&a)
+                            .or_else(|| crate::cas::factor_poly(&a))
+                            .unwrap_or_else(|| calc::factor(&a)),
                     },
                     "eval" => calc::evalf(&a),
                     "complexity" => Expr::int(a.size() as i128),
@@ -1039,7 +1041,8 @@ mod tests {
         assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
         assert_eq!(run("[1 true]"), "1\ttrue");
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
-        assert!(run("factor(10^300 + 1)").starts_with("Error: factor: found the factors 73, 137, "));
+        assert!(run("factor(10^300 + 1)").starts_with("73 * 137 * 401 * "));
+        assert!(run("factor(10^300 + 1)").contains("\nC156 = "));
         assert!(run("isprime(2^(2^2281 - 1) - 1)").contains("too large to compute: it would have about 10^686 digits"));
         assert!(run("isprime(eval(2^(2^2281 - 1) - 1))").contains("decimal too large to represent"));
         assert!(run("factor(2^(10^9) + 1)").contains("about 301029996 digits"));
