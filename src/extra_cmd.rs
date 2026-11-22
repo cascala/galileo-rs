@@ -882,6 +882,14 @@ impl Session {
             "perm" | "compose" | "pinverse" | "porder" | "psign" | "cycles" | "generate" | "cayley" => self.perms(f, args),
             "dsolve" => self.dsolve(args),
             "letters" | "word" | "encode" | "decode" => self.text_cmd(f, args),
+            "rows" | "cols" | "length" => (|| {
+                let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+                let (r, c) = match self.eval(a)? {
+                    Expr::Matrix(m) => (m.len(), m.first().map_or(0, |r| r.len())),
+                    _ => (1, 1),
+                };
+                Ok(Expr::int(match f { "rows" => r, "cols" => c, _ => r.max(c) } as i128))
+            })(),
             "polydiv" => self.polydiv(args),
             _ => return None,
         };

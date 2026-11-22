@@ -971,6 +971,7 @@ mod tests {
         assert_eq!(run("mod([3 6 9], 7)"), "3\t6\t2");
         assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
         assert_eq!(run("[1 true]"), "1\ttrue");
+        assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
         assert_eq!(run("v = [3 5 7]; v(2)").lines().last().unwrap(), "5");
         assert_eq!(run("A = [1 2; 3 4]; A(2, 1)").lines().last().unwrap(), "3");
         assert_eq!(run("A = [1 2; 3 4]; A(2)").lines().last().unwrap(), "3\t4");

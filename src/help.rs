@@ -122,10 +122,13 @@ pub const ENTRIES: &[Entry] = &[
     e!("odedata", "Calculus", "odedata(rhs, unknowns, t, start, t0, t1, n)", "Like odesolve, but returns the whole solution as a table with n+1 rows [t y1 y2 ...], evenly spaced from t0 to t1, ready for scatter or discover.", "odedata([v, -x], [x v], t, [1 0], 0, 6, 60)"),
     e!("transform", "Matrices", "transform(data, [names], [expr1 expr2 ...])", "Makes a new table from a data table: the names label the columns of data, and each expression (in those names) gives one column of the result, computed row by row. Use it to change units, take logarithms or compute 1/r.", "transform([1 2; 2 4], [x y], [x 1/y])"),
     e!("indexing", "Matrices", "A(k), A(i, j)", "Picks from a stored table or list, counting from 1: A(k) is entry k of a list (row or column) or row k of a table, A(i, j) the entry in row i, column j.", "v = [3 5 7]; v(2)"),
+    e!("rows", "Matrices", "rows(A), cols(A), length(v)", "The number of rows or columns of a table; length is the number of entries of a list (the larger of the two).", "rows(generate([2 3 1]))"),
     e!("column", "Matrices", "column(A, k)", "Column k of a matrix (counting from 1), as a column vector.", "column([1 2; 3 4], 2)"),
 ];
 
 const ALIASES: &[(&str, &str)] = &[
+    ("cols", "rows"),
+    ("length", "rows"),
     ("word", "letters"),
     ("decode", "encode"),
     ("whos", "who"),
