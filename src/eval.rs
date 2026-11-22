@@ -515,10 +515,6 @@ impl Session {
 
     /// f(a, b) for a user-defined f: the body evaluated with the parameters bound
     fn call_user(&mut self, f: &str, args: &[Node]) -> R<Expr> {
-        let (params, body) = self.funcs.get(f).cloned().unwrap();
-        if params.len() != args.len() {
-            return Err(format!("{} takes {} argument{}", f, params.len(), if params.len() == 1 { "" } else { "s" }));
-        }
         let mut vals = vec![];
         for a in args {
             vals.push(self.eval(a)?);
@@ -526,25 +522,71 @@ impl Session {
         if self.depth >= 2000 {
             return Err(format!("{}: too many nested calls (does the recursion stop?)", f));
         }
-        let saved: Vec<Option<Expr>> = params.iter().map(|p| self.vars.get(p).cloned()).collect();
-        let hidden = self.hidden.clone();
-        self.hidden.retain(|h| !params.contains(h));
-        // values that mention a parameter name (f(x+1) inside a function of x)
-        // must not refer back to themselves
-        for (p, v) in params.iter().zip(vals) {
-            self.vars.insert(p.clone(), v);
-        }
         self.depth += 1;
-        let r = self.eval(&body);
+        let r = self.run_user(f.to_string(), vals);
         self.depth -= 1;
-        self.hidden = hidden;
-        for (p, v) in params.iter().zip(saved) {
-            match v {
-                Some(v) => self.vars.insert(p.clone(), v),
-                None => self.vars.remove(p),
-            };
-        }
         r
+    }
+
+    /// Runs a user function. A call in tail position (the whole body, or a
+    /// branch of an if that is the whole body) does not nest: the loop just
+    /// rebinds the parameters, so f(n, k) := if(..., k, f(n, k + 1)) can run
+    /// millions of steps.
+    fn run_user(&mut self, mut f: String, mut vals: Vec<Expr>) -> R<Expr> {
+        let mut steps: u64 = 0;
+        loop {
+            let (params, body) = self.funcs.get(&f).cloned().unwrap();
+            if params.len() != vals.len() {
+                return Err(format!("{} takes {} argument{}", f, params.len(), if params.len() == 1 { "" } else { "s" }));
+            }
+            let saved: Vec<Option<Expr>> = params.iter().map(|p| self.vars.get(p).cloned()).collect();
+            let hidden = self.hidden.clone();
+            self.hidden.retain(|h| !params.contains(h));
+            for (p, v) in params.iter().zip(vals) {
+                self.vars.insert(p.clone(), v);
+            }
+            let r = self.tail(&body);
+            self.hidden = hidden;
+            for (p, v) in params.iter().zip(saved) {
+                match v {
+                    Some(v) => self.vars.insert(p.clone(), v),
+                    None => self.vars.remove(p),
+                };
+            }
+            match r? {
+                Tail::Value(e) => return Ok(e),
+                Tail::Call(g, v) => {
+                    steps += 1;
+                    if steps > 10_000_000 {
+                        return Err(format!("{}: still running after 10 million steps (does the recursion stop?)", g));
+                    }
+                    f = g;
+                    vals = v;
+                }
+            }
+        }
+    }
+
+    fn tail(&mut self, node: &Node) -> R<Tail> {
+        if let Node::Call(name, args) = node {
+            if self.funcs.contains_key(name) {
+                let mut vals = vec![];
+                for a in args {
+                    vals.push(self.eval(a)?);
+                }
+                return Ok(Tail::Call(name.clone(), vals));
+            }
+            if name == "if" && args.len() == 3 {
+                let c = self.eval(&args[0])?;
+                let pick = match c {
+                    Expr::Bool(b) => b,
+                    Expr::Num(n) => !n.is_zero(),
+                    other => return Err(format!("if: can't tell whether {} is true or false", show(&other))),
+                };
+                return self.tail(&args[if pick { 1 } else { 2 }]);
+            }
+        }
+        Ok(Tail::Value(self.eval(node)?))
     }
 
     /// f'(x), y''(t): derivatives of a user function, or of an undefined one
@@ -683,6 +725,11 @@ fn truthy(e: &Expr) -> R<bool> {
         Expr::Num(n) => Ok(!n.is_zero()),
         other => Err(format!("{} is not a boolean", show(other))),
     }
+}
+
+enum Tail {
+    Value(Expr),
+    Call(String, Vec<Expr>),
 }
 
 fn elementwise(a: &Expr, f: &dyn Fn(&Expr) -> Expr) -> R<Expr> {
@@ -888,5 +935,13 @@ mod tests {
         assert_eq!(run("deriv(x^3,x)"), "3*x^2");
         assert_eq!(run("0.1:0.1:0.3").split('\t').count(), 3);
         assert_eq!(run("1:3"), "1\t2\t3");
+    }
+    #[test]
+    fn tail_calls_and_big_integers() {
+        let out = run("count(n, k) := if(k == n, k, count(n, k + 1)); count(100000, 0)");
+        assert_eq!(out.lines().last().unwrap(), "100000");
+        assert_eq!(run("fact(n) := if(n == 0, 1, n*fact(n-1)); fact(20)").lines().last().unwrap(), "2432902008176640000");
+        assert_eq!(run("gcd(2^60-1, 2^40-1)"), "1048575");
+        assert_eq!(run("mod([3 6 9], 7)"), "3\t6\t2");
     }
 }

@@ -49,12 +49,26 @@ fn point(e: &Expr, side: Side) -> Point {
 }
 
 fn integer(e: &Expr, f: &str) -> R<i128> {
+    if let Some(n) = exact_int(e) {
+        return Ok(n);
+    }
     let e = calc::evalf(e);
     let v = e.num().map(|n| n.to_f64()).ok_or_else(|| format!("{} needs integers, got {}", f, show(&e)))?;
     if v.fract() != 0.0 || v.abs() > 1e30 {
         return Err(format!("{} needs integers, got {}", f, show(&e)));
     }
     Ok(v as i128)
+}
+
+fn modulo(va: &Expr, vb: &Expr) -> R<Expr> {
+    if let (Some(x), Some(y)) = (exact_int(va), exact_int(vb)) {
+        if y == 0 {
+            return Err("mod: division by zero".into());
+        }
+        return Ok(Expr::int(x.rem_euclid(y)));
+    }
+    let (x, y) = (real(va, "mod")?, real(vb, "mod")?);
+    Ok(Expr::float(x - y * (x / y).floor()))
 }
 
 fn exact_int(e: &Expr) -> Option<i128> {
@@ -325,16 +339,11 @@ impl Session {
                 let g = cas::gcd_int(x, y);
                 Ok(Expr::int(if f == "gcd" { g } else if g == 0 { 0 } else { (x / g * y).abs() }))
             }
-            "mod" => {
-                if let (Some(x), Some(y)) = (exact_int(&va), exact_int(&vb)) {
-                    if y == 0 {
-                        return Err("mod: division by zero".into());
-                    }
-                    return Ok(Expr::int(x.rem_euclid(y)));
-                }
-                let (x, y) = (real(&va, f)?, real(&vb, f)?);
-                Ok(Expr::float(x - y * (x / y).floor()))
-            }
+            "mod" => match (&va, &vb) {
+                (Expr::Matrix(m), b) => Ok(Expr::Matrix(m.iter().map(|r| r.iter().map(|x| modulo(x, b)).collect::<R<_>>()).collect::<R<_>>()?)),
+                (a, Expr::Matrix(m)) => Ok(Expr::Matrix(m.iter().map(|r| r.iter().map(|y| modulo(a, y)).collect::<R<_>>()).collect::<R<_>>()?)),
+                (a, b) => modulo(a, b),
+            },
             "dot" | "cross" => {
                 let flat = |e: Expr| -> Vec<Expr> {
                     match e {
