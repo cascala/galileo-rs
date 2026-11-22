@@ -400,6 +400,14 @@ impl Session {
                     "factor" => match a.num().filter(|n| n.is_exact()).and_then(|n| n.as_int()) {
                         // factor(360) = 2^3 * 3^2 * 5
                         Some(n) if n.abs() > 1 => Expr::Str(crate::extra_cmd::factored_text(n)?),
+                        // a whole number too big for exact arithmetic has become a decimal:
+                        // its digits are gone, so there is nothing to factor
+                        _ if a.num().is_some_and(|n| !n.is_exact() && n.to_f64().abs() >= 1.7e38) => {
+                            return Err(format!(
+                                "factor: {} is too large. Galileo keeps whole numbers exact up to 38 digits (2^127 - 1); larger ones become decimals with 16 significant digits, which cannot be factored",
+                                show(&a)
+                            ))
+                        }
                         _ => crate::cas::factor_poly(&a).unwrap_or_else(|| calc::factor(&a)),
                     },
                     "eval" => calc::evalf(&a),
@@ -979,6 +987,7 @@ mod tests {
         assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
         assert_eq!(run("[1 true]"), "1\ttrue");
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
+        assert!(run("factor(10^300 + 1)").starts_with("Error: factor: "));
         assert_eq!(run("rank([1 2 3; 4 5 6; 7 8 9])"), "2");
         assert_eq!(run("null([1 2 3; 4 5 6; 7 8 9])"), "1\n-2\n1");
         assert_eq!(run("eigvec([2 1; 1 2])"), "-1\t1\n1\t1");
