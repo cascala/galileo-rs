@@ -22,6 +22,7 @@ fn report(kind: &'static str, text: String, markdown: String) -> Expr {
         vars: vec![],
         order: 0,
         target: 0,
+        value: None,
     })))
 }
 
@@ -101,6 +102,7 @@ impl Session {
                     _ => return Err("usage: pm1(n) or pm1(n, B): Pollard's p - 1 method with bound B (default 100000)".into()),
                 };
                 let (f, gg) = g::pm1(&n, b);
+                let value = f.clone().map_or(Expr::int(1), bnum);
                 let text = match f {
                     Some(p) => format!(
                         "found the factor {}: for this prime p, p - 1 has no prime factor above {} (p - 1 = {}), so 3^E = 1 mod p for E = lcm(1..{}), and gcd(3^E - 1, n) = p",
@@ -118,7 +120,8 @@ impl Session {
                         b
                     ),
                 };
-                Ok(Expr::Str(text))
+                self.note(text);
+                Ok(value)
             })(),
             "ecm" => (|| {
                 let (n, curves, b1) = match args {
@@ -132,7 +135,11 @@ impl Session {
                         "ecm(n, curves, B1): curves from 1 to 100000, B1 from 100 to 10^7".into(),
                     );
                 }
-                Ok(Expr::Str(match g::ecm(&n, curves, b1) {
+                let found = g::ecm(&n, curves, b1);
+                let value = found
+                    .as_ref()
+                    .map_or(Expr::int(1), |(p, _)| bnum(p.clone()));
+                let text = match found {
                     Some((p, c)) => format!(
                         "found the factor {} on curve {} of {}: the group of that elliptic curve mod {} has an order made of primes up to {}, plus at most one prime up to {}",
                         p,
@@ -146,7 +153,9 @@ impl Session {
                         "no factor with {} curves and B1 = {}; more curves or a larger B1 find larger factors (B1 = 11000 suits about 20 digits, 50000 about 25, 250000 about 30)",
                         curves, b1
                     ),
-                }))
+                };
+                self.note(text);
+                Ok(value)
             })(),
             "squfof" => (|| {
                 let [a] = args else {
@@ -156,13 +165,18 @@ impl Session {
                 if n.bits() > 100 {
                     return Err("squfof: n has more than 100 bits; SQUFOF takes about n^(1/4) steps, which is too many".into());
                 }
-                Ok(Expr::Str(match g::squfof(&n) {
+                let found = g::squfof(&n);
+                let value = found
+                    .as_ref()
+                    .map_or(Expr::int(1), |(p, _, _)| bnum(p.clone()));
+                self.note(match found {
                     Some((p, k, steps)) => format!(
                         "found the factor {} after {} steps of the continued fraction of sqrt({}·n)",
                         p, steps, k
                     ),
-                    None => "no factor found".into(),
-                }))
+                    None => "no factor found (the value is 1)".into(),
+                });
+                Ok(value)
             })(),
             "classfactor" => (|| {
                 let (n, b) = match args {
@@ -173,7 +187,11 @@ impl Session {
                 if n.bits() > 140 {
                     return Err("classfactor: n has more than 140 bits; the class group is too large for this method".into());
                 }
-                Ok(Expr::Str(match g::class_factor(&n, b, 3) {
+                let found = g::class_factor(&n, b, 3);
+                let value = found
+                    .as_ref()
+                    .map_or(Expr::int(1), |(p, _, _)| bnum(p.clone()));
+                let text = match found {
                     Some((p, k, f)) => format!(
                         "found the factor {}: the form {} of discriminant -4·{}·n has order 2 (it is ambiguous), and ambiguous forms are factorizations",
                         p,
@@ -184,21 +202,45 @@ impl Session {
                         "no factor: the odd part of the class number was not {}-smooth for the multipliers tried; try a larger B",
                         b
                     ),
-                }))
+                };
+                self.note(text);
+                Ok(value)
             })(),
             "polyselect" => (|| {
                 let usage = "usage: polyselect(n), polyselect(n, d) or polyselect(n, d, generations): number field sieve polynomials for n (at least 30 digits) of degree d (3 to 6)";
                 let (n, d, gens) = match args {
                     [a] => (self.big_arg(a, "polyselect: n")?.abs(), 0usize, 30usize),
-                    [a, d] => (self.big_arg(a, "polyselect: n")?.abs(), self.big_arg(d, "polyselect: d")?.to_usize().unwrap_or(0), 30),
-                    [a, d, g] => (self.big_arg(a, "polyselect: n")?.abs(), self.big_arg(d, "polyselect: d")?.to_usize().unwrap_or(0), self.big_arg(g, "polyselect: generations")?.to_usize().unwrap_or(0)),
+                    [a, d] => (
+                        self.big_arg(a, "polyselect: n")?.abs(),
+                        self.big_arg(d, "polyselect: d")?.to_usize().unwrap_or(0),
+                        30,
+                    ),
+                    [a, d, g] => (
+                        self.big_arg(a, "polyselect: n")?.abs(),
+                        self.big_arg(d, "polyselect: d")?.to_usize().unwrap_or(0),
+                        self.big_arg(g, "polyselect: generations")?
+                            .to_usize()
+                            .unwrap_or(0),
+                    ),
                     _ => return Err(usage.into()),
                 };
                 let digits = n.to_string().len();
                 if !(30..=620).contains(&digits) {
                     return Err("polyselect: n should have 30 to 620 digits".into());
                 }
-                let d = if d == 0 { if digits < 60 { 3 } else if digits < 110 { 4 } else if digits < 220 { 5 } else { 6 } } else { d };
+                let d = if d == 0 {
+                    if digits < 60 {
+                        3
+                    } else if digits < 110 {
+                        4
+                    } else if digits < 220 {
+                        5
+                    } else {
+                        6
+                    }
+                } else {
+                    d
+                };
                 if !(3..=6).contains(&d) || !(1..=1000).contains(&gens) {
                     return Err("polyselect: d from 3 to 6, generations from 1 to 1000".into());
                 }
@@ -320,7 +362,10 @@ impl Session {
                 md.push(String::new());
                 md.push(line.clone());
                 tx.push(line);
-                Ok(report("Class group", tx.join("\n"), md.join("\n")))
+                Ok(crate::discover::with_value(
+                    report("Class group", tx.join("\n"), md.join("\n")),
+                    Expr::int(h as i128),
+                ))
             })(),
             _ => return None,
         })
@@ -356,14 +401,26 @@ fn polyselect_report(n: &BigInt, d: usize, gens: usize) -> Expr {
     let base = ps::score(n, d, 1, 0, 0, 0).expect("base m");
     let (j, k, _) = ps::root_sieve(&base.f, &base.m, 4, 20_000);
     let sieved = ps::score(n, d, 1, 0, j, k).unwrap_or_else(|| base.clone());
-    let start = if sieved.e > base.e { sieved.clone() } else { base.clone() };
+    let start = if sieved.e > base.e {
+        sieved.clone()
+    } else {
+        base.clone()
+    };
     let seed = n.to_u64_digits().1.first().copied().unwrap_or(7);
     let hist = ps::evolve(n, d, &start, gens, 30, seed);
     let best = hist.last().unwrap().clone();
     let digits = n.to_string().len();
-    let row = |name: &str, c: &ps::Cand| format!("| {} | {} | {} | {}, {} | {:.3e} | {:.2} | {:+.2} | {:.3e} |", name, c.ad, c.dm, c.j, c.k, c.skew, c.lognorm, c.alpha, c.e);
+    let row = |name: &str, c: &ps::Cand| {
+        format!(
+            "| {} | {} | {} | {}, {} | {:.3e} | {:.2} | {:+.2} | {:.3e} |",
+            name, c.ad, c.dm, c.j, c.k, c.skew, c.lognorm, c.alpha, c.e
+        )
+    };
     let mut md = vec![
-        format!("Polynomial selection for this {}-digit number, degree {}: pairs $f(x)$, $g(x) = x - m$ with $f(m) = N$. Smaller lognorm (size of $F(a, b)$ over the sieve region, at the best skew), more negative $\\alpha$ (more roots mod small primes) and larger Murphy $E$ (estimated chance that $F$ and $G$ are both smooth, with bounds $B = {:.0e}$ and area {:.0e}) are better. $E$ only compares polynomials for the same $N$.", digits, d, bf, area),
+        format!(
+            "Polynomial selection for this {}-digit number, degree {}: pairs $f(x)$, $g(x) = x - m$ with $f(m) = N$. Smaller lognorm (size of $F(a, b)$ over the sieve region, at the best skew), more negative $\\alpha$ (more roots mod small primes) and larger Murphy $E$ (estimated chance that $F$ and $G$ are both smooth, with bounds $B = {:.0e}$ and area {:.0e}) are better. $E$ only compares polynomials for the same $N$.",
+            digits, d, bf, area
+        ),
         String::new(),
         "| step | leading coeff | m shift | rotation j, k | skew | lognorm | α | E |".into(),
         "|---|---|---|---|---|---|---|---|".into(),
@@ -378,21 +435,58 @@ fn polyselect_report(n: &BigInt, d: usize, gens: usize) -> Expr {
     }
     let ratio = best.e / base.e;
     md.push(String::new());
-    md.push(format!("Best E is {:.1} times that of plain base m. The best pair:", ratio));
+    md.push(format!(
+        "Best E is {:.1} times that of plain base m. The best pair:",
+        ratio
+    ));
     md.push(String::new());
     md.push(format!("* $f(x) = $ `{}`", poly_text(&best.f)));
     md.push(format!("* $g(x) = x - m$ with $m = $ `{}`", best.m));
-    md.push(format!("* check: $f(m) - N = {}$", ps::eval(&best.f, &best.m) - n));
+    md.push(format!(
+        "* check: $f(m) - N = {}$",
+        ps::eval(&best.f, &best.m) - n
+    ));
     md.push(String::new());
-    let start1 = if sieved.e > base.e { sieved.clone() } else { base.clone() };
-    let monic = ps::evolve_with(n, d, &start1, gens, 30, seed ^ 0x5bd1e995, true).last().unwrap().clone();
-    let own = crate::gnfs::choices(n, 20).into_iter().filter(|c| c.degree() == d).map(|c| c.score()).fold(f64::MAX, f64::min);
+    let start1 = if sieved.e > base.e {
+        sieved.clone()
+    } else {
+        base.clone()
+    };
+    let monic = ps::evolve_with(n, d, &start1, gens, 30, seed ^ 0x5bd1e995, true)
+        .last()
+        .unwrap()
+        .clone();
+    let own = crate::gnfs::choices(n, 20)
+        .into_iter()
+        .filter(|c| c.degree() == d)
+        .map(|c| c.score())
+        .fold(f64::MAX, f64::min);
     md.push(format!("Galileo's teaching sieve `gnfs` wants a monic $f$ and sieves a rectangle without skew ($|a| \\le 30000$, $b$ up to a few thousand), so the best pair above (leading coefficient {}) is not the one for it. A second search keeps $f$ monic and scores with the sieve's own estimate (bits of both norms over its rectangle plus $\\alpha$; lower is better). Best monic pair: score {:.1}, against {:.1} for the polynomial `gnfs` picks by itself at this degree:", best.ad, ps::gnfs_score(&monic.f, &monic.m), own));
     md.push(String::new());
-    md.push(format!("`gnfs({}, {}, {})`", n, poly_text(&monic.f), monic.m));
-    let mut tx = vec![format!("Polynomial selection for this {}-digit number, degree {} (g(x) = x - m, f(m) = N). Lower lognorm, more negative alpha and larger Murphy E are better:", digits, d)];
+    md.push(format!(
+        "`gnfs({}, {}, {})`",
+        n,
+        poly_text(&monic.f),
+        monic.m
+    ));
+    let mut tx = vec![format!(
+        "Polynomial selection for this {}-digit number, degree {} (g(x) = x - m, f(m) = N). Lower lognorm, more negative alpha and larger Murphy E are better:",
+        digits, d
+    )];
     for l in md.iter().skip(4) {
         tx.push(l.replace("$", "").replace("`", "").replace("\\", ""));
     }
-    report("Polynomial selection", tx.join("\n"), md.join("\n"))
+    let value = Expr::Matrix(vec![vec![
+        crate::eval::value_of(&poly_text(&monic.f)),
+        bnum(monic.m.clone()),
+    ]]);
+    md.push(String::new());
+    md.push(
+        "The value is the best monic pair as [f(x) m], ready for `gnfs(N, r(1, 1), r(1, 2))`."
+            .into(),
+    );
+    crate::discover::with_value(
+        report("Polynomial selection", tx.join("\n"), md.join("\n")),
+        value,
+    )
 }

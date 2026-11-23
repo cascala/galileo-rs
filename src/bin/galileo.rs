@@ -6,13 +6,18 @@ use std::io::{self, BufRead, IsTerminal, Write};
 
 /// Print results; statements ending in ; stay quiet. Returns false on exit.
 fn report(s: &mut Session, src: &str) -> bool {
-    for (r, quiet) in s.run_quiet(src) {
+    for (r, quiet, notes) in s.run_notes(src) {
         match r {
             Ok(Output::Exit) => return false,
             Ok(o) => {
                 let t = o.render();
                 if !quiet && !t.is_empty() {
                     println!("{}", t);
+                }
+                // explanations as comments, so the output stays Galileo source
+                let c = galileo_rs::eval::comment_notes(&notes);
+                if !quiet && !c.is_empty() {
+                    println!("{}", c);
                 }
             }
             Err(e) => println!("Error: {}", e),

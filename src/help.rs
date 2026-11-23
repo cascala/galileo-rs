@@ -29,6 +29,13 @@ pub const ENTRIES: &[Entry] = &[
         "help(deriv)"
     ),
     e!(
+        "explain",
+        "Basics",
+        "explain = true, explain = false",
+        "Results are always plain Galileo values; with explain = true (the default) commands also add an explanation, shown apart from the result (as // comments in plain text). explain = false turns explanations off for the session; starting Galileo with the environment variable GALILEO_EXPLAIN=0 starts with them off. A trailing ; hides both.",
+        "explain = false"
+    ),
+    e!(
         "who",
         "Basics",
         "who",

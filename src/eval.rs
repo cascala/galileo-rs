@@ -5,11 +5,52 @@ use crate::calc;
 use crate::expr::{Const, Expr, Func};
 use crate::linalg::{self, Mat};
 use crate::num::Number;
-use crate::parser::{Node, Op, Stmt, parse};
+use crate::parser::{Node, Op, Stmt};
 use crate::print::show;
 use std::collections::BTreeMap;
 
 pub type R<T> = Result<T, String>;
+
+/// The value of a piece of Galileo source (for building results from text such as a polynomial)
+pub fn value_of(src: &str) -> Expr {
+    let mut s = Session::new();
+    match s.run(src).pop() {
+        Some(Ok(Output::Value(v))) => v,
+        _ => Expr::Str(src.to_string()),
+    }
+}
+
+/// An explanation of a result: plain text and Markdown
+#[derive(Clone, Debug, PartialEq)]
+pub struct Note {
+    pub plain: String,
+    pub markdown: String,
+}
+
+/// the Markdown of explanations, one paragraph each
+pub fn markdown_notes(notes: &[Note]) -> String {
+    notes
+        .iter()
+        .map(|n| n.markdown.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// explanations as `//` comment lines
+pub fn comment_notes(notes: &[Note]) -> String {
+    notes
+        .iter()
+        .flat_map(|n| n.plain.lines())
+        .map(|l| {
+            if l.trim().is_empty() {
+                "//".to_string()
+            } else {
+                format!("// {}", l)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// What a statement produced
 #[derive(Clone, Debug, PartialEq)]
@@ -45,6 +86,8 @@ pub struct Session {
     pub(crate) funcs: BTreeMap<String, (Vec<String>, Node)>,
     /// how deeply user functions are calling each other
     pub(crate) depth: usize,
+    /// explanations (Markdown) for the statement being run; see [`Session::note`]
+    pub(crate) notes: Vec<Note>,
 }
 
 impl Default for Session {
@@ -61,7 +104,30 @@ fn builtins() -> BTreeMap<String, Expr> {
     v.insert("j".into(), Expr::Const(Const::I));
     v.insert("true".into(), Expr::Bool(true));
     v.insert("false".into(), Expr::Bool(false));
+    v.insert("explain".into(), Expr::Bool(explain_default()));
     v
+}
+
+/// `explain` starts on unless the environment variable GALILEO_EXPLAIN is 0, off, false or no
+fn explain_default() -> bool {
+    match std::env::var("GALILEO_EXPLAIN") {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "off" | "false" | "no"
+        ),
+        Err(_) => true,
+    }
+}
+
+/// the first sentence of a text
+fn first_sentence(s: &str) -> &str {
+    let b = s.as_bytes();
+    for i in 0..b.len() {
+        if b[i] == b'.' && (i + 1 == b.len() || b[i + 1] == b' ') {
+            return &s[..=i];
+        }
+    }
+    s
 }
 
 impl Session {
@@ -71,6 +137,7 @@ impl Session {
             hidden: vec![],
             funcs: BTreeMap::new(),
             depth: 0,
+            notes: vec![],
         }
     }
 
@@ -91,36 +158,85 @@ impl Session {
         self.vars.insert(name.to_string(), v);
     }
 
-    /// Run source text; one output (or error) per statement
-    pub fn run(&mut self, src: &str) -> Vec<R<Output>> {
-        match parse(src) {
-            Err(e) => vec![Err(format!("parse error: {}", e))],
-            Ok(stmts) => {
-                let mut out = vec![];
-                for s in stmts {
-                    let r = self.exec(&s);
-                    let stop = matches!(r, Ok(Output::Exit));
-                    out.push(r);
-                    if stop {
-                        break;
-                    }
+    /// Whether commands explain their results: the variable `explain`
+    /// (true unless set to false or 0, or started off by GALILEO_EXPLAIN=0)
+    pub fn explaining(&self) -> bool {
+        match self.vars.get("explain") {
+            Some(Expr::Bool(b)) => *b,
+            Some(Expr::Num(n)) => !n.is_zero(),
+            _ => true,
+        }
+    }
+
+    /// Adds an explanation (Markdown) to the statement being run. Results stay
+    /// plain Galileo values; explanations are shown apart from them.
+    pub(crate) fn note(&mut self, md: impl Into<String>) {
+        let md = md.into();
+        self.note2(md.replace('`', ""), md);
+    }
+
+    /// An explanation with separate plain-text and Markdown forms
+    pub(crate) fn note2(&mut self, plain: String, markdown: String) {
+        if self.explaining() && !markdown.trim().is_empty() {
+            self.notes.push(Note { plain, markdown });
+        }
+    }
+
+    /// Run one statement; returns its result and its explanations
+    pub fn exec_notes(&mut self, st: &Stmt) -> (R<Output>, Vec<Note>) {
+        self.notes.clear();
+        let r = self.exec(st);
+        if r.is_ok() && self.notes.is_empty() && self.explaining() {
+            // every command explains itself at least by what it computes
+            let call = match st {
+                Stmt::Expr(Node::Call(f, _)) | Stmt::Assign(_, Node::Call(f, _)) => {
+                    Some(f.as_str())
                 }
-                out
+                _ => None,
+            };
+            if let Some(e) = call.and_then(crate::help::entry) {
+                if !self.funcs.contains_key(e.name) {
+                    let s = first_sentence(e.description).to_string();
+                    self.note(format!("`{}`: {}", e.name, s));
+                }
             }
         }
+        (r, std::mem::take(&mut self.notes))
+    }
+
+    /// Run source text; one output (or error) per statement
+    pub fn run(&mut self, src: &str) -> Vec<R<Output>> {
+        self.run_all(src, false)
+            .into_iter()
+            .map(|(r, _, _)| r)
+            .collect()
     }
 
     /// Run source text; each result comes with whether it should be hidden
     /// (the statement ended in `;`). Stops at the first error.
     pub fn run_quiet(&mut self, src: &str) -> Vec<(R<Output>, bool)> {
+        self.run_notes(src)
+            .into_iter()
+            .map(|(r, q, _)| (r, q))
+            .collect()
+    }
+
+    /// Run source text: (result, hidden by `;`, explanations) per statement.
+    /// Stops at the first error.
+    pub fn run_notes(&mut self, src: &str) -> Vec<(R<Output>, bool, Vec<Note>)> {
+        self.run_all(src, true)
+    }
+
+    /// Run source text, stopping at `exit` and (when `stop_on_error`) at the first error
+    pub fn run_all(&mut self, src: &str, stop_on_error: bool) -> Vec<(R<Output>, bool, Vec<Note>)> {
         match crate::parser::parse_quiet(src) {
-            Err(e) => vec![(Err(format!("parse error: {}", e)), false)],
+            Err(e) => vec![(Err(format!("parse error: {}", e)), false, vec![])],
             Ok(stmts) => {
                 let mut out = vec![];
                 for (s, quiet) in stmts {
-                    let r = self.exec(&s);
-                    let stop = matches!(r, Ok(Output::Exit) | Err(_));
-                    out.push((r, quiet));
+                    let (r, notes) = self.exec_notes(&s);
+                    let stop = matches!(r, Ok(Output::Exit)) || (stop_on_error && r.is_err());
+                    out.push((r, quiet, notes));
                     if stop {
                         break;
                     }
@@ -130,14 +246,32 @@ impl Session {
         }
     }
 
-    /// Run source text and render it like the REPL does
+    /// Run source text and render it like the REPL does: results, then their
+    /// explanations as `//` comments (so the whole output is Galileo source)
     pub fn run_to_string(&mut self, src: &str) -> String {
-        self.run(src)
-            .into_iter()
-            .map(|r| match r {
-                Ok(o) => o.render(),
-                Err(e) => format!("Error: {}", e),
-            })
+        self.render_run(src, true)
+    }
+
+    /// Results only, as text (no explanations)
+    pub fn run_values(&mut self, src: &str) -> String {
+        self.render_run(src, false)
+    }
+
+    fn render_run(&mut self, src: &str, with_notes: bool) -> String {
+        let mut out = vec![];
+        for (r, quiet, notes) in self.run_all(src, false) {
+            match r {
+                Ok(o) => {
+                    let _ = quiet;
+                    out.push(o.render());
+                    if with_notes {
+                        out.push(comment_notes(&notes));
+                    }
+                }
+                Err(e) => out.push(format!("Error: {}", e)),
+            }
+        }
+        out.into_iter()
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
             .join("\n")
@@ -147,11 +281,13 @@ impl Session {
         match s {
             Stmt::Expr(n) => {
                 let v = self.eval(n)?;
+                self.note_report(&v);
                 self.set("ans", v.clone());
                 Ok(Output::Value(v))
             }
             Stmt::Assign(name, n) => {
                 let v = self.eval(n)?;
+                self.note_report(&v);
                 self.set(name, v.clone());
                 Ok(Output::Value(v))
             }
@@ -225,6 +361,16 @@ impl Session {
         }
     }
 
+    /// a report shows its value; its text becomes the explanation
+    fn note_report(&mut self, v: &Expr) {
+        if let Expr::Obj(o) = v {
+            if let crate::expr::Obj::Report(r) = &**o {
+                let (t, md) = (r.text.clone(), r.markdown.clone());
+                self.note2(t, md);
+            }
+        }
+    }
+
     fn command(&mut self, c: &str, arg: Option<&str>) -> R<Output> {
         match c {
             "who" | "whos" => {
@@ -276,7 +422,9 @@ impl Session {
             "load" => {
                 let file = arg.ok_or("load needs a file name")?;
                 if file.trim().eq_ignore_ascii_case("rsa") {
-                    return Ok(self.load_rsa());
+                    let t = self.load_rsa().render();
+                    self.note(t);
+                    return Ok(Output::Nothing);
                 }
                 if cfg!(target_arch = "wasm32") {
                     return Err(format!(
@@ -480,6 +628,19 @@ impl Session {
         {
             return self.index(f, &m, args);
         }
+        // a result with explanations indexes like the value it shows
+        if let Some(Expr::Obj(o)) = self
+            .vars
+            .get(f)
+            .filter(|_| !self.hidden.iter().any(|h| h == f))
+            .cloned()
+        {
+            if let crate::expr::Obj::Report(r) = &*o {
+                if let Some(Expr::Matrix(m)) = r.shown_value() {
+                    return self.index(f, &m, args);
+                }
+            }
+        }
         if f.ends_with('\'') {
             return self.call_primed(f, args);
         }
@@ -532,10 +693,13 @@ impl Session {
                     "expand" => calc::expand(&a),
                     "factor" => match a.num().and_then(|n| n.as_bigint()) {
                         // factor(360) = 2^3 * 3^2 * 5; a^n ± b^n splits algebraically first
-                        Some(n) if n.bits() > 1 => Expr::Str(
-                            self.factor_integer(&args[0], &n)
-                                .map_err(|e| format!("factor: {}", e))?,
-                        ),
+                        Some(n) if n.bits() > 1 => {
+                            let t = self
+                                .factor_integer(&args[0], &n)
+                                .map_err(|e| format!("factor: {}", e))?;
+                            self.note("`factor` of a whole number: its prime factorization. Numbers like a^n ± b^n are first cut along their algebraic factors; then trial division, Pollard's rho and the elliptic curve method split the rest, and each factor is checked to be prime (Miller–Rabin). A part written C*k* (k digits) is composite but did not split in reasonable time.");
+                            Expr::Str(t)
+                        }
                         _ if crate::extra_cmd::is_huge(&a) => {
                             return Err(crate::extra_cmd::not_whole(&a, "factor"));
                         }
@@ -1244,7 +1408,7 @@ fn structure(e: &Expr) -> String {
 mod tests {
     use super::*;
     fn run(s: &str) -> String {
-        Session::new().run_to_string(s)
+        Session::new().run_values(s)
     }
     #[test]
     fn basics() {
@@ -1296,13 +1460,26 @@ mod tests {
         assert_eq!(run("factor(x^2 + 1, i)"), "(x+i)*(x-i)");
         assert_eq!(run("factor(x^4 + 1, 17)"), "(x+2)*(x+8)*(x+9)*(x+15)");
         assert_eq!(run("factor(x^2 + y^2, i)"), "(x-i*y)*(x+i*y)");
-        assert!(run("N = (2^1062 + 1)/5; algfactor(N)").contains("divides 2^1062 + 1"));
-        assert!(run("N = 7^50 + 3^50; algfactor(N)").contains("All 7 prime factors found"));
         assert!(
-            run("N = 31415926^5 + 31415926 + 1; algfactor(N)")
+            Session::new()
+                .run_to_string("N = (2^1062 + 1)/5; algfactor(N)")
+                .contains("divides 2^1062 + 1")
+        );
+        assert!(
+            Session::new()
+                .run_to_string("N = 7^50 + 3^50; algfactor(N)")
+                .contains("All 7 prime factors found")
+        );
+        assert!(
+            Session::new()
+                .run_to_string("N = 31415926^5 + 31415926 + 1; algfactor(N)")
                 .contains("x^5 + x + 1 with x = 31415926")
         );
-        assert!(run("N = 98765^4 + 4*7^4; algfactor(N)").contains("x^4 + 9604 with x = 98765"));
+        assert!(
+            Session::new()
+                .run_to_string("N = 98765^4 + 4*7^4; algfactor(N)")
+                .contains("x^4 + 9604 with x = 98765")
+        );
         assert!(
             run("isprime(2^(2^2281 - 1) - 1)")
                 .contains("too large to compute: it would have about 10^686 digits")

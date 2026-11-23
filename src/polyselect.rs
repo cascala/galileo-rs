@@ -17,7 +17,10 @@ use num_traits::{ToPrimitive, Zero};
 pub type Poly = Vec<BigInt>;
 
 fn primes(n: u64) -> Vec<u64> {
-    crate::numtheory::small::primes_upto(n as usize).into_iter().map(|p| p as u64).collect()
+    crate::numtheory::small::primes_upto(n as usize)
+        .into_iter()
+        .map(|p| p as u64)
+        .collect()
 }
 
 /// f with leading coefficient ad and f(m) = n, by writing n - ad m^d in base m
@@ -85,7 +88,10 @@ pub fn alpha(f: &[BigInt], b: u64) -> f64 {
     let mut s = 0.0;
     for p in primes(b) {
         let pb = BigInt::from(p);
-        let fm: Vec<u64> = f.iter().map(|c| c.mod_floor(&pb).to_u64().unwrap()).collect();
+        let fm: Vec<u64> = f
+            .iter()
+            .map(|c| c.mod_floor(&pb).to_u64().unwrap())
+            .collect();
         let mut q = 0u64;
         for r in 0..p {
             let mut v = 0u64;
@@ -230,7 +236,7 @@ pub struct Cand {
 pub fn score(n: &BigInt, d: usize, ad: i64, dm: i64, j: i64, k: i64) -> Option<Cand> {
     if ad <= 0 {
         return None;
-        }
+    }
     let adb = BigInt::from(ad);
     let m = root_for(n, d, &adb) + dm;
     if m < BigInt::from(2) {
@@ -245,7 +251,19 @@ pub fn score(n: &BigInt, d: usize, ad: i64, dm: i64, j: i64, k: i64) -> Option<C
     let (skew, lognorm) = skew_lognorm(&f);
     let al = alpha(&f, 200);
     let e = murphy_e(&f, &m, skew, al, n);
-    Some(Cand { f, m, ad, dm, j, k, skew, lognorm, alpha: al, e, fit: e })
+    Some(Cand {
+        f,
+        m,
+        ad,
+        dm,
+        j,
+        k,
+        skew,
+        lognorm,
+        alpha: al,
+        e,
+        fit: e,
+    })
 }
 
 /// Root sieve: for rotations f + (j x + k)(x - m) with |j| <= jmax, |k| <= kmax,
@@ -263,7 +281,10 @@ pub fn root_sieve(f: &[BigInt], m: &BigInt, jmax: i64, kmax: i64) -> (i64, i64, 
             let pb = BigInt::from(p);
             let pf = p as f64;
             let contrib = pf * pf.ln() / (pf * pf - 1.0);
-            let fm: Vec<u64> = fj.iter().map(|c| c.mod_floor(&pb).to_u64().unwrap()).collect();
+            let fm: Vec<u64> = fj
+                .iter()
+                .map(|c| c.mod_floor(&pb).to_u64().unwrap())
+                .collect();
             let mm = m.mod_floor(&pb).to_u64().unwrap();
             for r in 0..p {
                 let mut v = 0u64;
@@ -304,12 +325,27 @@ pub fn root_sieve(f: &[BigInt], m: &BigInt, jmax: i64, kmax: i64) -> (i64, i64, 
 /// A small evolutionary search over (leading coefficient, shift of m, rotation j, k):
 /// keeps a population, mutates the best ones, and keeps the fittest by Murphy's E.
 /// Returns the best candidate of each generation.
-pub fn evolve(n: &BigInt, d: usize, start: &Cand, generations: usize, pop: usize, seed: u64) -> Vec<Cand> {
+pub fn evolve(
+    n: &BigInt,
+    d: usize,
+    start: &Cand,
+    generations: usize,
+    pop: usize,
+    seed: u64,
+) -> Vec<Cand> {
     evolve_with(n, d, start, generations, pop, seed, false)
 }
 
 /// evolve, optionally keeping f monic (leading coefficient 1), as the teaching gnfs needs
-pub fn evolve_with(n: &BigInt, d: usize, start: &Cand, generations: usize, pop: usize, seed: u64, monic: bool) -> Vec<Cand> {
+pub fn evolve_with(
+    n: &BigInt,
+    d: usize,
+    start: &Cand,
+    generations: usize,
+    pop: usize,
+    seed: u64,
+    monic: bool,
+) -> Vec<Cand> {
     // in monic mode, fitness is the teaching sieve's own estimate (norm bits over its
     // unskewed rectangle plus alpha, lower is better), since that is the region it sieves
     let fitness = |mut c: Cand| -> Cand {
@@ -318,7 +354,9 @@ pub fn evolve_with(n: &BigInt, d: usize, start: &Cand, generations: usize, pop: 
         }
         c
     };
-    let score = |n: &BigInt, d: usize, ad: i64, dm: i64, j: i64, k: i64| score(n, d, ad, dm, j, k).map(fitness);
+    let score = |n: &BigInt, d: usize, ad: i64, dm: i64, j: i64, k: i64| {
+        score(n, d, ad, dm, j, k).map(fitness)
+    };
     let start = &fitness(start.clone());
     let mut rng = seed | 1;
     let mut next = move || {
@@ -330,7 +368,11 @@ pub fn evolve_with(n: &BigInt, d: usize, start: &Cand, generations: usize, pop: 
     let mut population: Vec<Cand> = vec![start.clone()];
     let admax = 10_000i64;
     while population.len() < pop {
-        let (ad, dm) = if monic { (1, (next() % 200_001) as i64 - 100_000) } else { (1 + (next() % admax as u64) as i64, 0) };
+        let (ad, dm) = if monic {
+            (1, (next() % 200_001) as i64 - 100_000)
+        } else {
+            (1 + (next() % admax as u64) as i64, 0)
+        };
         if let Some(c) = score(n, d, ad, dm, 0, 0) {
             population.push(c);
         }

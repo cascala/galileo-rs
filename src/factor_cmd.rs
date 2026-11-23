@@ -30,6 +30,7 @@ fn report(kind: &'static str, text: String, markdown: String, formulas: Vec<Expr
         vars: vec![],
         order: 0,
         target: 0,
+        value: None,
     })))
 }
 
@@ -391,7 +392,7 @@ impl Session {
                 let splits = af::factor_zpoly(&p)
                     .is_some_and(|(_, fs)| fs.iter().map(|(_, m)| *m).sum::<u32>() >= 2);
                 let added = af::add_family(&show(&x), p);
-                Ok(Expr::Str(match (added, splits) {
+                self.note(match (added, splits) {
                     (false, _) => "already in the list".into(),
                     (true, true) => {
                         format!("added {}; algfactor now tries it on every number", show(&v))
@@ -400,7 +401,8 @@ impl Session {
                         "added {}; note that it does not factor over the integers, so it can recognize a number but not split it",
                         show(&v)
                     ),
-                }))
+                });
+                Ok(Expr::Bool(added))
             })(),
             "families" => (|| {
                 let (nb, all) = af::families();
@@ -419,7 +421,15 @@ impl Session {
                     md.push(format!("* {}{}", name, tag));
                     tx.push(format!("  {}{}", name, tag));
                 }
-                Ok(report("Families", tx.join("\n"), md.join("\n"), vec![]))
+                let value = Expr::Matrix(
+                    all.iter()
+                        .map(|(_, f)| vec![crate::eval::value_of(&af::show_zpoly(f, "x"))])
+                        .collect(),
+                );
+                Ok(crate::discover::with_value(
+                    report("Families", tx.join("\n"), md.join("\n"), vec![]),
+                    value,
+                ))
             })(),
             "algfactor" => self.algfactor_cmd(args),
             "factorsearch" => self.factorsearch_cmd(args),
@@ -730,8 +740,11 @@ impl Session {
         let mut tx = vec![head_tx];
         let (mut nprime, mut ncomp, mut compdig) = (0, 0, 0);
         let mut formulas = vec![];
+        let mut allf: Vec<BigInt> = vec![];
         for p in &pieces {
             let (ps, cs) = af::factor_partial_known(&p.value, p.d);
+            allf.extend(ps.iter().cloned());
+            allf.extend(cs.iter().cloned());
             nprime += ps.len();
             ncomp += cs.len();
             compdig += cs.iter().map(digits).sum::<usize>();
@@ -807,11 +820,13 @@ impl Session {
         md.push(String::new());
         md.push(summary.clone());
         tx.push(summary);
-        Ok(report(
-            "Algebraic factors",
-            tx.join("\n"),
-            md.join("\n"),
-            formulas,
+        allf.sort();
+        md.push(String::new());
+        md.push("The value lists the factors found (primes, and any composite part left), smallest first; r[k] is piece k.".into());
+        let value = Expr::Matrix(vec![allf.into_iter().map(bnum).collect()]);
+        Ok(crate::discover::with_value(
+            report("Algebraic factors", tx.join("\n"), md.join("\n"), formulas),
+            value,
         ))
     }
 

@@ -35,6 +35,36 @@ pub struct Report {
     pub vars: Vec<String>,
     pub order: usize,
     pub target: usize,
+    /// what the result shows (plain Galileo); None: the formulas
+    pub value: Option<Expr>,
+}
+
+/// the same report showing `v` as its value
+pub fn with_value(e: Expr, v: Expr) -> Expr {
+    if let Expr::Obj(o) = &e {
+        if let Obj::Report(r) = &**o {
+            let mut r = r.clone();
+            r.value = Some(v);
+            return Expr::Obj(Rc::new(Obj::Report(r)));
+        }
+    }
+    e
+}
+
+impl Report {
+    /// The value a report shows: its own, else its formulas (one, or a column)
+    pub fn shown_value(&self) -> Option<Expr> {
+        if let Some(v) = &self.value {
+            return Some(v.clone());
+        }
+        match self.formulas.len() {
+            0 => None,
+            1 => Some(self.formulas[0].clone()),
+            _ => Some(Expr::Matrix(
+                self.formulas.iter().map(|f| vec![f.clone()]).collect(),
+            )),
+        }
+    }
 }
 
 fn report(r: Report) -> Expr {
@@ -1197,6 +1227,7 @@ impl Session {
             vars: t.names.clone(),
             order: t.order,
             target: t.target_col,
+            value: None,
         }))
     }
 
@@ -1390,6 +1421,7 @@ impl Session {
             vars: t.names.clone(),
             order: t.order,
             target: t.target_col,
+            value: None,
         }))
     }
 }
@@ -1825,6 +1857,7 @@ impl Session {
             vars: vec![],
             order: 0,
             target: 0,
+            value: Some(Expr::Bool(proved)),
         }))
     }
 }
@@ -2172,9 +2205,24 @@ impl Session {
 mod tests {
     use crate::eval::Session;
 
+    /// values, with a report replaced by its plain text
     fn run(src: &str) -> String {
-        let mut s = Session::new();
-        s.run_to_string(src)
+        run_in(&mut Session::new(), src)
+    }
+
+    fn run_in(s: &mut Session, src: &str) -> String {
+        s.run(src)
+            .into_iter()
+            .map(|r| match r {
+                Ok(crate::eval::Output::Value(crate::expr::Expr::Obj(o))) => match &*o {
+                    crate::expr::Obj::Report(r) => r.text.clone(),
+                    _ => o.text(),
+                },
+                Ok(o) => o.render(),
+                Err(e) => format!("Error: {}", e),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]
@@ -2191,7 +2239,8 @@ mod tests {
         let mut s = Session::new();
         s.run_to_string("a = [0.387; 0.723; 1; 1.524; 5.203; 9.537]; T = [0.2408; 0.6152; 1; 1.881; 11.86; 29.46]");
         // centripetal acceleration 4 pi^2 a / T^2 of exact Kepler data
-        let out = s.run_to_string(
+        let out = run_in(
+            &mut s,
             "d = [1 39.4784176; 2 9.8696044; 4 2.4674011; 0.5 157.9136704]\ndiscover(d, [r g])",
         );
         let best = out.lines().find(|l| l.starts_with('*')).unwrap();

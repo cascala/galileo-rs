@@ -51,10 +51,11 @@ pub fn bundle(e: &Expr) -> Option<Bundle> {
                 ("text/latex", q.latex()),
                 ("text/markdown", q.markdown()),
             ],
-            Obj::Report(r) => vec![
-                ("text/plain", r.text.clone()),
-                ("text/markdown", r.markdown.clone()),
-            ],
+            // the text of a report is its explanation (a note); it shows its value
+            Obj::Report(r) => {
+                let v = r.shown_value()?;
+                return bundle(&v).or_else(|| Some(vec![("text/plain", show(&v))]));
+            }
         }),
         _ if typeset(e) => Some(vec![
             ("text/plain", show(e)),
@@ -72,6 +73,13 @@ pub enum Shown {
 }
 
 pub fn shown(o: &Output) -> Shown {
+    if let Output::Value(Expr::Obj(ob)) = o {
+        if let Obj::Report(r) = &**ob {
+            if r.shown_value().is_none() {
+                return Shown::Nothing;
+            }
+        }
+    }
     match o {
         Output::Value(e) => match bundle(e) {
             Some(b) => Shown::Rich(b),

@@ -1177,6 +1177,23 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
         })
         .filter(|d: &Vec<usize>| !d.is_empty())
         .collect();
+    // The basis the elimination returns can be lopsided: whether a set gives a
+    // factor is a +-1 character of the set, and the first basis vectors often all
+    // have the same value. Random sums of basis vectors split half and half.
+    let basis = deps;
+    let mut rng = lab::Rng::new(0x5eed);
+    let deps: Vec<Vec<usize>> = (0..basis.len())
+        .map(|t| {
+            let mut d = basis[t].clone();
+            for (u, b) in basis.iter().enumerate() {
+                if u != t && rng.below(2) == 1 {
+                    d = symdiff(&d, b);
+                }
+            }
+            d
+        })
+        .filter(|d| !d.is_empty())
+        .collect();
     log.push(format!("    linear algebra mod 2: {} dependencies (subsets whose product is a square on both sides)", deps.len()) + &at(&clock));
     // 6. square roots
     let fpm = af::peval(&deriv(&f), &m).mod_floor(n);

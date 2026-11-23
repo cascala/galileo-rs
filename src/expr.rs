@@ -141,7 +141,10 @@ impl Obj {
             Obj::Metric(m) => m.text(),
             Obj::Components(c) => c.text(),
             Obj::Equations(e) => e.text(),
-            Obj::Report(r) => r.text.clone(),
+            Obj::Report(r) => r
+                .shown_value()
+                .map(|v| crate::print::show(&v))
+                .unwrap_or_default(),
         }
     }
 }

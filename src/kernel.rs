@@ -12,7 +12,7 @@
 //! Each reply is one line of JSON. `cursor` counts characters (Unicode code points).
 
 use crate::display::{Bundle, Shown, shown};
-use crate::eval::Session;
+use crate::eval::{Session, comment_notes, markdown_notes};
 use crate::help;
 use crate::plot::jstr;
 use std::io::{BufRead, Read, Write};
@@ -25,11 +25,14 @@ fn bundle_json(b: &Bundle) -> String {
     format!("{{{}}}", fields.join(","))
 }
 
-/// Run a cell: {"outputs": [{"text": ...} | {"data": {mime: content}}], "error": null | {...}}
+/// Run a cell: {"outputs": [{"text": ...} | {"data": {mime: content}} | {"data": ..., "notes": true}], "error": null | {...}}
+///
+/// A result is plain Galileo; its explanation, when `explain` is on, follows it as a
+/// separate output marked `"notes": true` (Markdown, and `//` comments as plain text).
 pub fn execute(s: &mut Session, code: &str) -> String {
     let mut outputs = vec![];
     let mut error = "null".to_string();
-    for (r, quiet) in s.run_quiet(code) {
+    for (r, quiet, notes) in s.run_notes(code) {
         match r {
             Ok(o) => {
                 if quiet {
@@ -39,6 +42,23 @@ pub fn execute(s: &mut Session, code: &str) -> String {
                     Shown::Rich(b) => outputs.push(format!("{{\"data\":{}}}", bundle_json(&b))),
                     Shown::Text(t) => outputs.push(format!("{{\"text\":{}}}", jstr(&t))),
                     Shown::Nothing => {}
+                }
+                if !notes.is_empty() {
+                    // a block quote, so notebooks (and GitHub) set notes apart from results
+                    let md = markdown_notes(&notes)
+                        .lines()
+                        .map(|l| {
+                            if l.is_empty() {
+                                ">".to_string()
+                            } else {
+                                format!("> {}", l)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let b: Bundle =
+                        vec![("text/plain", comment_notes(&notes)), ("text/markdown", md)];
+                    outputs.push(format!("{{\"data\":{},\"notes\":true}}", bundle_json(&b)));
                 }
             }
             Err(e) => {

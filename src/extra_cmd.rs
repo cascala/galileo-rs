@@ -2267,7 +2267,7 @@ fn snap(v: f64) -> Expr {
 mod tests {
     use crate::Session;
     fn run(s: &str) -> String {
-        Session::new().run_to_string(s)
+        Session::new().run_values(s)
     }
     #[test]
     fn number_theory() {

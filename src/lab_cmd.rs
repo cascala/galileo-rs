@@ -1,7 +1,7 @@
 //! Galileo commands for the factoring lab: semiprime, semifactors, labrun,
 //! scoreboard, scoreplot, algosearch, leaderboard, leakhunt.
 
-use crate::discover::Report;
+use crate::discover::{Report, with_value};
 use crate::eval::{R, Session};
 use crate::expr::{Expr, Obj};
 use crate::extra_cmd::{big_of, bnum};
@@ -32,6 +32,7 @@ fn report(
         vars,
         order: 0,
         target: 0,
+        value: None,
     })))
 }
 
@@ -263,8 +264,21 @@ impl Session {
         };
         let text = format!("{}\n{}", head, run.log.join("\n"));
         let md = format!("{}\n\n```\n{}\n```", head, run.log.join("\n"));
-        let formulas = run.factor.iter().map(|f| bnum(f.clone())).collect();
-        Ok(report("NFS", text, md, formulas, vec![]))
+        let formulas: Vec<Expr> = run.factor.iter().map(|f| bnum(f.clone())).collect();
+        // the value: both factors, smaller first ([] when none)
+        let value = match &run.factor {
+            Some(f) => {
+                let g = &n / f;
+                let (a, b) = if f < &g {
+                    (f.clone(), g)
+                } else {
+                    (g, f.clone())
+                };
+                Expr::Matrix(vec![vec![bnum(a), bnum(b)]])
+            }
+            None => Expr::Matrix(vec![]),
+        };
+        Ok(with_value(report("NFS", text, md, formulas, vec![]), value))
     }
 
     fn nfspoly(&mut self, args: &[Node]) -> R<Expr> {
@@ -308,20 +322,36 @@ impl Session {
                 c.m,
                 c.how
             ));
-            formulas.push(Expr::Matrix(vec![
-                c.f.iter().map(|x| bnum(x.clone())).collect(),
-            ]));
+            formulas.push(Expr::Matrix(vec![vec![
+                crate::eval::value_of(&fs),
+                bnum(c.m.clone()),
+                Expr::float((c.score() * 10.0).round() / 10.0),
+            ]]));
         }
         let note = "score = estimated bits of the rational plus algebraic norm over a typical sieve region, plus Murphy's alpha (in bits); lower sieves faster".to_string();
         md.push(String::new());
         md.push(note.clone());
         tx.push(note);
-        Ok(report(
-            "NFS polynomials",
-            tx.join("\n"),
-            md.join("\n"),
-            formulas,
-            vec![],
+        let value = Expr::Matrix(
+            formulas
+                .iter()
+                .filter_map(|f| match f {
+                    Expr::Matrix(m) => m.first().cloned(),
+                    _ => None,
+                })
+                .collect(),
+        );
+        md.push(String::new());
+        md.push("The value has one row per polynomial: f(x), m and the score; `gnfs(N, r(1, 1), r(1, 2))` sieves with the first.".into());
+        Ok(with_value(
+            report(
+                "NFS polynomials",
+                tx.join("\n"),
+                md.join("\n"),
+                formulas,
+                vec![],
+            ),
+            value,
         ))
     }
 
@@ -361,7 +391,10 @@ impl Session {
                     fmt_units(w),
                     fmt_secs(t)
                 );
-                Ok(report("LabRun", text.clone(), text, vec![], vec![]))
+                Ok(with_value(
+                    report("LabRun", text.clone(), text, vec![], vec![]),
+                    Expr::Matrix(vec![]),
+                ))
             }
         }
     }
@@ -532,7 +565,25 @@ impl Session {
         md.push_str(&fits_md);
         text.push('\n');
         text.push_str(&fits_md.replace('`', ""));
-        Ok(report("Scoreboard", text, md, formulas, names))
+        // the value: one row per method and size: method, digits, solved, trials, cost
+        let mut value = vec![];
+        for (name, f) in names.iter().zip(&formulas) {
+            if let Expr::Matrix(rows) = f {
+                for r in rows {
+                    let mut row = vec![Expr::Str(name.clone())];
+                    row.push(r[0].clone());
+                    row.push(r[1].clone());
+                    row.push(Expr::int(trials as i128));
+                    row.push(r[2].clone());
+                    value.push(row);
+                }
+            }
+        }
+        md.push_str("\nThe value has one row per method and size: method, digits, solved, trials, cost (seconds, or work units in the browser).");
+        Ok(with_value(
+            report("Scoreboard", text, md, formulas, names),
+            Expr::Matrix(value),
+        ))
     }
 
     fn scoreplot(&mut self, args: &[Node]) -> R<Expr> {
@@ -910,7 +961,25 @@ impl Session {
             }
             md.push_str("Before calling this a leak, check whether it only reflects the size of N (p is the smaller factor; with few digits, p ranges over a short interval and its bits depend on its size) and repeat with another seed and more digits.");
         }
-        Ok(report("LeakHunt", text, md, vec![], vec![]))
+        // the value: the significant (feature, property) pairs with corrected and held-out p-values
+        let value: Vec<Vec<Expr>> = h
+            .hits
+            .iter()
+            .filter(|x| x.q_bh < 0.05)
+            .map(|x| {
+                vec![
+                    Expr::Str(h.features[x.feature].name.clone()),
+                    Expr::Str(lableak::TARGETS[x.target].0.to_string()),
+                    Expr::float(x.q_bh),
+                    Expr::float(x.p_test),
+                ]
+            })
+            .collect();
+        md.push_str("\n\nThe value lists the significant pairs: feature, property of p, corrected p-value, held-out p-value.");
+        Ok(with_value(
+            report("LeakHunt", text, md, vec![], vec![]),
+            Expr::Matrix(value),
+        ))
     }
 }
 
