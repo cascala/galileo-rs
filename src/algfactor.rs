@@ -1457,6 +1457,12 @@ pub fn divisor_pieces(n: &BigInt, b: u64, k: u64, plus: bool) -> Vec<Piece> {
 
 /// an integer x with f(x) = t, for large t (Newton's method from the t^(1/d) estimate, both signs)
 pub fn int_root(f: &[BigInt], t: &BigInt) -> Option<BigInt> {
+    int_root_from(f, t, None)
+}
+
+/// int_root starting Newton from est (the d-th root of t/lc, shared by every
+/// family with the same degree and leading coefficient)
+pub fn int_root_from(f: &[BigInt], t: &BigInt, est: Option<&BigInt>) -> Option<BigInt> {
     let f = trim(f.to_vec());
     let d = deg(&f);
     if d == 0 {
@@ -1464,7 +1470,10 @@ pub fn int_root(f: &[BigInt], t: &BigInt) -> Option<BigInt> {
     }
     let lc = f.last().unwrap().clone();
     let df = pderiv(&f);
-    let est = (t.abs() / lc.abs()).nth_root(d as u32);
+    let est = match est {
+        Some(e) => e.clone(),
+        None => (t.abs() / lc.abs()).nth_root(d as u32),
+    };
     for sign in [1i32, -1] {
         let mut x = &est * sign;
         for _ in 0..300 {
@@ -1667,15 +1676,116 @@ pub fn families() -> (usize, Vec<(String, ZPoly)>) {
 
 /// the first catalogued family with n = f(x) for a whole number x (|x| >= 2)
 pub fn catalogue_match(n: &BigInt) -> Option<(String, ZPoly, BigInt)> {
-    let (_, all) = families();
-    for (name, f) in all {
-        if let Some(x) = int_root(&f, n) {
+    let fams = prepared_families();
+    let res = Residues::new(n);
+    let mut roots = RootCache::default();
+    for fam in &fams {
+        if !fam.may_hit(&res, 1) {
+            continue;
+        }
+        let est = roots.get(n, fam.d, &fam.f[fam.d]);
+        if let Some(x) = int_root_from(&fam.f, n, Some(&est)) {
             if x.abs() >= BigInt::from(2) {
-                return Some((name, f, x));
+                return Some((fam.name.clone(), fam.f.clone(), x));
             }
         }
     }
     None
+}
+
+/// small moduli for the residue filter (all at most 64, so a residue set is a u64 mask)
+const PRUNE_MODULI: [u64; 16] = [64, 27, 25, 49, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53];
+
+/// n reduced by each pruning modulus
+pub struct Residues(Vec<u64>);
+
+impl Residues {
+    pub fn new(n: &BigInt) -> Residues {
+        Residues(PRUNE_MODULI.iter().map(|&m| n.mod_floor(&BigInt::from(m)).to_u64().unwrap()).collect())
+    }
+}
+
+/// A family prepared for fast rejection: for each modulus m and each y mod m,
+/// the set of values F(x, y) mod m over all x, as a bit mask. If n mod m is not
+/// in the set for the y being tried, no x can give F(x, y) = n, and the family
+/// is skipped without any big-number arithmetic.
+pub struct Prepared {
+    pub name: String,
+    pub f: ZPoly,
+    pub d: usize,
+    masks: Vec<Vec<u64>>,
+}
+
+impl Prepared {
+    fn new(name: String, f: ZPoly) -> Prepared {
+        let f = trim(f);
+        let d = f.len() - 1;
+        let masks = PRUNE_MODULI
+            .iter()
+            .map(|&m| {
+                let fm: Vec<u64> = f.iter().map(|c| c.mod_floor(&BigInt::from(m)).to_u64().unwrap()).collect();
+                (0..m)
+                    .map(|y| {
+                        // coefficients of F(x, y) = sum c_i x^i y^(d-i) mod m
+                        let mut ypow = vec![1u64; d + 1];
+                        for k in 1..=d {
+                            ypow[k] = ypow[k - 1] * y % m;
+                        }
+                        let cs: Vec<u64> = (0..=d).map(|i| fm[i] * ypow[d - i] % m).collect();
+                        let mut mask = 0u64;
+                        for x in 0..m {
+                            let mut v = 0u64;
+                            for c in cs.iter().rev() {
+                                v = (v * x + c) % m;
+                            }
+                            mask |= 1 << v;
+                        }
+                        mask
+                    })
+                    .collect()
+            })
+            .collect();
+        Prepared { name, f, d, masks }
+    }
+
+    /// false when some modulus proves F(x, y) = n has no whole-number solution x
+    pub fn may_hit(&self, res: &Residues, y: u64) -> bool {
+        PRUNE_MODULI.iter().zip(&self.masks).zip(&res.0).all(|((&m, mk), &r)| mk[(y % m) as usize] >> r & 1 == 1)
+    }
+}
+
+/// one d-th root of n/lc per (degree, leading coefficient), shared by all families and all y
+#[derive(Default)]
+pub struct RootCache(std::collections::HashMap<(usize, BigInt), BigInt>);
+
+impl RootCache {
+    pub fn get(&mut self, n: &BigInt, d: usize, lc: &BigInt) -> BigInt {
+        self.0.entry((d, lc.clone())).or_insert_with(|| (n.abs() / lc.abs()).nth_root(d as u32)).clone()
+    }
+}
+
+thread_local! {
+    static PREPARED: std::cell::RefCell<Vec<std::rc::Rc<Prepared>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// the families of families(), each prepared once (masks are cached across calls)
+pub fn prepared_families() -> Vec<std::rc::Rc<Prepared>> {
+    let (_, all) = families();
+    PREPARED.with(|p| {
+        let mut p = p.borrow_mut();
+        let out: Vec<_> = all
+            .into_iter()
+            .map(|(name, f)| match p.iter().find(|q| q.name == name && q.f == trim(f.clone())) {
+                Some(q) => q.clone(),
+                None => {
+                    let q = std::rc::Rc::new(Prepared::new(name, f));
+                    p.push(q.clone());
+                    q
+                }
+            })
+            .collect();
+        out
+    })
 }
 
 /// the homogeneous form y^d f(x/y) as a polynomial in x for a fixed y
@@ -1723,16 +1833,21 @@ pub fn show_hzpoly(p: &[BigInt], x: &str, y: &str) -> String {
 /// we look for a whole number x with F(x, y) = n and gcd(x, y) = 1.
 /// Returns the family's name, f, x and y.
 pub fn catalogue_match2(n: &BigInt, effort: u64) -> Option<(String, ZPoly, BigInt, BigInt)> {
-    let (_, all) = families();
-    let all: Vec<_> = all.into_iter().filter(|(_, f)| f.len() >= 3 && !f[0].is_zero()).collect();
+    let fams: Vec<_> = prepared_families().into_iter().filter(|q| q.d >= 2 && !q.f[0].is_zero()).collect();
+    let res = Residues::new(n);
+    let mut roots = RootCache::default();
     let ymax = (50 * effort).min(100_000);
     for yy in 2..=ymax {
         let y = BigInt::from(yy);
-        for (name, f) in &all {
-            let fy = homogenize(f, &y);
-            if let Some(x) = int_root(&fy, n) {
+        for fam in &fams {
+            if !fam.may_hit(&res, yy) {
+                continue;
+            }
+            let est = roots.get(n, fam.d, &fam.f[fam.d]);
+            let fy = homogenize(&fam.f, &y);
+            if let Some(x) = int_root_from(&fy, n, Some(&est)) {
                 if x.abs() >= BigInt::from(2) && crate::numtheory::gcd(&x, &y).is_one() {
-                    return Some((name.clone(), f.clone(), x, y));
+                    return Some((fam.name.clone(), fam.f.clone(), x, y));
                 }
             }
         }
