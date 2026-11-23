@@ -1222,7 +1222,8 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
     let unit_budget = seconds * 3.0e6;
     let mut units = 0.0;
     let mut rng = Rng::new(seed);
-    let mut seen: HashSet<String> = HashSet::new();
+    // hashes of the program texts tried (a hash, not the text, so long runs stay small)
+    let mut seen: HashSet<u64> = HashSet::new();
     let mut evaluated = 0;
     let mut scored: Vec<Entry> = vec![];
     let done = |units: f64| -> bool {
@@ -1232,10 +1233,16 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         }
     };
     let mut prints: HashSet<u64> = HashSet::new();
-    let mut eval = |p: Prog, by: &str, scored: &mut Vec<Entry>, seen: &mut HashSet<String>, units: &mut f64| -> bool {
+    let mut eval = |p: Prog, by: &str, scored: &mut Vec<Entry>, seen: &mut HashSet<u64>, units: &mut f64| -> bool {
         let p = simplify_prog(&p);
         let text = p.to_string();
-        if !seen.insert(text) {
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut h);
+            h.finish()
+        };
+        if !seen.insert(key) {
             return false;
         }
         if !prints.insert(fingerprint(&p)) {
@@ -1248,6 +1255,11 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         let e = Entry { prog: p, score: s, found_by: by.to_string(), test: None, held: None, sizes: sizes_label.clone() };
         if e.score.solved > 0 {
             post(e.clone());
+        }
+        if scored.len() > 4000 {
+            // keep only the best, so long runs do not fill the memory
+            scored.sort_by(|a, b| a.score.score.partial_cmp(&b.score.score).unwrap());
+            scored.truncate(500);
         }
         scored.push(e);
         true
