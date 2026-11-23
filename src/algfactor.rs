@@ -1103,7 +1103,7 @@ pub fn factor_partial_known(n: &BigInt, d: u64) -> (Vec<BigInt>, Vec<BigInt>) {
 /// one factor of a composite m whose prime factors are 1 (mod d)
 fn split_known(m: &BigInt, d: u64) -> Option<BigInt> {
     if d <= 2 {
-        return nt::pollard_pm1(m).or_else(|| nt::pollard_rho(m));
+        return nt::pollard_pm1(m).or_else(|| nt::pollard_rho(m)).or_else(|| ecm_effort(m));
     }
     // p odd and p = 1 (mod d) give p = 1 (mod 2d) when d is odd. Only p - 1
     // uses it: it gets d into its exponent for free, which matters when d has a
@@ -1112,7 +1112,16 @@ fn split_known(m: &BigInt, d: u64) -> Option<BigInt> {
     // measured no faster for the d of the Cunningham numbers (Brent and Pollard's
     // x^1024 + 1 for 2^256 + 1 is the case where it pays).
     let k = if d % 2 == 1 { 2 * d } else { d };
-    nt::pollard_pm1_with(m, k).or_else(|| nt::pollard_rho(m))
+    nt::pollard_pm1_with(m, k).or_else(|| nt::pollard_rho(m)).or_else(|| ecm_effort(m))
+}
+
+/// Lenstra's ECM after rho has failed: 4*effort curves, with B1 growing with
+/// effort (2000, then 11000 from effort 5, 50000 from effort 50). Rho finds
+/// factors of up to about 15 digits; ECM reaches 20 and more.
+fn ecm_effort(m: &BigInt) -> Option<BigInt> {
+    let e = nt::effort();
+    let b1 = if e >= 50 { 50_000 } else if e >= 5 { 11_000 } else { 2_000 };
+    crate::groups::ecm(m, 4 * e.min(10_000), b1).map(|(p, _)| p)
 }
 
 // ---------- polynomials in several variables ----------
