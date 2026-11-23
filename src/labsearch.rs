@@ -995,6 +995,10 @@ pub struct Entry {
     pub found_by: String,
     /// the score on the held-out set, when it was checked
     pub test: Option<Score>,
+    /// held-out comparison with rho: (times less work, p-value)
+    pub held: Option<(f64, f64)>,
+    /// the training sizes, e.g. "12-18"
+    pub sizes: String,
 }
 
 thread_local! {
@@ -1013,15 +1017,21 @@ fn post(e: Entry) {
     BOARD.with(|b| {
         let mut b = b.borrow_mut();
         let text = e.prog.to_string();
-        if let Some(old) = b.iter_mut().find(|o| o.prog.to_string() == text) {
+        if let Some(old) = b.iter_mut().find(|o| o.prog.to_string() == text && o.sizes == e.sizes) {
             if e.score.score < old.score.score || (e.test.is_some() && old.test.is_none()) {
                 *old = e;
             }
         } else {
             b.push(e);
         }
-        b.sort_by(|a, c| a.score.score.partial_cmp(&c.score.score).unwrap());
-        b.truncate(30);
+        // checked programs first, by how much less work than rho they need on new numbers
+        b.sort_by(|a, c| match (a.held, c.held) {
+            (Some(x), Some(y)) => y.0.partial_cmp(&x.0).unwrap(),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.score.score.partial_cmp(&c.score.score).unwrap(),
+        });
+        b.truncate(40);
     });
 }
 
@@ -1034,6 +1044,12 @@ pub struct SearchResult {
     pub seconds: Option<f64>,
     /// Pollard rho on the held-out set, for comparison
     pub rho_test: Score,
+    pub train_sizes: Vec<u32>,
+    pub test_sizes: Vec<u32>,
+    pub train_count: usize,
+    pub test_count: usize,
+    /// whether the classics were put into the first population
+    pub seeded: bool,
 }
 
 /// geometric-mean work ratio of b over a on the same set: how many times
@@ -1063,7 +1079,25 @@ pub fn paired(a: &Score, b: &Score) -> (f64, f64) {
 /// brute-force enumeration of small programs ("exhaustive"), for about
 /// `seconds` (in the browser: an equivalent amount of work).
 pub fn search(mode: &str, seconds: f64, seed: u64) -> SearchResult {
-    let t = TrainSet::new(1);
+    search_with(mode, seconds, seed, &TRAIN)
+}
+
+/// The same with chosen training sizes (digits). Every candidate first has to
+/// solve three 12-digit numbers, so hopeless programs cost little even when
+/// the training numbers are big; the held-out sizes are the training sizes + 2.
+pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> SearchResult {
+    let default = sizes == TRAIN;
+    let t = if default {
+        TrainSet::new(1)
+    } else {
+        let mut t = TrainSet::with(1, &[12], PER_SIZE);
+        t.cases.extend(TrainSet::with(1, sizes, PER_SIZE).cases.into_iter().filter(|c| c.0 != 12));
+        t
+    };
+    let test_sizes: Vec<u32> = if default { TEST.to_vec() } else { sizes.iter().map(|d| d + 2).collect() };
+    let train_sizes: Vec<u32> = t.cases.iter().map(|c| c.0).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    let sizes_label = format!("{}-{}", train_sizes[0], train_sizes.last().unwrap());
+    let seeded = !default && sizes.iter().copied().max().unwrap_or(0) > 20;
     let clock = lab::Clock::start();
     let unit_budget = seconds * 3.0e6;
     let mut units = 0.0;
@@ -1091,7 +1125,7 @@ pub fn search(mode: &str, seconds: f64, seed: u64) -> SearchResult {
         let s = score(&p, &t);
         *units += s.runs.iter().map(|r| r.1).sum::<f64>() + (s.total - s.solved) as f64 * 1000.0;
         evaluated += 1;
-        let e = Entry { prog: p, score: s, found_by: by.to_string(), test: None };
+        let e = Entry { prog: p, score: s, found_by: by.to_string(), test: None, held: None, sizes: sizes_label.clone() };
         if e.score.solved > 0 {
             post(e.clone());
         }
@@ -1102,27 +1136,40 @@ pub fn search(mode: &str, seconds: f64, seed: u64) -> SearchResult {
         .iter()
         .map(|(name, text)| {
             let p = parse_prog(text).unwrap();
-            (name.to_string(), Entry { score: score(&p, &t), prog: p, found_by: "classic".into(), test: None })
+            (name.to_string(), Entry { score: score(&p, &t), prog: p, found_by: "classic".into(), test: None, held: None, sizes: sizes_label.clone() })
         })
         .collect();
     match mode {
         "exhaustive" => {
-            'outer: for sz in 1..=6 {
-                for f in trees(sz, true) {
+            let small_iter: Vec<Vec<E>> = (0..=5).map(|k| trees(k, true)).collect();
+            let small_rel: Vec<Vec<E>> = (0..=5).map(|k| trees(k, false)).collect();
+            'outer: for sz in 1..=9 {
+                let mut go = true;
+                each_tree(sz, &small_iter, &mut |f| {
                     for h in [E::Sub(Box::new(E::X), Box::new(E::Y)), E::Sub(Box::new(E::X), Box::new(E::C(1)))] {
                         eval(Prog::Iter { f: f.clone(), h, x0: E::C(2) }, "exhaustive", &mut scored, &mut seen, &mut units);
                         if done(units) {
-                            break 'outer;
+                            go = false;
+                            return false;
                         }
                     }
+                    true
+                });
+                if !go {
+                    break 'outer;
                 }
-                for s in trees(sz, false) {
-                    for fb in [0, 64] {
+                each_tree(sz, &small_rel, &mut |s| {
+                    for fb in [0, 64, 256] {
                         eval(Prog::Rel { s: s.clone(), fb }, "exhaustive", &mut scored, &mut seen, &mut units);
                         if done(units) {
-                            break 'outer;
+                            go = false;
+                            return false;
                         }
                     }
+                    true
+                });
+                if !go {
+                    break 'outer;
                 }
             }
         }
@@ -1136,6 +1183,14 @@ pub fn search(mode: &str, seconds: f64, seed: u64) -> SearchResult {
             // has to find things on its own)
             let pop_size = 40;
             let mut pop: Vec<Entry> = vec![];
+            if seeded {
+                // on big numbers random programs almost never solve anything, so start from the classics
+                for (_, c) in &classics {
+                    if eval(c.prog.clone(), "evolve", &mut scored, &mut seen, &mut units) {
+                        pop.push(scored.last().unwrap().clone());
+                    }
+                }
+            }
             while pop.len() < pop_size * 2 && !done(units) {
                 if eval(random_prog(&mut rng), "evolve", &mut scored, &mut seen, &mut units) {
                     pop.push(scored.last().unwrap().clone());
@@ -1182,15 +1237,64 @@ pub fn search(mode: &str, seconds: f64, seed: u64) -> SearchResult {
     scored.truncate(10);
     let seconds = clock.seconds();
     // check the best ones on numbers the search never saw
-    let test = TrainSet::test();
+    let test = if default { TrainSet::test() } else { TrainSet::with(1_000_001, &test_sizes, TEST_PER_SIZE) };
+    let rho_test = score(&parse_prog(CLASSICS[0].1).unwrap(), &test);
     for e in scored.iter_mut().take(5) {
         if e.score.solved > 0 {
-            e.test = Some(score(&e.prog, &test));
+            let ts = score(&e.prog, &test);
+            e.held = Some((speedup(&ts, &rho_test), paired(&ts, &rho_test).1));
+            e.test = Some(ts);
             post(e.clone());
         }
     }
-    let rho_test = score(&parse_prog(CLASSICS[0].1).unwrap(), &test);
-    SearchResult { evaluated, distinct, best: scored, classics, units, seconds, rho_test }
+    let (train_count, test_count) = (t.cases.len(), test.cases.len());
+    SearchResult { evaluated, distinct, best: scored, classics, units, seconds, rho_test, train_sizes, test_sizes, train_count, test_count, seeded }
+}
+
+/// calls f on every expression with exactly `size` nodes, using the stored
+/// lists for small sizes and building bigger ones on the fly; stops when f
+/// returns false (and then returns false)
+pub fn each_tree(size: usize, small: &[Vec<E>], f: &mut dyn FnMut(E) -> bool) -> bool {
+    if size < small.len() {
+        for e in &small[size] {
+            if !f(e.clone()) {
+                return false;
+            }
+        }
+        return true;
+    }
+    let ok = each_tree(size - 1, small, &mut |a| {
+        for u in [E::Pow(Box::new(a.clone()), 2), E::PowI(Box::new(a.clone())), E::Luc(Box::new(a.clone())), E::Inv(Box::new(a.clone()))] {
+            if !f(u) {
+                return false;
+            }
+        }
+        true
+    });
+    if !ok {
+        return false;
+    }
+    for l in 1..size - 1 {
+        let r = size - 1 - l;
+        let ok = each_tree(l, small, &mut |a| {
+            each_tree(r, small, &mut |b| {
+                for e in [
+                    E::Add(Box::new(a.clone()), Box::new(b.clone())),
+                    E::Sub(Box::new(a.clone()), Box::new(b.clone())),
+                    E::Mul(Box::new(a.clone()), Box::new(b.clone())),
+                ] {
+                    if !f(e) {
+                        return false;
+                    }
+                }
+                true
+            })
+        });
+        if !ok {
+            return false;
+        }
+    }
+    true
 }
 
 /// every expression with exactly `size` nodes over a small alphabet

@@ -360,8 +360,8 @@ impl Session {
     }
 
     fn algosearch(&mut self, args: &[Node]) -> R<Expr> {
-        if args.len() > 3 {
-            return Err("usage: algosearch(seconds, mode, seed) with mode \"evolve\", \"random\" or \"exhaustive\"".into());
+        if args.len() > 4 {
+            return Err("usage: algosearch(seconds, mode, seed, digits) with mode \"evolve\", \"random\" or \"exhaustive\" and digits the training sizes, e.g. [24 28 32]".into());
         }
         let secs = if !args.is_empty() { self.small_arg(&args[0], "algosearch", 0.1, 36000.0)? } else { 5.0 };
         let mode = if args.len() >= 2 {
@@ -372,8 +372,20 @@ impl Session {
         } else {
             "evolve".to_string()
         };
-        let seed = if args.len() == 3 { self.small_arg(&args[2], "algosearch", 0.0, 1e15)? as u64 } else { 1 };
-        let r = ls::search(&mode, secs, seed);
+        let seed = if args.len() >= 3 { self.small_arg(&args[2], "algosearch", 0.0, 1e15)? as u64 } else { 1 };
+        let sizes: Vec<u32> = if args.len() == 4 {
+            let v = self.eval(&args[3])?;
+            let xs: Vec<Expr> = match v {
+                Expr::Matrix(m) => m.into_iter().flatten().collect(),
+                o => vec![o],
+            };
+            xs.iter()
+                .map(|x| x.num().and_then(|n| n.as_int()).filter(|d| (10..=60).contains(d)).map(|d| d as u32).ok_or_else(|| "algosearch: training digits are whole numbers from 10 to 60".to_string()))
+                .collect::<R<_>>()?
+        } else {
+            ls::TRAIN.to_vec()
+        };
+        let r = ls::search_with(&mode, secs, seed, &sizes);
         let rho = &r.classics[0].1;
         let mut md = format!(
             "**Algorithm search** ({}, seed {}): {} programs scored, {} distinct candidates generated, {}.\n\n\
@@ -387,11 +399,14 @@ impl Session {
                 Some(s) => format!("{:.1} s", s),
                 None => format!("{} work units", fmt_units(r.units)),
             },
-            ls::TRAIN.len() * ls::PER_SIZE as usize,
-            ls::TRAIN.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
-            ls::TEST.len() * ls::TEST_PER_SIZE as usize,
-            ls::TEST.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
+            r.train_count,
+            r.train_sizes.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
+            r.test_count,
+            r.test_sizes.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
         );
+        if r.seeded {
+            md.push_str("On numbers this big random programs almost never solve anything, so the first population also holds the classics.\n\n");
+        }
         md.push_str("| program | solved (training) | work vs rho (training) | solved (held out) | work vs rho (held out) | p-value |\n|---|---|---|---|---|---|\n");
         let mut text = String::new();
         let mut formulas = vec![];
@@ -437,17 +452,15 @@ impl Session {
         if b.is_empty() {
             return Err("leaderboard: run algosearch first".into());
         }
-        let test = ls::TrainSet::test();
-        let rho = ls::score(&ls::parse_prog(ls::CLASSICS[0].1).unwrap(), &test);
-        let mut md = "**Leaderboard** of this session (best training score first; held-out = numbers no search trained on)\n\n| # | program | training score | held out vs rho | p-value | found by |\n|---|---|---|---|---|---|\n".to_string();
+        let mut md = "**Leaderboard** of this session (checked programs first, by how much less work than rho they need on numbers no search trained on)\n\n| # | program | training digits | training score | held out vs rho | p-value | found by |\n|---|---|---|---|---|---|---|\n".to_string();
         let mut text = String::new();
         let mut formulas = vec![];
         for (k, e) in b.iter().enumerate().take(15) {
-            let (held, p) = match &e.test {
-                Some(t) => (format!("{:.2}x less work", ls::speedup(t, &rho)), pval(ls::paired(t, &rho).1)),
+            let (held, p) = match e.held {
+                Some((x, p)) => (format!("{:.2}x less work", x), pval(p)),
                 None => ("-".into(), "-".into()),
             };
-            md.push_str(&format!("| {} | `{}` | {:.1} | {} | {} | {} |\n", k, e.prog, e.score.score, held, p, e.found_by));
+            md.push_str(&format!("| {} | `{}` | {} | {:.1} | {} | {} | {} |\n", k, e.prog, e.sizes, e.score.score, held, p, e.found_by));
             text.push_str(&format!("{:>2} {:<60} {:.1} {} p={}\n", k, e.prog.to_string(), e.score.score, held, p));
             formulas.push(Expr::Str(e.prog.to_string()));
         }
