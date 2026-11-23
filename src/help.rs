@@ -31,8 +31,8 @@ pub const ENTRIES: &[Entry] = &[
     e!(
         "explain",
         "Basics",
-        "explain = true, explain = false",
-        "Results are always plain Galileo values; with explain = true (the default) commands also add an explanation, shown apart from the result (as // comments in plain text). explain = false turns explanations off for the session; starting Galileo with the environment variable GALILEO_EXPLAIN=0 starts with them off. A trailing ; hides both.",
+        "explain = true, explain = \"teach\", explain = false",
+        "Results are always plain Galileo values; with explain = true (the default) commands also add a short explanation, shown apart from the result (as // comments in plain text). explain = \"teach\" gives longer explanations for learning: they walk through the method step by step with the numbers of this run, say why each step is needed and what to notice (gnfs, nfspoly and polyselect so far; other commands give their full help text). explain = false turns explanations off for the session. The environment variable GALILEO_EXPLAIN sets the start: 0 for off, teach for teaching. A trailing ; hides both.",
         "explain = false"
     ),
     e!(

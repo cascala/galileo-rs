@@ -262,8 +262,15 @@ impl Session {
                 fmt_secs(clock.seconds())
             ),
         };
-        let text = format!("{}\n{}", head, run.log.join("\n"));
-        let md = format!("{}\n\n```\n{}\n```", head, run.log.join("\n"));
+        let (text, md) = if self.teaching() {
+            let md = crate::teach::gnfs(&n, &run, &format!("{} work units", fmt_units(w)), &fmt_secs(clock.seconds()));
+            (crate::teach::plain(&md), md)
+        } else {
+            (
+                format!("{}\n{}", head, run.log.join("\n")),
+                format!("{}\n\n```\n{}\n```", head, run.log.join("\n")),
+            )
+        };
         let formulas: Vec<Expr> = run.factor.iter().map(|f| bnum(f.clone())).collect();
         // the value: both factors, smaller first ([] when none)
         let value = match &run.factor {
@@ -343,6 +350,12 @@ impl Session {
         );
         md.push(String::new());
         md.push("The value has one row per polynomial: f(x), m and the score; `gnfs(N, r(1, 1), r(1, 2))` sieves with the first.".into());
+        if self.teaching() {
+            let t = crate::teach::nfspoly(&n, &list);
+            md.push(String::new());
+            md.push(t.clone());
+            tx.push(crate::teach::plain(&t));
+        }
         Ok(with_value(
             report(
                 "NFS polynomials",

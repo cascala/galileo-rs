@@ -244,7 +244,7 @@ impl Session {
                 if !(3..=6).contains(&d) || !(1..=1000).contains(&gens) {
                     return Err("polyselect: d from 3 to 6, generations from 1 to 1000".into());
                 }
-                Ok(polyselect_report(&n, d, gens))
+                Ok(polyselect_report(&n, d, gens, self.teaching()))
             })(),
             "reduceform" => (|| {
                 let [a] = args else {
@@ -395,7 +395,7 @@ fn poly_text(f: &[BigInt]) -> String {
 }
 
 /// the polyselect report: base m, root sieve, evolution, and the best polynomial pair
-fn polyselect_report(n: &BigInt, d: usize, gens: usize) -> Expr {
+fn polyselect_report(n: &BigInt, d: usize, gens: usize, teach: bool) -> Expr {
     use crate::polyselect as ps;
     let (bf, _, area) = ps::e_params(n);
     let base = ps::score(n, d, 1, 0, 0, 0).expect("base m");
@@ -485,6 +485,22 @@ fn polyselect_report(n: &BigInt, d: usize, gens: usize) -> Expr {
         "The value is the best monic pair as [f(x) m], ready for `gnfs(N, r(1, 1), r(1, 2))`."
             .into(),
     );
+    if teach {
+        let t = crate::teach::polyselect(
+            n,
+            d,
+            &base,
+            &sieved,
+            &best,
+            gens,
+            &monic,
+            ps::gnfs_score(&monic.f, &monic.m),
+            own,
+        );
+        md.push(String::new());
+        md.push(t.clone());
+        tx.push(crate::teach::plain(&t));
+    }
     crate::discover::with_value(
         report("Polynomial selection", tx.join("\n"), md.join("\n")),
         value,

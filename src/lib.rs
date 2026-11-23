@@ -42,6 +42,7 @@ pub mod polyselect;
 pub mod print;
 pub mod ratfun;
 pub mod rsa_data;
+pub mod teach;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 

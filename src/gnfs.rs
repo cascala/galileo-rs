@@ -243,6 +243,17 @@ pub fn choices(n: &BigInt, tries: usize) -> Vec<Choice> {
         all.extend(base_m_search(n, d, tries).into_iter().take(1));
     }
     all.sort_by(|a, b| a.score().partial_cmp(&b.score()).unwrap());
+    // base m can land on a special form (x^4 + 1 for 2^128 + 1): keep it once, named as the special form
+    let mut seen: Vec<(ZPoly, BigInt)> = vec![];
+    all.retain(|c| {
+        let k = (c.f.clone(), c.m.clone());
+        if seen.contains(&k) {
+            false
+        } else {
+            seen.push(k);
+            true
+        }
+    });
     all
 }
 
@@ -365,6 +376,81 @@ pub struct NfsRun {
     pub columns: usize,
     pub lines: i64,
     pub choice: Option<Choice>,
+    /// the numbers of this run, for explain = "teach"
+    pub teach: Teach,
+}
+
+/// What a run saw, kept so that a teaching explanation can show real numbers
+#[derive(Clone, Debug, Default)]
+pub struct Teach {
+    /// f factors over the integers: its factors, and the factor g with gcd(g(m), N)
+    pub f_factors: Vec<ZPoly>,
+    /// (g, g(m), gcd(g(m), N), f, m)
+    pub alg_split: Option<(ZPoly, BigInt, BigInt, ZPoly, BigInt)>,
+    /// factor base bound, large prime bound, sieve half width
+    pub fb: u64,
+    pub lp: u64,
+    pub half: i64,
+    /// the first rational primes and algebraic pairs (p, r)
+    pub rfb: Vec<u64>,
+    pub afb: Vec<(u64, u64)>,
+    pub nrfb: usize,
+    pub nafb: usize,
+    /// sieve counts
+    pub pairs: u64,
+    pub candidates: u64,
+    pub full: usize,
+    pub partial: usize,
+    /// the first relations found, (a, b)
+    pub first: Vec<(i64, i64)>,
+    /// two relations sharing one large prime: side (0 rational, 1 algebraic), p, the two pairs
+    pub lp_pair: Option<(u8, u64, (i64, i64), (i64, i64))>,
+    /// relations left after pruning, primes and ideals they use, matrix size
+    pub kept: usize,
+    pub used: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub chars: Vec<(u64, u64)>,
+    pub nchars: usize,
+    pub deps: usize,
+    /// the dependency that gave the factor: number tried, size, digits of the rational product
+    pub tried: usize,
+    pub dep_size: usize,
+    pub product_digits: usize,
+    /// prime q where f splits, and its roots
+    pub q: u64,
+    pub q_roots: Vec<u64>,
+    /// X and Y mod N
+    pub x: BigInt,
+    pub y: BigInt,
+}
+
+/// splits x into primes up to `limit` (exponents) and the cofactor left over
+pub fn small_parts(x: &BigInt, limit: u64) -> (Vec<(u64, u32)>, BigInt) {
+    let mut x = x.abs();
+    let mut out = vec![];
+    if x.is_zero() {
+        return (out, x);
+    }
+    for p in small_primes(limit as usize) {
+        let mut e = 0;
+        while (&x % p).is_zero() {
+            x /= p;
+            e += 1;
+        }
+        if e > 0 {
+            out.push((p, e));
+        }
+        if x.is_one() {
+            break;
+        }
+    }
+    (out, x)
+}
+
+/// the norm F(a, b) = b^d f(a/b) of a - b α
+pub fn norm_of(f: &[BigInt], a: i64, b: i64) -> BigInt {
+    norm_alg(f, a, b)
 }
 
 fn small_factor(n: &BigInt, limit: u64) -> Option<BigInt> {
@@ -666,6 +752,7 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
         columns: 0,
         lines: 0,
         choice: None,
+        teach: Teach::default(),
     };
     macro_rules! done {
         ($f:expr) => {{
@@ -725,6 +812,8 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
             for (g, _) in &facs {
                 let gv = af::peval(g, &m).gcd(n);
                 if gv > BigInt::one() && &gv < n {
+                    run.teach.f_factors = facs.iter().map(|(g, _)| g.clone()).collect();
+                    run.teach.alg_split = Some((g.clone(), af::peval(g, &m), gv.clone(), f.clone(), m.clone()));
                     log.push(format!(
                         "    gcd(g(m), N) = {} for the factor g = {}: done without sieving",
                         gv,
@@ -787,6 +876,13 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
         lab::spend(d as f64 * 2.0);
     }
     let lp = pr.fb * pr.lp_mult;
+    run.teach.fb = pr.fb;
+    run.teach.lp = lp;
+    run.teach.half = pr.half;
+    run.teach.rfb = rfb.iter().take(12).map(|t| t.0).collect();
+    run.teach.afb = afb.iter().take(12).map(|t| (t.0, t.1)).collect();
+    run.teach.nrfb = rfb.len();
+    run.teach.nafb = afb.len();
     log.push(format!(
         "2. Factor bases up to {}: {} rational primes, {} algebraic pairs (p, r) with f(r) ≡ 0 mod p; large primes up to {}",
         pr.fb,
@@ -1021,6 +1117,38 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
         }
     }
     run.lines = b;
+    run.teach.pairs = b as u64 * w as u64;
+    run.teach.candidates = stats.candidates;
+    run.teach.full = stats.full;
+    run.teach.partial = stats.partial;
+    run.teach.first = rels.iter().take(200).map(|r| (r.a, r.b)).collect();
+    run.teach.chars = chars.iter().take(4).cloned().collect();
+    run.teach.nchars = chars.len();
+    {
+        // two relations that share a large prime: together they cancel it
+        let big: HashMap<usize, Key> = keys
+            .iter()
+            .filter(|(k, _)| k.1 > pr.fb)
+            .map(|(k, &id)| (id, *k))
+            .collect();
+        let mut owners: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (i, r) in rels.iter().enumerate() {
+            for (k, _) in &r.keys {
+                if big.contains_key(k) {
+                    owners.entry(*k).or_default().push(i);
+                }
+            }
+        }
+        if let Some((k, o)) = owners
+            .iter()
+            .filter(|(_, o)| o.len() == 2)
+            .min_by_key(|(_, o)| (o[0], o[1]))
+        {
+            let key = big[k];
+            let (r1, r2) = (&rels[o[0]], &rels[o[1]]);
+            run.teach.lp_pair = Some((key.0, key.1, (r1.a, r1.b), (r2.a, r2.b)));
+        }
+    }
     log.push(format!(
         "3. Sieved {} lines b = 1..{} with |a| <= {} ({} pairs): {} candidates, {} relations ({} full, {} with large primes)",
         b,
@@ -1161,6 +1289,10 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
         .collect();
     run.relations = alive.len();
     run.columns = ncols;
+    run.teach.kept = rows_before;
+    run.teach.used = used;
+    run.teach.rows = groups.len();
+    run.teach.cols = ncols;
     log.push(format!(
         "4. After removing relations with a prime nobody else has: {} relations with {} primes and ideals. Structured elimination (adding relations to remove primes that few of them have): matrix {} x {} (2 signs, {} quadratic characters)",
         rows_before,
@@ -1203,6 +1335,9 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
         .map(|(k, &id)| (id, k.1))
         .collect();
     log.push(format!("5. Square roots: rational side from the exponents, algebraic side at q = {} where f splits", split.0));
+    run.teach.deps = deps.len();
+    run.teach.q = split.0;
+    run.teach.q_roots = split.1.clone();
     for (t, dep) in deps.iter().enumerate() {
         if lab::out_of_budget() {
             break;
@@ -1233,6 +1368,16 @@ pub fn nfs(n: &BigInt, choice: Option<Choice>, params: Option<Params>) -> NfsRun
         };
         let g = (&x - &y).gcd(n);
         if g > BigInt::one() && &g < n {
+            run.teach.tried = t + 1;
+            run.teach.dep_size = pairs.len();
+            run.teach.product_digits = pairs
+                .iter()
+                .fold(BigInt::one(), |acc, &(a, b)| acc * (BigInt::from(a) - BigInt::from(b) * &m))
+                .abs()
+                .to_string()
+                .len();
+            run.teach.x = x.mod_floor(n);
+            run.teach.y = y.mod_floor(n);
             log.push(
                 format!(
                     "6. X = f'(m) ∏ sqrt(a - b m), Y = β(m): X² ≡ Y² (mod N), gcd(X - Y, N) = {}",

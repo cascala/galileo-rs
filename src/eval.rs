@@ -104,18 +104,20 @@ fn builtins() -> BTreeMap<String, Expr> {
     v.insert("j".into(), Expr::Const(Const::I));
     v.insert("true".into(), Expr::Bool(true));
     v.insert("false".into(), Expr::Bool(false));
-    v.insert("explain".into(), Expr::Bool(explain_default()));
+    v.insert("explain".into(), explain_default());
     v
 }
 
-/// `explain` starts on unless the environment variable GALILEO_EXPLAIN is 0, off, false or no
-fn explain_default() -> bool {
+/// `explain` starts on (brief) unless the environment variable GALILEO_EXPLAIN is
+/// 0, off, false or no; GALILEO_EXPLAIN=teach starts in teaching mode
+fn explain_default() -> Expr {
     match std::env::var("GALILEO_EXPLAIN") {
-        Ok(v) => !matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "0" | "off" | "false" | "no"
-        ),
-        Err(_) => true,
+        Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+            "0" | "off" | "false" | "no" => Expr::Bool(false),
+            "teach" => Expr::Str("teach".into()),
+            _ => Expr::Bool(true),
+        },
+        Err(_) => Expr::Bool(true),
     }
 }
 
@@ -164,8 +166,15 @@ impl Session {
         match self.vars.get("explain") {
             Some(Expr::Bool(b)) => *b,
             Some(Expr::Num(n)) => !n.is_zero(),
+            Some(Expr::Str(s)) => !matches!(s.trim(), "off" | "no" | "false" | "0"),
             _ => true,
         }
+    }
+
+    /// Whether commands teach: explain = "teach" walks through the method with the
+    /// numbers of this run (commands without a teaching note give their brief one)
+    pub fn teaching(&self) -> bool {
+        matches!(self.vars.get("explain"), Some(Expr::Str(s)) if s.trim() == "teach")
     }
 
     /// Adds an explanation (Markdown) to the statement being run. Results stay
@@ -196,7 +205,11 @@ impl Session {
             };
             if let Some(e) = call.and_then(crate::help::entry) {
                 if !self.funcs.contains_key(e.name) {
-                    let s = first_sentence(e.description).to_string();
+                    let s = if self.teaching() {
+                        e.description.to_string()
+                    } else {
+                        first_sentence(e.description).to_string()
+                    };
                     self.note(format!("`{}`: {}", e.name, s));
                 }
             }
@@ -1431,6 +1444,31 @@ mod tests {
         assert_eq!(run("deriv(x^3,x)"), "3*x^2");
         assert_eq!(run("0.1:0.1:0.3").split('\t').count(), 3);
         assert_eq!(run("1:3"), "1\t2\t3");
+    }
+    #[test]
+    fn explain_levels() {
+        let notes = |src: &str| -> String {
+            let mut s = Session::new();
+            s.run_notes(src)
+                .into_iter()
+                .last()
+                .map(|(_, _, n)| markdown_notes(&n))
+                .unwrap_or_default()
+        };
+        // brief: the log; teach: a walk-through with this run's numbers; off: nothing
+        let brief = notes("gnfs(2^128 + 1)");
+        assert!(brief.contains("5. Square roots"));
+        let teach = notes("explain = \"teach\"; gnfs(2^128 + 1)");
+        for part in ["**Step 1", "2 · N", "**Step 3", "(a, b) = (-100, 1)", "**Step 6", "X² − Y² mod N = 0", "gcd(X − Y, N) = 5704689200685129054721"] {
+            assert!(teach.contains(part), "missing {}: {}", part, teach);
+        }
+        let split = notes("explain = \"teach\"; gnfs(2^78 + 1, x^4 + 4, 2^20)");
+        assert!(split.contains("**It factors.**") && split.contains("1099509530626"));
+        let poly = notes("explain = \"teach\"; nfspoly(2^128 + 1)");
+        assert!(poly.contains("The degree is a balance") && poly.contains("0 mod 7"));
+        assert_eq!(notes("explain = false; gnfs(2^128 + 1)"), "");
+        // commands without a teaching note give their whole help text
+        assert!(notes("explain = \"teach\"; mod(7, 3)").contains("greatest common divisor"));
     }
     #[test]
     fn tail_calls_and_big_integers() {
