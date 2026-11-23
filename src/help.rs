@@ -646,6 +646,13 @@ pub const ENTRIES: &[Entry] = &[
         "classfactor(nextprime(10^8)*nextprime(3*10^8))"
     ),
     e!(
+        "polyselect",
+        "Number theory",
+        "polyselect(n), polyselect(n, d), polyselect(n, d, generations)",
+        "Explores polynomial selection for the number field sieve: pairs f(x) of degree d (default by size: 3 below 60 digits, 4 below 110, 5 below 220, else 6) and g(x) = x - m with f(m) = n. Starts from the base-m expansion of n, runs a root sieve over rotations f + (j x + k)(x - m) to lower Murphy's alpha (more roots mod small primes), then an evolutionary search over the leading coefficient, the shift of m and the rotation, scored by Murphy's E (Dickman's rho of both sides over the sieve region). Shows lognorm, alpha and E for each step and the best pair, with the check f(m) - n = 0. A teaching tool: real selectors (Kleinjung's algorithm in CADO-NFS and msieve) search far more leading coefficients and also translate f.",
+        "polyselect(nextprime(10^59)*nextprime(10^60))"
+    ),
+    e!(
         "digits",
         "Number theory",
         "digits(n)",

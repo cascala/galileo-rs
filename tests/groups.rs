@@ -48,3 +48,19 @@ fn group_factoring_methods() {
     let q = nt::next_prime(&BigInt::from(10u64).pow(40));
     assert_eq!(ecm(&(&p * &q), 100, 2000).map(|x| x.0), Some(p));
 }
+
+#[test]
+fn polyselect_keeps_the_common_root() {
+    use galileo_rs::polyselect::*;
+    let n: BigInt = "1522605027922533360535618378132637429718068114961380688657908494580122963258952897654000350692006139".parse().unwrap();
+    let base = score(&n, 4, 1, 0, 0, 0).unwrap();
+    assert_eq!(eval(&base.f, &base.m), n);
+    let (j, k, _) = root_sieve(&base.f, &base.m, 2, 5000);
+    let r = score(&n, 4, 1, 0, j, k).unwrap();
+    assert_eq!(eval(&r.f, &r.m), n);
+    assert!(r.alpha < base.alpha);
+    let h = evolve(&n, 4, &r, 5, 12, 99);
+    let best = h.last().unwrap();
+    assert_eq!(eval(&best.f, &best.m), n);
+    assert!(best.e >= r.e);
+}

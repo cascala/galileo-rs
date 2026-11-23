@@ -186,6 +186,24 @@ impl Session {
                     ),
                 }))
             })(),
+            "polyselect" => (|| {
+                let usage = "usage: polyselect(n), polyselect(n, d) or polyselect(n, d, generations): number field sieve polynomials for n (at least 30 digits) of degree d (3 to 6)";
+                let (n, d, gens) = match args {
+                    [a] => (self.big_arg(a, "polyselect: n")?.abs(), 0usize, 30usize),
+                    [a, d] => (self.big_arg(a, "polyselect: n")?.abs(), self.big_arg(d, "polyselect: d")?.to_usize().unwrap_or(0), 30),
+                    [a, d, g] => (self.big_arg(a, "polyselect: n")?.abs(), self.big_arg(d, "polyselect: d")?.to_usize().unwrap_or(0), self.big_arg(g, "polyselect: generations")?.to_usize().unwrap_or(0)),
+                    _ => return Err(usage.into()),
+                };
+                let digits = n.to_string().len();
+                if !(30..=620).contains(&digits) {
+                    return Err("polyselect: n should have 30 to 620 digits".into());
+                }
+                let d = if d == 0 { if digits < 60 { 3 } else if digits < 110 { 4 } else if digits < 220 { 5 } else { 6 } } else { d };
+                if !(3..=6).contains(&d) || !(1..=1000).contains(&gens) {
+                    return Err("polyselect: d from 3 to 6, generations from 1 to 1000".into());
+                }
+                Ok(polyselect_report(&n, d, gens))
+            })(),
             "reduceform" => (|| {
                 let [a] = args else {
                     return Err("usage: reduceform([a, b, c])".into());
@@ -325,4 +343,56 @@ fn factor_text(n: &BigInt) -> String {
             .join(" * "),
         Err(_) => n.to_string(),
     }
+}
+
+fn poly_text(f: &[BigInt]) -> String {
+    crate::algfactor::show_zpoly(f, "x")
+}
+
+/// the polyselect report: base m, root sieve, evolution, and the best polynomial pair
+fn polyselect_report(n: &BigInt, d: usize, gens: usize) -> Expr {
+    use crate::polyselect as ps;
+    let (bf, _, area) = ps::e_params(n);
+    let base = ps::score(n, d, 1, 0, 0, 0).expect("base m");
+    let (j, k, _) = ps::root_sieve(&base.f, &base.m, 4, 20_000);
+    let sieved = ps::score(n, d, 1, 0, j, k).unwrap_or_else(|| base.clone());
+    let start = if sieved.e > base.e { sieved.clone() } else { base.clone() };
+    let seed = n.to_u64_digits().1.first().copied().unwrap_or(7);
+    let hist = ps::evolve(n, d, &start, gens, 30, seed);
+    let best = hist.last().unwrap().clone();
+    let digits = n.to_string().len();
+    let row = |name: &str, c: &ps::Cand| format!("| {} | {} | {} | {}, {} | {:.3e} | {:.2} | {:+.2} | {:.3e} |", name, c.ad, c.dm, c.j, c.k, c.skew, c.lognorm, c.alpha, c.e);
+    let mut md = vec![
+        format!("Polynomial selection for this {}-digit number, degree {}: pairs $f(x)$, $g(x) = x - m$ with $f(m) = N$. Smaller lognorm (size of $F(a, b)$ over the sieve region, at the best skew), more negative $\\alpha$ (more roots mod small primes) and larger Murphy $E$ (estimated chance that $F$ and $G$ are both smooth, with bounds $B = {:.0e}$ and area {:.0e}) are better. $E$ only compares polynomials for the same $N$.", digits, d, bf, area),
+        String::new(),
+        "| step | leading coeff | m shift | rotation j, k | skew | lognorm | α | E |".into(),
+        "|---|---|---|---|---|---|---|---|".into(),
+        row("base m", &base),
+        row("root sieve", &sieved),
+    ];
+    let step = (gens / 6).max(1);
+    for (g, c) in hist.iter().enumerate() {
+        if g % step == 0 || g + 1 == hist.len() {
+            md.push(row(&format!("generation {}", g), c));
+        }
+    }
+    let ratio = best.e / base.e;
+    md.push(String::new());
+    md.push(format!("Best E is {:.1} times that of plain base m. The best pair:", ratio));
+    md.push(String::new());
+    md.push(format!("* $f(x) = $ `{}`", poly_text(&best.f)));
+    md.push(format!("* $g(x) = x - m$ with $m = $ `{}`", best.m));
+    md.push(format!("* check: $f(m) - N = {}$", ps::eval(&best.f, &best.m) - n));
+    md.push(String::new());
+    let start1 = if sieved.e > base.e { sieved.clone() } else { base.clone() };
+    let monic = ps::evolve_with(n, d, &start1, gens, 30, seed ^ 0x5bd1e995, true).last().unwrap().clone();
+    let own = crate::gnfs::choices(n, 20).into_iter().filter(|c| c.degree() == d).map(|c| c.score()).fold(f64::MAX, f64::min);
+    md.push(format!("Galileo's teaching sieve `gnfs` wants a monic $f$ and sieves a rectangle without skew ($|a| \\le 30000$, $b$ up to a few thousand), so the best pair above (leading coefficient {}) is not the one for it. A second search keeps $f$ monic and scores with the sieve's own estimate (bits of both norms over its rectangle plus $\\alpha$; lower is better). Best monic pair: score {:.1}, against {:.1} for the polynomial `gnfs` picks by itself at this degree:", best.ad, ps::gnfs_score(&monic.f, &monic.m), own));
+    md.push(String::new());
+    md.push(format!("`gnfs({}, {}, {})`", n, poly_text(&monic.f), monic.m));
+    let mut tx = vec![format!("Polynomial selection for this {}-digit number, degree {} (g(x) = x - m, f(m) = N). Lower lognorm, more negative alpha and larger Murphy E are better:", digits, d)];
+    for l in md.iter().skip(4) {
+        tx.push(l.replace("$", "").replace("`", "").replace("\\", ""));
+    }
+    report("Polynomial selection", tx.join("\n"), md.join("\n"))
 }

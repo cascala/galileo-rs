@@ -38,6 +38,7 @@ pub mod numtheory;
 pub mod ode;
 pub mod parser;
 pub mod plot;
+pub mod polyselect;
 pub mod print;
 pub mod ratfun;
 pub mod rsa_data;
