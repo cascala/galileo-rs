@@ -11,15 +11,75 @@ const P_ATOM: u8 = 4;
 
 pub fn show(e: &Expr) -> String {
     match e {
-        Matrix(rows) => rows
-            .iter()
-            .map(|r| r.iter().map(show).collect::<Vec<_>>().join("\t"))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Matrix(rows) => show_matrix(rows),
         Str(s) => s.clone(),
         Obj(o) => o.text(),
         _ => fmt(e).0,
     }
+}
+
+/// A result as shown to the user: like [`show`], but a string keeps its
+/// quotes so the output can be read back as Galileo
+pub fn show_value(e: &Expr) -> String {
+    match e {
+        Str(_) => fmt(e).0,
+        _ => show(e),
+    }
+}
+
+/// A matrix as Galileo input: [1, 2, 3] on one line, and one row per line
+/// with aligned columns when there are several rows:
+/// [2, 3;
+///  3, 2;
+///  5, 1]
+fn show_matrix(rows: &[Vec<Expr>]) -> String {
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| r.iter().map(|x| fmt(x).0).collect())
+        .collect();
+    if cells.len() <= 1 {
+        return format!(
+            "[{}]",
+            cells.first().map(|r| r.join(", ")).unwrap_or_default()
+        );
+    }
+    let ncol = cells.iter().map(|r| r.len()).max().unwrap_or(0);
+    let width: Vec<usize> = (0..ncol)
+        .map(|j| {
+            cells
+                .iter()
+                .filter_map(|r| r.get(j))
+                .map(|c| c.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let lines: Vec<String> = rows
+        .iter()
+        .zip(&cells)
+        .map(|(r, c)| {
+            let n = c.len();
+            c.iter()
+                .enumerate()
+                .map(|(j, t)| {
+                    let pad = " ".repeat(width[j] - t.chars().count());
+                    // numbers line up on the right, text on the left; no
+                    // trailing spaces after the last column
+                    if matches!(r[j], Str(_)) {
+                        if j + 1 < n {
+                            format!("{}{}", t, pad)
+                        } else {
+                            t.clone()
+                        }
+                    } else {
+                        format!("{}{}", pad, t)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .collect();
+    format!("[{}]", lines.join(";\n "))
 }
 
 fn wrap(s: (String, u8), min: u8) -> String {

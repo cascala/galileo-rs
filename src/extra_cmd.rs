@@ -1261,7 +1261,23 @@ impl Session {
         let two = BigInt::from(2);
         let err = |e: String| format!("{}: {}", f, e);
         match f {
-            "ifactor" => Ok(Expr::Str(factored_text(&n).map_err(err)?)),
+            "ifactor" => {
+                if n.abs() <= BigInt::one() {
+                    return Ok(if n.is_zero() {
+                        Expr::Matrix(vec![vec![Expr::int(0), Expr::int(1)]])
+                    } else if n.is_negative() {
+                        Expr::Matrix(vec![vec![Expr::int(-1), Expr::int(1)]])
+                    } else {
+                        Expr::Matrix(vec![])
+                    });
+                }
+                let (m, t) = self.factor_integer(a, &n).map_err(err)?;
+                self.note(format!(
+                    "{} = {}\n\nOne row per prime: the prime and its exponent.",
+                    n, t
+                ));
+                Ok(m)
+            }
             "factors" => {
                 if n < two {
                     return Err("factors: give a whole number of 2 or more".into());
@@ -2271,11 +2287,11 @@ mod tests {
     }
     #[test]
     fn number_theory() {
-        assert_eq!(run("ifactor(360)"), "2^3 * 3^2 * 5");
+        assert_eq!(run("ifactor(360)"), "[2, 3;\n 3, 2;\n 5, 1]");
         assert_eq!(run("isprime(97)"), "true");
         assert_eq!(run("powmod(2, 10, 1000)"), "24");
         assert_eq!(run("modinv(3, 11)"), "4");
-        assert_eq!(run("primes(20)"), "2\t3\t5\t7\t11\t13\t17\t19");
+        assert_eq!(run("primes(20)"), "[2, 3, 5, 7, 11, 13, 17, 19]");
     }
     #[test]
     fn complex_parts() {
@@ -2296,20 +2312,20 @@ mod tests {
     fn sums_and_tables() {
         assert_eq!(run("sum(k, k, 1, n)"), "n*(n+1)/2");
         assert_eq!(run("sum(1/2^k, k, 1, inf)"), "1");
-        assert_eq!(run("table(k^2, k, 1, 4)"), "1\t4\t9\t16");
+        assert_eq!(run("table(k^2, k, 1, 4)"), "[1, 4, 9, 16]");
     }
     #[test]
     fn groups() {
-        assert_eq!(run("compose([2,3,1],[2,3,1])"), "3\t1\t2");
-        assert_eq!(run("cycles(perm(\"(1 2 3)(4 5)\", 5))"), "(1 2 3)(4 5)");
-        assert_eq!(run("size(generate([2,3,1],[2,1,3]))"), "6\t3");
+        assert_eq!(run("compose([2,3,1],[2,3,1])"), "[3, 1, 2]");
+        assert_eq!(run("cycles(perm(\"(1 2 3)(4 5)\", 5))"), "\"(1 2 3)(4 5)\"");
+        assert_eq!(run("size(generate([2,3,1],[2,1,3]))"), "[6, 3]");
     }
     #[test]
     fn trig_equations() {
-        assert_eq!(run("solve(sin(x) == 1/2, x)"), "pi/6\t5*pi/6");
+        assert_eq!(run("solve(sin(x) == 1/2, x)"), "[pi/6, 5*pi/6]");
         assert_eq!(
             run("solve(2*sin(x)^2 - sin(x) - 1, x)"),
-            "pi/2\t7*pi/6\t11*pi/6"
+            "[pi/2, 7*pi/6, 11*pi/6]"
         );
     }
     #[test]

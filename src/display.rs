@@ -3,7 +3,7 @@
 use crate::eval::Output;
 use crate::expr::{Expr, Obj};
 use crate::latex::latex;
-use crate::print::show;
+use crate::print::{show, show_value};
 
 /// (MIME type, content) pairs; JSON types hold JSON text
 pub type Bundle = Vec<(&'static str, String)>;
@@ -54,7 +54,7 @@ pub fn bundle(e: &Expr) -> Option<Bundle> {
             // the text of a report is its explanation (a note); it shows its value
             Obj::Report(r) => {
                 let v = r.shown_value()?;
-                return bundle(&v).or_else(|| Some(vec![("text/plain", show(&v))]));
+                return bundle(&v).or_else(|| Some(vec![("text/plain", show_value(&v))]));
             }
         }),
         _ if typeset(e) => Some(vec![
@@ -83,7 +83,7 @@ pub fn shown(o: &Output) -> Shown {
     match o {
         Output::Value(e) => match bundle(e) {
             Some(b) => Shown::Rich(b),
-            None => Shown::Text(show(e)),
+            None => Shown::Text(show_value(e)),
         },
         Output::Nothing => Shown::Nothing,
         Output::Exit => Shown::Text(

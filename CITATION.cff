@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use Galileo in your teaching, research or writing, please cite it as below."
+title: "Galileo: a computer algebra system in Rust"
+abstract: "Galileo is a small computer algebra system with exact arithmetic, symbolic algebra and calculus, matrices, number theory, plotting and differential geometry. It runs as a command-line REPL, a Jupyter kernel, and in the browser through WebAssembly."
+type: software
+authors:
+  - family-names: Esch
+    given-names: Joris
+    alias: cascala
+version: "0.3.1"
+license: Apache-2.0
+url: "https://cascala.github.io/igalileo/"
+repository-code: "https://github.com/cascala/galileo-rs"
+keywords:
+  - computer algebra
+  - symbolic mathematics
+  - mathematics education
+  - Jupyter
+  - WebAssembly

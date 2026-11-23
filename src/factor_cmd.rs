@@ -215,6 +215,22 @@ struct IntFactors {
 }
 
 impl IntFactors {
+    /// rows [p, e] (prime and exponent), [-1, 1] first for a negative number,
+    /// and [c, 1] for a composite part that did not split
+    fn matrix(&self) -> Expr {
+        let big = |n: &BigInt| Expr::Num(Number::from_bigint(n.clone()));
+        let mut rows = vec![];
+        if self.sign {
+            rows.push(vec![Expr::int(-1), Expr::int(1)]);
+        }
+        for (p, e) in &self.primes {
+            rows.push(vec![big(p), Expr::int(*e as i128)]);
+        }
+        for c in &self.composites {
+            rows.push(vec![big(c), Expr::int(1)]);
+        }
+        Expr::Matrix(rows)
+    }
     fn text(&self) -> String {
         let mut parts = vec![];
         if self.sign {
@@ -336,7 +352,8 @@ fn form_latex(a: &BigInt, b: &BigInt, k: u64, plus: bool) -> String {
 
 impl Session {
     /// factor(n) for a whole number: split algebraically first when n = a^n ± b^n
-    pub(crate) fn factor_integer(&mut self, node: &Node, n: &BigInt) -> R<String> {
+    /// The factorization of n as rows [p, e], with its text (2^3 * 3^2 * 5)
+    pub(crate) fn factor_integer(&mut self, node: &Node, n: &BigInt) -> R<(Expr, String)> {
         let detect = n.bits() > 100;
         if let Some((a, b, k, plus, neg)) = int_form(self, Some(node), n, detect) {
             if let Some(pieces) = af::algebraic_pieces(&a, &b, k, plus) {
@@ -352,11 +369,19 @@ impl Session {
                     }
                     f.composites.extend(cs);
                 }
-                return Ok(f.text());
+                return Ok((f.matrix(), f.text()));
             }
         }
         if n.bits() <= 120 {
-            return crate::extra_cmd::factored_text(n);
+            let mut f = IntFactors {
+                sign: n.is_negative(),
+                primes: BTreeMap::new(),
+                composites: vec![],
+            };
+            for (p, e) in crate::numtheory::factorize(&n.abs())? {
+                f.primes.insert(p, e as u32);
+            }
+            return Ok((f.matrix(), f.text()));
         }
         let (ps, cs) = af::factor_partial(n);
         if ps.is_empty() {
@@ -373,7 +398,7 @@ impl Session {
         for q in ps {
             *f.primes.entry(q).or_insert(0) += 1;
         }
-        Ok(f.text())
+        Ok((f.matrix(), f.text()))
     }
 
     /// Some(result) if f is one of the commands here
