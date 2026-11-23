@@ -2,6 +2,8 @@
 
 The [Galileo](https://github.com/cascala/galileo) computer algebra system, rewritten in Rust.
 
+**▶ [Try Galileo in your browser](https://cascala.github.io/igalileo/)**: nothing to install. Open the [playground](https://cascala.github.io/igalileo/playground/), start the [first lesson](https://cascala.github.io/igalileo/playground/#lesson/foundations/01-numbers), or use [notebooks in JupyterLite](https://cascala.github.io/igalileo/lab/lab/index.html).
+
 This is a redesign rather than a line-by-line port. The language is the same
 (`deriv(x^3, x)`, `[a b; c d]`, `[L, U, P] = lu(A)`, ...), but the engine
 underneath is new:
@@ -152,6 +154,10 @@ because it only equals `y` for `0 <= y <= pi`).
 - [x] Tensors and differential geometry (metrics, Christoffel, Riemann, Ricci, Einstein, Weyl, geodesics, ODE solver)
 - [x] Plotting (SVG and Plotly) and LaTeX output
 - [x] Jupyter kernel (through iGalileo)
+
+## Citing Galileo
+
+Galileo is created by Joris Esch ([cascala](https://github.com/cascala)). If you use it in teaching, research or writing, please cite it: GitHub's **Cite this repository** button (in the sidebar) gives APA and BibTeX, from [CITATION.cff](CITATION.cff).
 
 ## License
 
