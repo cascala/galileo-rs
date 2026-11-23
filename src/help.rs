@@ -152,7 +152,7 @@ pub const ENTRIES: &[Entry] = &[
         "factor",
         "Algebra",
         "factor(expr), factor(expr, field)",
-        "Factors a polynomial with rational coefficients over the integers, in any variables: (a*x + b)*(c*x + d) comes back from its expanded form. factor(expr, n) factors modulo a prime n (factor(x^4 + 1, 17)); factor(expr, sqrt(d)) over the numbers a + b*sqrt(d), with i for the Gaussian numbers (factor(x^2 + y^2, i)); these two take one variable, or a homogeneous polynomial in two. Irreducible factors of any degree are found (Zassenhaus: factor mod a prime, lift, recombine); x^n - 1 and x^n + 1 split into cyclotomic polynomials. Other expressions get their common factors pulled out. A whole number of any size is factored into primes (trial division, Pollard p - 1 and rho). A number a^n + b^n or a^n - b^n (typed that way, or recognized as b^n + 1 or b^n - 1) is first cut into its algebraic pieces, values of cyclotomic polynomials split again by Aurifeuillean factors, and then each piece is factored. Pieces that do not split in about a second are shown as C followed by their number of digits, with the full number on a line below.",
+        "Factors a polynomial with rational coefficients over the integers, in any variables: (a*x + b)*(c*x + d) comes back from its expanded form. factor(expr, n) factors modulo a prime n (factor(x^4 + 1, 17)); factor(expr, sqrt(d)) over the numbers a + b*sqrt(d), with i for the Gaussian numbers (factor(x^2 + y^2, i)); these two take one variable, or a homogeneous polynomial in two. Irreducible factors of any degree are found (Zassenhaus: factor mod a prime, lift, recombine); x^n - 1 and x^n + 1 split into cyclotomic polynomials. Other expressions get their common factors pulled out. A whole number of any size is factored into primes, given as rows [prime, exponent]: factor(360) is [2, 3; 3, 2; 5, 1], and the explanation shows 2^3 * 3^2 * 5 (trial division, Pollard p - 1 and rho). A number a^n + b^n or a^n - b^n (typed that way, or recognized as b^n + 1 or b^n - 1) is first cut into its algebraic pieces, values of cyclotomic polynomials split again by Aurifeuillean factors, and then each piece is factored. A piece that does not split in about a second gets a row of its own with the whole composite number; the explanation calls it C followed by its number of digits.",
         "factor(x^4 + 4)"
     ),
     e!(
@@ -516,7 +516,7 @@ pub const ENTRIES: &[Entry] = &[
         "ifactor",
         "Number theory",
         "ifactor(n), factor(n), factors(n)",
-        "Prime factorization of a whole number: as text 2^3 * 3^2 * 5, or as rows [prime exponent]. Uses trial division, then Pollard's p - 1 and rho. factor(n) also splits numbers a^n +- b^n algebraically first (see help(factor) and algfactor).",
+        "Prime factorization of a whole number, as rows [prime, exponent]: 360 gives [2, 3; 3, 2; 5, 1], and the explanation shows 2^3 * 3^2 * 5. Uses trial division, then Pollard's p - 1 and rho. factor(n) also splits numbers a^n +- b^n algebraically first (see help(factor) and algfactor).",
         "ifactor(2^64 + 1)"
     ),
     e!(

@@ -26,6 +26,28 @@ fn report(s: &mut Session, src: &str) -> bool {
     true
 }
 
+/// How many ( and [ are still open, outside strings and comments
+fn open_brackets(src: &str) -> i32 {
+    let mut depth = 0;
+    let mut in_str = false;
+    let mut chars = src.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => in_str = !in_str,
+            _ if in_str => {}
+            '/' if chars.peek() == Some(&'/') => {
+                while chars.peek().is_some_and(|&c| c != '\n') {
+                    chars.next();
+                }
+            }
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // deep expressions recurse deeply: give the engine a large stack
@@ -72,16 +94,34 @@ fn run(args: Vec<String>) -> i32 {
                 );
             }
             let stdin = io::stdin();
+            // a statement continues while brackets are open, so a matrix
+            // printed over several lines can be pasted back in
+            let mut buf = String::new();
             loop {
                 if interactive {
-                    print!("galileo> ");
+                    print!(
+                        "{}",
+                        if buf.is_empty() {
+                            "galileo> "
+                        } else {
+                            "    ...> "
+                        }
+                    );
                     io::stdout().flush().ok();
                 }
                 let mut line = String::new();
                 if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
+                    if !buf.is_empty() {
+                        report(&mut s, &buf);
+                    }
                     return 0;
                 }
-                if !report(&mut s, &line) {
+                buf.push_str(&line);
+                if open_brackets(&buf) > 0 {
+                    continue;
+                }
+                let src = std::mem::take(&mut buf);
+                if !report(&mut s, &src) {
                     return 0;
                 }
             }

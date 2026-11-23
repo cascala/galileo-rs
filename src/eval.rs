@@ -66,10 +66,10 @@ pub enum Output {
 impl Output {
     pub fn render(&self) -> String {
         match self {
-            Output::Value(e) => show(e),
+            Output::Value(e) => crate::print::show_value(e),
             Output::Assigned(v) => v
                 .iter()
-                .map(|(n, e)| format!("{} =\n{}", n, show(e)))
+                .map(|(n, e)| format!("{} = {}", n, crate::print::show_value(e)))
                 .collect::<Vec<_>>()
                 .join("\n"),
             Output::Text(s) => s.clone(),
@@ -88,6 +88,10 @@ pub struct Session {
     pub(crate) depth: usize,
     /// explanations (Markdown) for the statement being run; see [`Session::note`]
     pub(crate) notes: Vec<Note>,
+    /// how many function calls are being evaluated inside each other; only
+    /// the outermost call explains itself (table(factor(n), ...) explains the
+    /// table, not each factorization)
+    pub(crate) calls: usize,
 }
 
 impl Default for Session {
@@ -138,6 +142,7 @@ impl Session {
             funcs: BTreeMap::new(),
             depth: 0,
             notes: vec![],
+            calls: 0,
         }
     }
 
@@ -177,7 +182,7 @@ impl Session {
 
     /// An explanation with separate plain-text and Markdown forms
     pub(crate) fn note2(&mut self, plain: String, markdown: String) {
-        if self.explaining() && !markdown.trim().is_empty() {
+        if self.explaining() && self.calls <= 1 && !markdown.trim().is_empty() {
             self.notes.push(Note { plain, markdown });
         }
     }
@@ -185,6 +190,7 @@ impl Session {
     /// Run one statement; returns its result and its explanations
     pub fn exec_notes(&mut self, st: &Stmt) -> (R<Output>, Vec<Note>) {
         self.notes.clear();
+        self.calls = 0;
         let r = self.exec(st);
         if r.is_ok() && self.notes.is_empty() && self.explaining() {
             // every command explains itself at least by what it computes
@@ -598,7 +604,12 @@ impl Session {
                     _ => return Err("use one or two indices".into()),
                 }
             }
-            Node::Call(f, args) => self.call(f, args)?,
+            Node::Call(f, args) => {
+                self.calls += 1;
+                let r = self.call(f, args);
+                self.calls -= 1;
+                r?
+            }
         };
         check(&v)?;
         Ok(v)
@@ -692,13 +703,14 @@ impl Session {
                     "simplify" => calc::simplify(&a),
                     "expand" => calc::expand(&a),
                     "factor" => match a.num().and_then(|n| n.as_bigint()) {
-                        // factor(360) = 2^3 * 3^2 * 5; a^n ± b^n splits algebraically first
+                        // factor(360) = [2, 3; 3, 2; 5, 1] (primes and exponents);
+                        // a^n ± b^n splits algebraically first
                         Some(n) if n.bits() > 1 => {
-                            let t = self
+                            let (m, t) = self
                                 .factor_integer(&args[0], &n)
                                 .map_err(|e| format!("factor: {}", e))?;
-                            self.note("`factor` of a whole number: its prime factorization. Numbers like a^n ± b^n are first cut along their algebraic factors; then trial division, Pollard's rho and the elliptic curve method split the rest, and each factor is checked to be prime (Miller–Rabin). A part written C*k* (k digits) is composite but did not split in reasonable time.");
-                            Expr::Str(t)
+                            self.note(&format!("{} = {}\n\n`factor` of a whole number gives one row per prime: the prime and its exponent. Numbers like a^n ± b^n are first cut along their algebraic factors; then trial division, Pollard's rho and the elliptic curve method split the rest, and each factor is checked to be prime (Miller–Rabin). A part written C*k* (k digits) is composite but did not split in reasonable time; its row holds the whole composite number.", n, t.replace('\n', "\n\n")));
+                            m
                         }
                         _ if crate::extra_cmd::is_huge(&a) => {
                             return Err(crate::extra_cmd::not_whole(&a, "factor"));
@@ -1429,8 +1441,8 @@ mod tests {
             "0"
         );
         assert_eq!(run("deriv(x^3,x)"), "3*x^2");
-        assert_eq!(run("0.1:0.1:0.3").split('\t').count(), 3);
-        assert_eq!(run("1:3"), "1\t2\t3");
+        assert_eq!(run("0.1:0.1:0.3").split(", ").count(), 3);
+        assert_eq!(run("1:3"), "[1, 2, 3]");
     }
     #[test]
     fn tail_calls_and_big_integers() {
@@ -1444,18 +1456,28 @@ mod tests {
             "2432902008176640000"
         );
         assert_eq!(run("gcd(2^60-1, 2^40-1)"), "1048575");
-        assert_eq!(run("mod([3 6 9], 7)"), "3\t6\t2");
+        assert_eq!(run("mod([3 6 9], 7)"), "[3, 6, 2]");
         assert_eq!(
             run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)")
                 .lines()
                 .last()
                 .unwrap(),
-            "2\t2\t2"
+            "[2, 2, 2]"
         );
-        assert_eq!(run("[1 true]"), "1\ttrue");
+        assert_eq!(run("[1 true]"), "[1, true]");
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
-        assert!(run("factor(10^300 + 1)").starts_with("73 * 137 * 401 * "));
-        assert!(run("factor(10^300 + 1)").contains("\nC156 = "));
+        // rows [prime, exponent]; the 156-digit part that does not split
+        // has a row of its own
+        let f = run("factor(10^300 + 1)");
+        let rows: Vec<&str> = f
+            .lines()
+            .map(|l| l.trim_matches(|c| " [];".contains(c)))
+            .collect();
+        assert_eq!(&rows[..3], &["73, 1", "137, 1", "401, 1"]);
+        assert!(
+            rows.iter()
+                .any(|r| r.split(", ").next().unwrap().len() == 156)
+        );
         assert_eq!(run("factor(expand((a*x+b)*(c*x+d)))"), "(a*x+b)*(c*x+d)");
         assert_eq!(run("factor(x^2 + 1, i)"), "(x+i)*(x-i)");
         assert_eq!(run("factor(x^4 + 1, 17)"), "(x+2)*(x+8)*(x+9)*(x+15)");
@@ -1492,7 +1514,7 @@ mod tests {
         let out = run("f(x) := 8 + 3*x^2 + 9*x; deriv(f(x), x); d(x) := ans; deriv(d(x), x); d(3)");
         assert_eq!(out.lines().last().unwrap(), "27");
         assert!(out.contains("d(x) := 6*x+9"));
-        assert!(run("m = [1 2; 3 4]; m*2; g(k) := k*ans; g(2)").ends_with("4\t8\n12\t16"));
+        assert!(run("m = [1 2; 3 4]; m*2; g(k) := k*ans; g(2)").ends_with("[ 4,  8;\n 12, 16]"));
         assert_eq!(run("h(ans) := ans + 1; h(1)").lines().last().unwrap(), "2");
         assert_eq!(
             run("p = plot(x, x, 0, 1); q(x) := x + 1; q(1)")
@@ -1509,11 +1531,11 @@ mod tests {
         assert_eq!(run("isprime(2^521 - 1)"), "true");
         assert_eq!(
             run("factor(2^127 - 3)"),
-            "5^2 * 213156431 * 31927947500766558008599290859"
+            "[                            5, 2;\n                     213156431, 1;\n 31927947500766558008599290859, 1]"
         );
         assert_eq!(
             run("decode(encode(\"a message longer than fifteen characters\"))"),
-            "a message longer than fifteen characters"
+            "\"a message longer than fifteen characters\""
         );
         assert_eq!(
             run("floor(10^40/7)"),
@@ -1525,10 +1547,13 @@ mod tests {
             "170141183460469231731687303715884105727"
         );
         assert_eq!(run("rank([1 2 3; 4 5 6; 7 8 9])"), "2");
-        assert_eq!(run("null([1 2 3; 4 5 6; 7 8 9])"), "1\n-2\n1");
-        assert_eq!(run("eigvec([2 1; 1 2])"), "-1\t1\n1\t1");
+        assert_eq!(run("null([1 2 3; 4 5 6; 7 8 9])"), "[ 1;\n -2;\n  1]");
+        assert_eq!(run("eigvec([2 1; 1 2])"), "[-1, 1;\n  1, 1]");
         assert_eq!(run("v = [3 5 7]; v(2)").lines().last().unwrap(), "5");
         assert_eq!(run("A = [1 2; 3 4]; A(2, 1)").lines().last().unwrap(), "3");
-        assert_eq!(run("A = [1 2; 3 4]; A(2)").lines().last().unwrap(), "3\t4");
+        assert_eq!(
+            run("A = [1 2; 3 4]; A(2)").lines().last().unwrap(),
+            "[3, 4]"
+        );
     }
 }
