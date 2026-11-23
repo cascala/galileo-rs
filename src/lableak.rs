@@ -285,6 +285,13 @@ pub struct Feature {
     pub cats: usize,
 }
 
+impl Feature {
+    /// features that take about sqrt(N) steps: more than factoring N by rho
+    pub fn costly(&self) -> bool {
+        self.name.contains("period") || self.name.contains("class number")
+    }
+}
+
 /// names and category counts of the features for numbers with `digits` digits
 pub fn feature_list(digits: u32) -> Vec<Feature> {
     let mut f = vec![];
@@ -381,7 +388,7 @@ pub const TARGETS: &[(&str, bool)] = &[
     ("p = +-1 (mod 8)", false),
     ("p = +-1 (mod 5)", false),
     ("middle bit of p", false),
-    ("lowest bit of floor(p / 3)", false),
+    ("lowest bit of floor(p / 10)", false),
     ("popcount(p) odd", false),
     ("second bit of p (below the leading 1)", true),
     ("p = q (mod 4)", true),
@@ -397,7 +404,7 @@ fn targets(p: u128, q: u128) -> Vec<bool> {
         p % 8 == 1 || p % 8 == 7,
         p % 5 == 1 || p % 5 == 4,
         (p >> (bits / 2)) & 1 == 1,
-        (p / 3) & 1 == 1,
+        (p / 10) & 1 == 1,
         p.count_ones() % 2 == 1,
         (p >> (bits - 2)) & 1 == 1,
         p % 4 == q % 4,

@@ -139,7 +139,9 @@ impl Session {
     /// runs a method on n with a budget; (factor if found, work, seconds)
     fn run_one(&mut self, m: &Method, n: &BigInt, seconds: f64, seed: u64) -> (Option<BigInt>, f64, Option<f64>) {
         let clock = Clock::start();
-        lab::start_budget(seconds * UNITS_PER_SECOND, seconds);
+        // with a clock the limit is time; in the browser it is work
+        let units = if lab::has_clock() { f64::INFINITY } else { seconds * UNITS_PER_SECOND };
+        lab::start_budget(units, seconds);
         let f = match m {
             Method::Builtin(name) => lab::run_method(name, n, seed),
             Method::Program(p) => ls::run_prog(p, n),
@@ -210,10 +212,9 @@ impl Session {
         let mut formulas = vec![];
         let mut names = vec![];
         md.push_str(&format!(
-            "**Scoreboard**: balanced semiprimes (p and q of the same size, seeds 0 to {}), at most {} per run ({} work units).\n\n",
+            "**Scoreboard**: balanced semiprimes (p and q of the same size, seeds 0 to {}), at most {} per run.\n\n",
             trials - 1,
-            fmt_secs(Some(secs)),
-            fmt_units(secs * UNITS_PER_SECOND)
+            if timed { fmt_secs(Some(secs)) } else { format!("{} work units", fmt_units(secs * UNITS_PER_SECOND)) }
         ));
         md.push_str("| method | digits | solved | median work | median time |\n|---|---|---|---|---|\n");
         let mut fits_md = String::new();
@@ -264,7 +265,9 @@ impl Session {
             }
             formulas.push(Expr::Matrix(rows));
             names.push(label.clone());
-            // fits
+            // fits: sizes that cost under 1/1000 of the largest measure fixed overhead, not growth
+            let top = pts.iter().map(|p| p.1).fold(0.0, f64::max);
+            pts.retain(|p| p.1 >= top / 1000.0);
             let fits: Vec<(usize, (f64, f64, f64))> = (0..3).filter_map(|k| lab::fit(k, &pts).map(|f| (k, f))).collect();
             if pts.len() >= 3 {
                 let best = fits.iter().min_by(|a, b| a.1 .2.partial_cmp(&b.1 .2).unwrap()).unwrap();
@@ -299,6 +302,7 @@ impl Session {
         let mut series: Vec<Series> = vec![];
         let mut first: Option<(f64, f64)> = None;
         let mut dmax: f64 = 0.0;
+        let (mut ymin, mut ymax) = (f64::INFINITY, f64::NEG_INFINITY);
         let unit = if lab::has_clock() { "seconds" } else { "work units" };
         for a in args {
             let v = self.eval(a)?;
@@ -324,19 +328,12 @@ impl Session {
                 if first.is_none() {
                     first = Some(pts[0]);
                 }
-                // fitted curve of the best model
-                let raw: Vec<(f64, f64)> = pts.iter().map(|&(d, l)| (d, 10f64.powf(l))).collect();
-                series.push(Series { label: name.clone(), points: pts.clone(), markers: true, errors: vec![] });
-                if raw.len() >= 3 {
-                    let fits: Vec<(usize, (f64, f64, f64))> = (0..3).filter_map(|k| lab::fit(k, &raw).map(|f| (k, f))).collect();
-                    let (k, (c0, c1, _)) = *fits.iter().min_by(|a, b| a.1 .2.partial_cmp(&b.1 .2).unwrap()).unwrap();
-                    let (d0, d1) = (raw[0].0, raw.last().unwrap().0);
-                    let line: Vec<(f64, f64)> = crate::plot::steps(d0, d1, 40).into_iter().map(|d| (d, (c0 + c1 * lab::model_x(k, d)) / std::f64::consts::LN_10)).collect();
-                    series.push(Series { label: format!("{} fit: {}", name, lab::MODELS[k]), points: line, markers: false, errors: vec![] });
-                }
+                ymin = ymin.min(pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min));
+                ymax = ymax.max(pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max));
+                series.push(Series { label: name.clone(), points: pts, markers: true, errors: vec![] });
             }
         }
-        // reference curves through the first point
+        // reference curves through the first point (the fitted laws are in the scoreboard table)
         if let Some((d0, l0)) = first {
             let d1 = dmax.max(d0 + 1.0);
             let refs: [(&str, Box<dyn Fn(f64) -> f64>); 4] = [
@@ -346,7 +343,11 @@ impl Session {
                 ("L(1/3, 1.92) (number field sieve)", Box::new(|d: f64| 1.923 * lab::model_x(2, d) / std::f64::consts::LN_10)),
             ];
             for (name, g) in refs.iter() {
-                let pts: Vec<(f64, f64)> = crate::plot::steps(d0, d1, 40).into_iter().map(|d| (d, l0 + g(d) - g(d0))).collect();
+                // only the part inside the range of the data, so the data stays readable
+                let pts: Vec<(f64, f64)> = crate::plot::steps(d0, d1, 80).into_iter().map(|d| (d, l0 + g(d) - g(d0))).filter(|p| p.1 <= ymax + 1.0 && p.1 >= ymin - 1.0).collect();
+                if pts.len() < 2 {
+                    continue;
+                }
                 series.push(Series { label: format!("reference {}", name), points: pts, markers: false, errors: vec![] });
             }
         }
@@ -503,6 +504,12 @@ impl Session {
                 pval(pr.p)
             ));
         }
+        if h.digits < 10 {
+            md.push_str(&format!(
+                "\n**Small numbers**: with {} digits there are only a few hundred primes of the size of p, so N almost pins p down and nearly every feature of N says something about it (its leading digits say how big p is, and in a short range of primes, size and residues are not independent). Leaks found here do not carry over to large N; use 10 digits or more for real conclusions.\n",
+                h.digits
+            ));
+        }
         let extra: Vec<&lableak::Hit> = h.hits.iter().filter(|x| x.q_bh < 0.05 && !lableak::TARGETS[x.target].1).collect();
         md.push_str("\n**Verdict**: ");
         let real: Vec<&&lableak::Hit> = extra.iter().filter(|x| x.p_test < 0.01).collect();
@@ -514,12 +521,20 @@ impl Session {
             ));
         } else {
             for x in &real {
-                md.push_str(&format!("{} depends on {} (corrected p = {}, held-out p = {}). ", lableak::TARGETS[x.target].0, h.features[x.feature].name, pval(x.q_bh), pval(x.p_test)));
+                let f = &h.features[x.feature];
+                md.push_str(&format!(
+                    "{} depends on {} (corrected p = {}, held-out p = {}){}. ",
+                    lableak::TARGETS[x.target].0,
+                    f.name,
+                    pval(x.q_bh),
+                    pval(x.p_test),
+                    if f.costly() { ", but computing this feature takes about sqrt(N) steps, more than factoring N with rho" } else { "" }
+                ));
             }
             for t in &nb {
                 md.push_str(&format!("All features together predict {} at {:.1}% against {:.1}% by chance (p = {}). ", lableak::TARGETS[*t].0, 100.0 * h.predict[*t].accuracy, 100.0 * h.predict[*t].baseline, pval(h.predict[*t].p)));
             }
-            md.push_str("Before calling this a leak, check whether it only reflects the size of N (p is the smaller factor) and repeat with another seed.");
+            md.push_str("Before calling this a leak, check whether it only reflects the size of N (p is the smaller factor; with few digits, p ranges over a short interval and its bits depend on its size) and repeat with another seed and more digits.");
         }
         Ok(report("LeakHunt", text, md, vec![], vec![]))
     }

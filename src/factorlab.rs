@@ -329,6 +329,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("squfof", "Shanks' square forms factorization (continued fraction of sqrt(kN)): about N^(1/4), N below 10^36"),
     ("ecm", "Lenstra's elliptic curve method (Montgomery curves, stage 1): L(1/2) in the size of p"),
     ("qs", "multiple-polynomial quadratic sieve with large primes: L(1/2, 1) in N"),
+    ("classgroup", "class group of discriminant -4kN (Schnorr-Lenstra): works when the class number is smooth"),
 ];
 
 /// Runs a built-in method on n within the current budget.
@@ -345,6 +346,7 @@ pub fn run_method(name: &str, n: &BigInt, seed: u64) -> Option<BigInt> {
         "squfof" => squfof(n),
         "ecm" => ecm(n, seed),
         "qs" => qs(n),
+        "classgroup" => classgroup(n),
         _ => None,
     }
 }
@@ -596,6 +598,26 @@ pub fn squfof(n: &BigInt) -> Option<BigInt> {
         }
         round *= 2;
         if round > 1 << 20 {
+            return None;
+        }
+    }
+}
+
+/// class group factoring (groups.rs) with a growing smoothness bound
+pub fn classgroup(n: &BigInt) -> Option<BigInt> {
+    let mut b = 500u64;
+    loop {
+        let found = crate::groups::class_factor(n, b, 2);
+        // 11 multipliers x 2 forms x ~1.44 b squarings, a composition ~ 20 multiplications
+        let out = spend(22.0 * 1.44 * b as f64 * 20.0);
+        if let Some((f, _, _)) = found {
+            return Some(f);
+        }
+        if out {
+            return None;
+        }
+        b *= 2;
+        if b > 1 << 26 {
             return None;
         }
     }
