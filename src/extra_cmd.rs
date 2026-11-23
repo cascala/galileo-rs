@@ -938,6 +938,9 @@ impl Session {
 
     /// Some(result) if f is one of the commands here
     pub(crate) fn extra_call(&mut self, f: &str, args: &[Node]) -> Option<R<Expr>> {
+        if let Some(r) = self.lab_call(f, args) {
+            return Some(r);
+        }
         let r = match f {
             "isprime" | "nextprime" | "prevprime" | "totient" | "eulerphi" | "sigma" | "isqrt" | "primepi" | "prime" | "pollard" => {
                 self.int_unary(f, args)

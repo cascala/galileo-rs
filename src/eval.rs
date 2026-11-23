@@ -282,6 +282,9 @@ impl Session {
     }
 
     pub fn eval(&mut self, n: &Node) -> R<Expr> {
+        if crate::factorlab::tick() {
+            return Err("out of time (factoring lab budget)".into());
+        }
         let v = match n {
             Node::Num(s) => Expr::Num(Number::parse(s).ok_or_else(|| format!("bad number {}", s))?),
             Node::Str(s) => Expr::Str(s.clone()),
