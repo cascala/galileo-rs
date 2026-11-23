@@ -26,7 +26,11 @@ fn go(n: &BigInt, label: &str) {
     let tn = t.elapsed().as_secs_f64();
     lab::start_budget(1e13, env_secs());
     let t = Instant::now();
-    let q = lab::qs(n);
+    let q = if std::env::var("NFS_NOQS").is_ok() {
+        None
+    } else {
+        lab::qs(n)
+    };
     lab::end_budget();
     let tq = t.elapsed().as_secs_f64();
     println!(

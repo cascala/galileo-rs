@@ -568,7 +568,7 @@ fn alg_sqrt(
         lab::spend(layer.len() as f64 * 4.0);
     }
     let gamma = layer.pop().unwrap_or_else(|| vec![BigInt::one()]);
-    for attempt in 0..4 {
+    for attempt in 0..2 {
         let e = (bits / (*q as f64).log2()).ceil() as u32 + 1;
         let qe = qb.pow(e);
         let mut s = vec![];
@@ -640,8 +640,8 @@ fn alg_sqrt(
             }
         }
         bits *= 2.0;
-        if attempt == 3 {
-            log.push("    no square root found (precision too low?)".into());
+        if attempt == 1 {
+            log.push("    no square root with whole coefficients: the product is not a square in Z[α] after all (the characters only make that likely), next dependency".into());
         }
     }
     None

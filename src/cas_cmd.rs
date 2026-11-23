@@ -399,7 +399,9 @@ impl Session {
 
     fn fsolve(&mut self, args: &[Node]) -> R<Expr> {
         let [f, x, g] = args else {
-            return Err("usage: fsolve(f, x, guess): a numeric root of f = 0 near the guess".into());
+            return Err(
+                "usage: fsolve(f, x, guess): a numeric root of f = 0 near the guess".into(),
+            );
         };
         let x = name(x, "fsolve: x")?;
         let fx = crate::eval::equation_lhs(&self.eval_hidden(f, std::slice::from_ref(&x))?);
