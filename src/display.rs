@@ -10,7 +10,12 @@ pub type Bundle = Vec<(&'static str, String)>;
 
 fn typeset(e: &Expr) -> bool {
     match e {
-        Expr::Add(_) | Expr::Mul(_) | Expr::Pow(..) | Expr::Sym(_) | Expr::Func(..) | Expr::Apply(..) => true,
+        Expr::Add(_)
+        | Expr::Mul(_)
+        | Expr::Pow(..)
+        | Expr::Sym(_)
+        | Expr::Func(..)
+        | Expr::Apply(..) => true,
         Expr::Num(n) => !n.is_integer() && n.is_exact(),
         Expr::Matrix(m) => m.iter().flatten().any(|x| !x.is_number()),
         _ => false,
@@ -31,12 +36,30 @@ pub fn bundle(e: &Expr) -> Option<Bundle> {
                 ("image/svg+xml", f.svg()),
                 ("application/vnd.plotly.v1+json", f.plotly()),
             ],
-            Obj::Metric(m) => vec![("text/plain", m.text()), ("text/latex", m.latex()), ("text/markdown", m.latex())],
-            Obj::Components(c) => vec![("text/plain", c.text()), ("text/latex", c.latex()), ("text/markdown", c.markdown())],
-            Obj::Equations(q) => vec![("text/plain", q.text()), ("text/latex", q.latex()), ("text/markdown", q.markdown())],
-            Obj::Report(r) => vec![("text/plain", r.text.clone()), ("text/markdown", r.markdown.clone())],
+            Obj::Metric(m) => vec![
+                ("text/plain", m.text()),
+                ("text/latex", m.latex()),
+                ("text/markdown", m.latex()),
+            ],
+            Obj::Components(c) => vec![
+                ("text/plain", c.text()),
+                ("text/latex", c.latex()),
+                ("text/markdown", c.markdown()),
+            ],
+            Obj::Equations(q) => vec![
+                ("text/plain", q.text()),
+                ("text/latex", q.latex()),
+                ("text/markdown", q.markdown()),
+            ],
+            Obj::Report(r) => vec![
+                ("text/plain", r.text.clone()),
+                ("text/markdown", r.markdown.clone()),
+            ],
         }),
-        _ if typeset(e) => Some(vec![("text/plain", show(e)), ("text/latex", format!("$${}$$", latex(e)))]),
+        _ if typeset(e) => Some(vec![
+            ("text/plain", show(e)),
+            ("text/latex", format!("$${}$$", latex(e))),
+        ]),
         _ => None,
     }
 }
@@ -55,7 +78,9 @@ pub fn shown(o: &Output) -> Shown {
             None => Shown::Text(show(e)),
         },
         Output::Nothing => Shown::Nothing,
-        Output::Exit => Shown::Text("exit is not available in a notebook; use Kernel > Shut Down instead".into()),
+        Output::Exit => Shown::Text(
+            "exit is not available in a notebook; use Kernel > Shut Down instead".into(),
+        ),
         other => match other.render() {
             s if s.is_empty() => Shown::Nothing,
             s => Shown::Text(s),

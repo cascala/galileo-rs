@@ -64,8 +64,17 @@ fn fmt(e: &Expr) -> (String, u8) {
             P_ATOM,
         ),
         Func(f, a) => (format!("{}({})", f.name(), fmt(a).0), P_ATOM),
-        Apply(f, v) if f == "==" && v.len() == 2 => (format!("{} == {}", fmt(&v[0]).0, fmt(&v[1]).0), 0),
-        Apply(f, v) => (format!("{}({})", f, v.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", ")), P_ATOM),
+        Apply(f, v) if f == "==" && v.len() == 2 => {
+            (format!("{} == {}", fmt(&v[0]).0, fmt(&v[1]).0), 0)
+        }
+        Apply(f, v) => (
+            format!(
+                "{}({})",
+                f,
+                v.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", ")
+            ),
+            P_ATOM,
+        ),
         Add(terms) => {
             // lead with a positive term when there is one: b-a rather than -a+b
             let mut terms = terms.clone();
@@ -76,12 +85,17 @@ fn fmt(e: &Expr) -> (String, u8) {
             } else {
                 // polynomials in one variable keep descending powers: -x^3/6 + x
                 let poly = terms.len() >= 3 && crate::extra_cmd::univariate_poly(e);
-                if let Some(k) = terms.iter().position(|t| !t.is_negative_term()).filter(|_| !poly) {
+                if let Some(k) = terms
+                    .iter()
+                    .position(|t| !t.is_negative_term())
+                    .filter(|_| !poly)
+                {
                     let t = terms.remove(k);
                     terms.insert(0, t);
                 }
                 // a + b*i: the imaginary part last
-                let (re, im): (Vec<Expr>, Vec<Expr>) = terms.into_iter().partition(|t| !crate::extra_cmd::has_i(t));
+                let (re, im): (Vec<Expr>, Vec<Expr>) =
+                    terms.into_iter().partition(|t| !crate::extra_cmd::has_i(t));
                 terms = re.into_iter().chain(im).collect();
             }
             let mut s = String::new();
@@ -111,7 +125,10 @@ fn fmt(e: &Expr) -> (String, u8) {
             if **b == Const(Const::E) {
                 return (format!("exp({})", fmt(x).0), P_ATOM);
             }
-            (format!("{}^{}", wrap(fmt(b), P_ATOM), wrap(fmt(x), P_ATOM)), P_POW)
+            (
+                format!("{}^{}", wrap(fmt(b), P_ATOM), wrap(fmt(x), P_ATOM)),
+                P_POW,
+            )
         }
     }
 }
@@ -128,9 +145,10 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
     for f in factors {
         match &f {
             Num(n) => coeff = coeff.mul(n),
-            Pow(b, x) if x.num().is_some_and(|n| n.is_negative()) => {
-                denom.push(crate::build::pow((**b).clone(), Num(x.num().unwrap().neg())))
-            }
+            Pow(b, x) if x.num().is_some_and(|n| n.is_negative()) => denom.push(crate::build::pow(
+                (**b).clone(),
+                Num(x.num().unwrap().neg()),
+            )),
             _ => numer.push(f),
         }
     }
@@ -165,7 +183,11 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
     ds.extend(denom.iter().map(|f| wrap(fmt(f), P_POW)));
     let mut s = ns.join("*");
     if !ds.is_empty() {
-        let d = if ds.len() > 1 { format!("({})", ds.join("*")) } else { ds.pop().unwrap() };
+        let d = if ds.len() > 1 {
+            format!("({})", ds.join("*"))
+        } else {
+            ds.pop().unwrap()
+        };
         s = format!("{}/{}", s, d);
     }
     if negative {
@@ -185,12 +207,21 @@ mod tests {
     }
     #[test]
     fn prints_nicely() {
-        let e = sub(mul(vec![Expr::int(3), pow(x(), Expr::int(2))]), mul(vec![Expr::int(2), x()]));
+        let e = sub(
+            mul(vec![Expr::int(3), pow(x(), Expr::int(2))]),
+            mul(vec![Expr::int(2), x()]),
+        );
         assert_eq!(show(&e), "3*x^2-2*x");
         assert_eq!(show(&div(x(), Expr::int(3))), "x/3");
-        assert_eq!(show(&div(Expr::one(), mul(vec![x(), Expr::sym("y")]))), "1/(x*y)");
+        assert_eq!(
+            show(&div(Expr::one(), mul(vec![x(), Expr::sym("y")]))),
+            "1/(x*y)"
+        );
         assert_eq!(show(&neg(add(vec![x(), Expr::one()]))), "-(x+1)");
-        assert_eq!(show(&pow(add(vec![x(), Expr::one()]), Expr::int(2))), "(x+1)^2");
+        assert_eq!(
+            show(&pow(add(vec![x(), Expr::one()]), Expr::int(2))),
+            "(x+1)^2"
+        );
         assert_eq!(show(&sqrt(x())), "sqrt(x)");
         assert_eq!(show(&add(vec![x(), Expr::int(-9)])), "x-9");
     }

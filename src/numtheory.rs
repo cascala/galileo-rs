@@ -58,10 +58,16 @@ pub fn powmod(a: &BigInt, e: &BigInt, m: &BigInt) -> BigInt {
 /// a^-1 mod m, if gcd(a, m) = 1
 pub fn modinv(a: &BigInt, m: &BigInt) -> Option<BigInt> {
     let e = a.mod_floor(m).extended_gcd(m);
-    if e.gcd.is_one() { Some(e.x.mod_floor(m)) } else { None }
+    if e.gcd.is_one() {
+        Some(e.x.mod_floor(m))
+    } else {
+        None
+    }
 }
 
-const BASES: [u32; 20] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71];
+const BASES: [u32; 20] = [
+    2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+];
 
 /// Miller-Rabin: certain below 3.3e24, and for larger numbers a strong
 /// probable-prime test to 20 bases (no composite is known to pass it)
@@ -142,11 +148,21 @@ pub fn pollard_rho_pow(n: &BigInt, k: u64) -> Option<BigInt> {
     let k = k.max(2);
     let kb = BigInt::from(k);
     // multiplications per step
-    let cost = if k == 2 { 1 } else { (64 - k.leading_zeros() as u64) + k.count_ones() as u64 - 1 };
+    let cost = if k == 2 {
+        1
+    } else {
+        (64 - k.leading_zeros() as u64) + k.count_ones() as u64 - 1
+    };
     let mut budget = BIG_RHO_WORK.saturating_mul(effort()) / limbs(n);
     for c in 1..20u32 {
         let c = BigInt::from(c);
-        let f = |x: &BigInt| if k == 2 { (x * x + &c) % n } else { (x.modpow(&kb, n) + &c) % n };
+        let f = |x: &BigInt| {
+            if k == 2 {
+                (x * x + &c) % n
+            } else {
+                (x.modpow(&kb, n) + &c) % n
+            }
+        };
         let (mut y, mut r, mut q, m) = (BigInt::from(2), 1u64, BigInt::one(), 128u64);
         let (mut g, mut x, mut ys) = (BigInt::one(), BigInt::zero(), BigInt::zero());
         while g.is_one() {
@@ -195,7 +211,9 @@ pub fn pollard_pm1(n: &BigInt) -> Option<BigInt> {
 pub fn pollard_pm1_with(n: &BigInt, known: u64) -> Option<BigInt> {
     let e = effort() as usize;
     let b1: usize = 100_000 * e.min(1000);
-    let b2: usize = ((if limbs(n) <= 4 { 5_000_000 } else { 1_000_000 }) * e).min(50_000_000).max(b1 + 1);
+    let b2: usize = ((if limbs(n) <= 4 { 5_000_000 } else { 1_000_000 }) * e)
+        .min(50_000_000)
+        .max(b1 + 1);
     let ps = small::primes_upto(b2);
     let mut a = BigInt::from(2).modpow(&BigInt::from(known.max(1)), n);
     for (i, &q) in ps.iter().take_while(|&&q| q <= b1).enumerate() {
@@ -227,7 +245,11 @@ pub fn pollard_pm1_with(n: &BigInt, known: u64) -> Option<BigInt> {
     for i in first..ps.len() {
         if i > first {
             let gap = (ps[i] - ps[i - 1]) / 2;
-            let step = if gap <= 200 { steps[gap].clone() } else { a2.modpow(&BigInt::from(gap), n) };
+            let step = if gap <= 200 {
+                steps[gap].clone()
+            } else {
+                a2.modpow(&BigInt::from(gap), n)
+            };
             x = x * step % n;
         }
         acc = acc * (&x - 1u32) % n;
@@ -248,7 +270,10 @@ pub fn pollard_pm1_with(n: &BigInt, known: u64) -> Option<BigInt> {
 pub fn factorize(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
     let n = n.abs();
     if let Some(v) = word_of(&n) {
-        return Ok(small::factorize(v)?.into_iter().map(|(p, e)| (big(p), e)).collect());
+        return Ok(small::factorize(v)?
+            .into_iter()
+            .map(|(p, e)| (big(p), e))
+            .collect());
     }
     let mut primes: Vec<BigInt> = vec![];
     let mut n = n;
@@ -462,7 +487,9 @@ pub mod small {
             d /= 2;
             s += 1;
         }
-        let bases: &[u128] = &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71];
+        let bases: &[u128] = &[
+            2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+        ];
         'outer: for &a in bases {
             if a % n == 0 {
                 // a prime base equal to n says nothing
@@ -549,7 +576,7 @@ pub mod small {
         None
     }
 
-/// prime factorization as (prime, exponent), primes increasing
+    /// prime factorization as (prime, exponent), primes increasing
     pub fn factorize(n: u128) -> Result<Vec<(u128, u32)>, String> {
         let mut primes = vec![];
         let mut n = n;
@@ -572,7 +599,8 @@ pub mod small {
             if is_prime(m) {
                 primes.push(m);
             } else {
-                let d = pollard_rho(m).ok_or_else(|| format!("could not factor {} in reasonable time", m))?;
+                let d = pollard_rho(m)
+                    .ok_or_else(|| format!("could not factor {} in reasonable time", m))?;
                 todo.push(d);
                 todo.push(m / d);
             }
@@ -709,7 +737,10 @@ mod tests {
         assert!(is_prime(170141183460469231731687303715884105727)); // 2^127 - 1
         assert_eq!(factorize(360).unwrap(), vec![(2, 3), (3, 2), (5, 1)]);
         let n = 1_000_000_007u128 * 998_244_353;
-        assert_eq!(factorize(n).unwrap(), vec![(998_244_353, 1), (1_000_000_007, 1)]);
+        assert_eq!(
+            factorize(n).unwrap(),
+            vec![(998_244_353, 1), (1_000_000_007, 1)]
+        );
         assert_eq!(totient(36).unwrap(), 12);
         assert_eq!(modinv(3, 11), Some(4));
         assert_eq!(mult_order(2, 7).unwrap(), 3);
@@ -723,7 +754,9 @@ mod tests {
         let m127 = num_traits::pow(two.clone(), 127) - 1u32;
         assert!(super::is_prime(&m127));
         assert!(super::is_prime(&(num_traits::pow(two.clone(), 521) - 1u32)));
-        assert!(!super::is_prime(&(num_traits::pow(two.clone(), 523) - 1u32)));
+        assert!(!super::is_prime(
+            &(num_traits::pow(two.clone(), 523) - 1u32)
+        ));
         let f = super::factorize(&(num_traits::pow(two.clone(), 128) - 1u32)).unwrap();
         assert_eq!(f.len(), 9);
         assert_eq!(f[8], (b("67280421310721"), 1));
@@ -732,7 +765,13 @@ mod tests {
         assert!(super::is_prime(&p));
         let q = super::next_prime(&num_traits::pow(BigInt::from(10), 40));
         assert_eq!(super::pollard_pm1(&(&p * &q)), Some(p));
-        assert_eq!(super::powmod(&BigInt::from(3), &BigInt::from(100), &BigInt::from(7)), BigInt::from(4));
-        assert_eq!(super::next_prime(&num_traits::pow(BigInt::from(10), 40)), b("10000000000000000000000000000000000000121"));
+        assert_eq!(
+            super::powmod(&BigInt::from(3), &BigInt::from(100), &BigInt::from(7)),
+            BigInt::from(4)
+        );
+        assert_eq!(
+            super::next_prime(&num_traits::pow(BigInt::from(10), 40)),
+            b("10000000000000000000000000000000000000121")
+        );
     }
 }

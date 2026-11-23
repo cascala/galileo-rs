@@ -1,6 +1,6 @@
 //! End-to-end checks for differential geometry, plots and the kernel protocol.
 
-use galileo_rs::display::{shown, Shown};
+use galileo_rs::display::{Shown, shown};
 use galileo_rs::eval::Session;
 use galileo_rs::kernel;
 
@@ -24,7 +24,9 @@ fn run(code: &str) -> String {
 
 #[test]
 fn schwarzschild() {
-    let out = run("S = metric.generate(schwarzschild);\nchristoffel(S)[1,0,0]\nriccitensor(S)\nkretschmann(S)");
+    let out = run(
+        "S = metric.generate(schwarzschild);\nchristoffel(S)[1,0,0]\nriccitensor(S)\nkretschmann(S)",
+    );
     assert!(out.contains("r_s*(r-r_s)/(2*r^3)"), "{}", out);
     assert!(out.contains("all components are zero"), "{}", out);
     assert!(out.contains("12*r_s^2/r^6"), "{}", out);
@@ -58,14 +60,25 @@ fn kerr_is_vacuum() {
 
 #[test]
 fn ode_and_plots() {
-    let x = run("odesolve([y], [y], t, [1], 0, 1)").parse::<f64>().unwrap();
+    let x = run("odesolve([y], [y], t, [1], 0, 1)")
+        .parse::<f64>()
+        .unwrap();
     assert!((x - std::f64::consts::E).abs() < 1e-6);
     let mut s = Session::new();
     let rs = s.run_quiet("plot(sin(x), x, 0, 2*pi)");
     let Ok(o) = &rs[0].0 else { panic!() };
-    let Shown::Rich(b) = shown(o) else { panic!("no figure") };
+    let Shown::Rich(b) = shown(o) else {
+        panic!("no figure")
+    };
     let kinds: Vec<&str> = b.iter().map(|(k, _)| *k).collect();
-    assert_eq!(kinds, ["text/plain", "image/svg+xml", "application/vnd.plotly.v1+json"]);
+    assert_eq!(
+        kinds,
+        [
+            "text/plain",
+            "image/svg+xml",
+            "application/vnd.plotly.v1+json"
+        ]
+    );
 }
 
 #[test]
@@ -76,6 +89,10 @@ fn kernel_protocol() {
     let r = kernel::execute(&mut s, "1 +");
     assert!(r.contains(r#""ename":"SyntaxError""#), "{}", r);
     let r = kernel::complete(&s, "christ", 6);
-    assert!(r.contains(r#""christoffel""#) && r.contains(r#""start":0,"end":6"#), "{}", r);
+    assert!(
+        r.contains(r#""christoffel""#) && r.contains(r#""start":0,"end":6"#),
+        "{}",
+        r
+    );
     assert!(kernel::inspect("riccitensor(", 12).contains(r#""found":true"#));
 }

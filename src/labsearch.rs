@@ -53,10 +53,21 @@ pub enum E {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Prog {
-    Iter { f: E, h: E, x0: E },
-    Rel { s: E, fb: usize },
+    Iter {
+        f: E,
+        h: E,
+        x0: E,
+    },
+    Rel {
+        s: E,
+        fb: usize,
+    },
     /// grp(world, e, r): powers in a group mod N, see labgroups
-    Grp { w: World, e: E, r: u64 },
+    Grp {
+        w: World,
+        e: E,
+        r: u64,
+    },
 }
 
 // ---------- printing and parsing ----------
@@ -113,9 +124,17 @@ fn to_e(n: &Node) -> Result<E, String> {
             "B" => E::B,
             "d0" => E::D0,
             "d1" => E::D1,
-            o => return Err(format!("unknown name {} in a lab program (use x, y, i, rt, rti, B, d0, d1)", o)),
+            o => {
+                return Err(format!(
+                    "unknown name {} in a lab program (use x, y, i, rt, rti, B, d0, d1)",
+                    o
+                ));
+            }
         },
-        Node::Num(s) => E::C(s.parse::<i64>().map_err(|_| format!("{}: only whole numbers in lab programs", s))?),
+        Node::Num(s) => E::C(
+            s.parse::<i64>()
+                .map_err(|_| format!("{}: only whole numbers in lab programs", s))?,
+        ),
         Node::Neg(a) => match to_e(a)? {
             E::C(c) => E::C(-c),
             o => E::Sub(Box::new(E::C(0)), Box::new(o)),
@@ -126,7 +145,9 @@ fn to_e(n: &Node) -> Result<E, String> {
         Node::Bin(Op::Pow, x, y) => match &**y {
             Node::Ident(s) if s == "i" => E::PowI(b(x)?),
             Node::Num(k) => {
-                let k: u32 = k.parse().map_err(|_| "exponents are whole numbers 1 to 64, or i".to_string())?;
+                let k: u32 = k
+                    .parse()
+                    .map_err(|_| "exponents are whole numbers 1 to 64, or i".to_string())?;
                 if !(1..=64).contains(&k) {
                     return Err("exponents are whole numbers 1 to 64, or i".into());
                 }
@@ -138,9 +159,18 @@ fn to_e(n: &Node) -> Result<E, String> {
             ("pow", [a, e]) if matches!(e, Node::Ident(s) if s == "i") => E::PowI(b(a)?),
             ("luc", [a]) => E::Luc(b(a)?),
             ("inv", [a]) => E::Inv(b(a)?),
-            _ => return Err(format!("{}(...) is not a lab operation (use pow(a, i), luc(a), inv(a))", f)),
+            _ => {
+                return Err(format!(
+                    "{}(...) is not a lab operation (use pow(a, i), luc(a), inv(a))",
+                    f
+                ));
+            }
         },
-        _ => return Err("lab programs use + - * ^, pow, luc, inv and the names x y i rt rti B d0 d1".into()),
+        _ => {
+            return Err(
+                "lab programs use + - * ^, pow, luc, inv and the names x y i rt rti B d0 d1".into(),
+            );
+        }
     })
 }
 
@@ -151,8 +181,16 @@ pub fn parse_prog(text: &str) -> Result<Prog, String> {
         return Err("a lab program looks like iter(f, h, x0) or rel(s, fb)".into());
     };
     match (name.as_str(), &args[..]) {
-        ("iter", [f, h]) => Ok(Prog::Iter { f: to_e(f)?, h: to_e(h)?, x0: E::C(2) }),
-        ("iter", [f, h, x0]) => Ok(Prog::Iter { f: to_e(f)?, h: to_e(h)?, x0: to_e(x0)? }),
+        ("iter", [f, h]) => Ok(Prog::Iter {
+            f: to_e(f)?,
+            h: to_e(h)?,
+            x0: E::C(2),
+        }),
+        ("iter", [f, h, x0]) => Ok(Prog::Iter {
+            f: to_e(f)?,
+            h: to_e(h)?,
+            x0: to_e(x0)?,
+        }),
         ("rel", [s]) => Ok(Prog::Rel { s: to_e(s)?, fb: 0 }),
         ("rel", [s, Node::Num(k)]) => {
             let fb: usize = k.parse().map_err(|_| "rel(s, fb): fb is a whole number")?;
@@ -161,10 +199,20 @@ pub fn parse_prog(text: &str) -> Result<Prog, String> {
             }
             Ok(Prog::Rel { s: to_e(s)?, fb })
         }
-        ("grp", [w, e]) => Ok(Prog::Grp { w: world_of(w)?, e: to_e(e)?, r: 0 }),
+        ("grp", [w, e]) => Ok(Prog::Grp {
+            w: world_of(w)?,
+            e: to_e(e)?,
+            r: 0,
+        }),
         ("grp", [w, e, Node::Num(k)]) => {
-            let r: u64 = k.parse().map_err(|_| "grp(world, e, r): r is a whole number")?;
-            Ok(Prog::Grp { w: world_of(w)?, e: to_e(e)?, r })
+            let r: u64 = k
+                .parse()
+                .map_err(|_| "grp(world, e, r): r is a whole number")?;
+            Ok(Prog::Grp {
+                w: world_of(w)?,
+                e: to_e(e)?,
+                r,
+            })
         }
         _ => Err("a lab program looks like iter(f, h, x0), rel(s, fb) or grp(world, e, r)".into()),
     }
@@ -173,9 +221,14 @@ pub fn parse_prog(text: &str) -> Result<Prog, String> {
 fn world_of(n: &Node) -> Result<World, String> {
     let num = |n: &Node| -> Result<i64, String> {
         match n {
-            Node::Num(s) => s.parse().map_err(|_| "world parameters are whole numbers".to_string()),
+            Node::Num(s) => s
+                .parse()
+                .map_err(|_| "world parameters are whole numbers".to_string()),
             Node::Neg(a) => match &**a {
-                Node::Num(s) => s.parse::<i64>().map(|v| -v).map_err(|_| "world parameters are whole numbers".to_string()),
+                Node::Num(s) => s
+                    .parse::<i64>()
+                    .map(|v| -v)
+                    .map_err(|_| "world parameters are whole numbers".to_string()),
                 _ => Err("world parameters are whole numbers".into()),
             },
             _ => Err("world parameters are whole numbers".into()),
@@ -256,7 +309,11 @@ impl Ring for R64 {
     }
     fn add(&self, a: &u64, b: &u64) -> u64 {
         let s = *a as u128 + *b as u128;
-        (if s >= self.n as u128 { s - self.n as u128 } else { s }) as u64
+        (if s >= self.n as u128 {
+            s - self.n as u128
+        } else {
+            s
+        }) as u64
     }
     fn sub(&self, a: &u64, b: &u64) -> u64 {
         if a >= b { a - b } else { a + (self.n - b) }
@@ -274,7 +331,11 @@ impl Ring for R64 {
         BigInt::from(a.gcd(&self.n))
     }
     fn signed(&self, a: &u64) -> BigInt {
-        if *a > self.n / 2 { BigInt::from(*a) - &self.nb } else { BigInt::from(*a) }
+        if *a > self.n / 2 {
+            BigInt::from(*a) - &self.nb
+        } else {
+            BigInt::from(*a)
+        }
     }
 }
 
@@ -314,7 +375,11 @@ impl Ring for RBig {
         a.gcd(&self.n)
     }
     fn signed(&self, a: &BigInt) -> BigInt {
-        if a > &(&self.n / 2u32) { a - &self.n } else { a.clone() }
+        if a > &(&self.n / 2u32) {
+            a - &self.n
+        } else {
+            a.clone()
+        }
     }
 }
 
@@ -456,14 +521,26 @@ fn consts<Rg: Ring>(r: &Rg) -> Consts<Rg::V> {
     let b = n.cbrt();
     let d0 = n.mod_floor(&b);
     let d1 = (n / &b).mod_floor(&b);
-    Consts { rt: r.of(&lab::ceil_sqrt(n)), b: r.of(&b), d0: r.of(&d0), d1: r.of(&d1) }
+    Consts {
+        rt: r.of(&lab::ceil_sqrt(n)),
+        b: r.of(&b),
+        d0: r.of(&d0),
+        d1: r.of(&d1),
+    }
 }
 
 fn run_iter<Rg: Ring>(r: &Rg, f: &E, h: &E, x0: &E) -> Option<BigInt> {
     let n = r.n().clone();
     let c = consts(r);
     let zero = r.small(0);
-    let mut cx = Ctx { r, c: &c, x: zero.clone(), y: zero.clone(), i: 0, rti: None };
+    let mut cx = Ctx {
+        r,
+        c: &c,
+        x: zero.clone(),
+        y: zero.clone(),
+        i: 0,
+        rti: None,
+    };
     let x = match cx.eval(x0) {
         Ok(v) => v,
         Err(Found(g)) => return nontrivial(&g, &n).then_some(g),
@@ -561,7 +638,14 @@ fn run_rel<Rg: Ring>(r: &Rg, s: &E, fbn: usize) -> Option<BigInt> {
     let mut seen: HashSet<BigInt> = HashSet::new();
     let mut wanted = cols + 5;
     let rt0 = c.rt.clone();
-    let mut cx = Ctx { r, c: &c, x: rt0.clone(), y: rt0, i: 0, rti: None };
+    let mut cx = Ctx {
+        r,
+        c: &c,
+        x: rt0.clone(),
+        y: rt0,
+        i: 0,
+        rti: None,
+    };
     loop {
         cx.i += 1;
         cx.rti = None;
@@ -655,7 +739,9 @@ fn combine(n: &BigInt, fb: &[u64], rels: &[(BigInt, Vec<u32>)]) -> Option<BigInt
     lab::spend((r * r * (cw + hw)) as f64 / 16.0);
     let mut pr = 0;
     for c in 0..cols {
-        let Some(k) = (pr..r).find(|&i| rows[i].0[c / 64] >> (c % 64) & 1 == 1) else { continue };
+        let Some(k) = (pr..r).find(|&i| rows[i].0[c / 64] >> (c % 64) & 1 == 1) else {
+            continue;
+        };
         rows.swap(pr, k);
         let (pv, ph) = rows[pr].clone();
         for i in 0..r {
@@ -709,7 +795,10 @@ pub fn run_prog(p: &Prog, n: &BigInt) -> Option<BigInt> {
     }
     match n.to_u64().filter(|&v| v < 1 << 63) {
         Some(v) => {
-            let r = R64 { n: v, nb: n.clone() };
+            let r = R64 {
+                n: v,
+                nb: n.clone(),
+            };
             match p {
                 Prog::Iter { f, h, x0 } => run_iter(&r, f, h, x0),
                 Prog::Rel { s, fb } => run_rel(&r, s, *fb),
@@ -776,7 +865,11 @@ fn rand_exponent(rng: &mut Rng) -> E {
 
 pub fn random_prog(rng: &mut Rng) -> Prog {
     if rng.below(4) == 0 {
-        return Prog::Grp { w: lg::random_world(rng), e: rand_exponent(rng), r: RESTARTS[rng.below(6) as usize] };
+        return Prog::Grp {
+            w: lg::random_world(rng),
+            e: rand_exponent(rng),
+            r: RESTARTS[rng.below(6) as usize],
+        };
     }
     if rng.below(3) < 2 {
         let h = match rng.below(4) {
@@ -784,9 +877,16 @@ pub fn random_prog(rng: &mut Rng) -> Prog {
             1 => E::Sub(Box::new(E::X), Box::new(E::C(1))),
             _ => rand_e(rng, 2, true),
         };
-        Prog::Iter { f: rand_e(rng, 3, true), h, x0: E::C([2, 3, 5][rng.below(3) as usize]) }
+        Prog::Iter {
+            f: rand_e(rng, 3, true),
+            h,
+            x0: E::C([2, 3, 5][rng.below(3) as usize]),
+        }
     } else {
-        Prog::Rel { s: rand_e(rng, 3, false), fb: FBS[rng.below(8) as usize] }
+        Prog::Rel {
+            s: rand_e(rng, 3, false),
+            fb: FBS[rng.below(8) as usize],
+        }
     }
 }
 
@@ -829,9 +929,20 @@ pub fn simplify(e: &E) -> E {
 
 pub fn simplify_prog(p: &Prog) -> Prog {
     match p {
-        Prog::Iter { f, h, x0 } => Prog::Iter { f: simplify(f), h: simplify(h), x0: simplify(x0) },
-        Prog::Rel { s, fb } => Prog::Rel { s: simplify(s), fb: *fb },
-        Prog::Grp { w, e, r } => Prog::Grp { w: *w, e: simplify(e), r: *r },
+        Prog::Iter { f, h, x0 } => Prog::Iter {
+            f: simplify(f),
+            h: simplify(h),
+            x0: simplify(x0),
+        },
+        Prog::Rel { s, fb } => Prog::Rel {
+            s: simplify(s),
+            fb: *fb,
+        },
+        Prog::Grp { w, e, r } => Prog::Grp {
+            w: *w,
+            e: simplify(e),
+            r: *r,
+        },
     }
 }
 
@@ -849,9 +960,19 @@ fn fingerprint(p: &Prog) -> u64 {
         return h;
     }
     let n = BigInt::from(1_000_000_016_000_000_063u64); // 1000000007 * 1000000009
-    let r = R64 { n: 1_000_000_016_000_000_063, nb: n };
+    let r = R64 {
+        n: 1_000_000_016_000_000_063,
+        nb: n,
+    };
     let c = consts(&r);
-    let mut cx = Ctx { r: &r, c: &c, x: 2, y: 2, i: 0, rti: None };
+    let mut cx = Ctx {
+        r: &r,
+        c: &c,
+        x: 2,
+        y: 2,
+        i: 0,
+        rti: None,
+    };
     let mut h: u64 = match p {
         Prog::Iter { .. } => 1,
         Prog::Rel { fb, .. } => 1000 + *fb as u64,
@@ -951,7 +1072,12 @@ pub fn mutate(p: &Prog, other: &Prog, rng: &mut Rng) -> Prog {
     let cross = rng.below(4) == 0;
     match &mut p {
         Prog::Iter { f, h, x0 } => match rng.below(10) {
-            0 => p = Prog::Rel { s: f.clone(), fb: FBS[rng.below(8) as usize] },
+            0 => {
+                p = Prog::Rel {
+                    s: f.clone(),
+                    fb: FBS[rng.below(8) as usize],
+                }
+            }
             1..=2 => mutate_e(h, rng, true),
             3 => *x0 = E::C(CONSTS[rng.below(8) as usize].abs() + 1),
             _ if cross => {
@@ -961,7 +1087,13 @@ pub fn mutate(p: &Prog, other: &Prog, rng: &mut Rng) -> Prog {
             _ => mutate_e(f, rng, true),
         },
         Prog::Rel { s, fb } => match rng.below(10) {
-            0 => p = Prog::Iter { f: s.clone(), h: E::Sub(Box::new(E::X), Box::new(E::Y)), x0: E::C(2) },
+            0 => {
+                p = Prog::Iter {
+                    f: s.clone(),
+                    h: E::Sub(Box::new(E::X), Box::new(E::Y)),
+                    x0: E::C(2),
+                }
+            }
             1..=2 => *fb = FBS[rng.below(8) as usize],
             _ if cross => {
                 let d = subtree(&donor, rng);
@@ -1048,15 +1180,26 @@ impl TrainSet {
         let mut cases = vec![];
         for &d in sizes {
             for k in 0..per {
-                cases.push((d, lab::semiprime(d, seed.wrapping_mul(7919).wrapping_add(k))));
+                cases.push((
+                    d,
+                    lab::semiprime(d, seed.wrapping_mul(7919).wrapping_add(k)),
+                ));
             }
         }
-        TrainSet { cases: cases.into_iter().map(|(d, (n, _, _))| (d, n)).collect() }
+        TrainSet {
+            cases: cases.into_iter().map(|(d, (n, _, _))| (d, n)).collect(),
+        }
     }
 }
 
 pub fn score(p: &Prog, t: &TrainSet) -> Score {
-    let mut s = Score { score: 0.0, solved: 0, total: t.cases.len(), runs: vec![], logs: vec![] };
+    let mut s = Score {
+        score: 0.0,
+        solved: 0,
+        total: t.cases.len(),
+        runs: vec![],
+        logs: vec![],
+    };
     let mut give_up = false;
     let mut first_misses = 0;
     for (d, n) in &t.cases {
@@ -1137,7 +1280,10 @@ fn post(e: Entry) {
     BOARD.with(|b| {
         let mut b = b.borrow_mut();
         let text = e.prog.to_string();
-        if let Some(old) = b.iter_mut().find(|o| o.prog.to_string() == text && o.sizes == e.sizes) {
+        if let Some(old) = b
+            .iter_mut()
+            .find(|o| o.prog.to_string() == text && o.sizes == e.sizes)
+        {
             if e.score.score < old.score.score || (e.test.is_some() && old.test.is_none()) {
                 *old = e;
             }
@@ -1211,11 +1357,26 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         TrainSet::new(1)
     } else {
         let mut t = TrainSet::with(1, &[12], PER_SIZE);
-        t.cases.extend(TrainSet::with(1, sizes, PER_SIZE).cases.into_iter().filter(|c| c.0 != 12));
+        t.cases.extend(
+            TrainSet::with(1, sizes, PER_SIZE)
+                .cases
+                .into_iter()
+                .filter(|c| c.0 != 12),
+        );
         t
     };
-    let test_sizes: Vec<u32> = if default { TEST.to_vec() } else { sizes.iter().map(|d| d + 2).collect() };
-    let train_sizes: Vec<u32> = t.cases.iter().map(|c| c.0).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    let test_sizes: Vec<u32> = if default {
+        TEST.to_vec()
+    } else {
+        sizes.iter().map(|d| d + 2).collect()
+    };
+    let train_sizes: Vec<u32> = t
+        .cases
+        .iter()
+        .map(|c| c.0)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let sizes_label = format!("{}-{}", train_sizes[0], train_sizes.last().unwrap());
     let seeded = !default && sizes.iter().copied().max().unwrap_or(0) > 20;
     let clock = lab::Clock::start();
@@ -1233,7 +1394,12 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         }
     };
     let mut prints: HashSet<u64> = HashSet::new();
-    let mut eval = |p: Prog, by: &str, scored: &mut Vec<Entry>, seen: &mut HashSet<u64>, units: &mut f64| -> bool {
+    let mut eval = |p: Prog,
+                    by: &str,
+                    scored: &mut Vec<Entry>,
+                    seen: &mut HashSet<u64>,
+                    units: &mut f64|
+     -> bool {
         let p = simplify_prog(&p);
         let text = p.to_string();
         let key = {
@@ -1252,7 +1418,14 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         let s = score(&p, &t);
         *units += s.runs.iter().map(|r| r.1).sum::<f64>() + (s.total - s.solved) as f64 * 1000.0;
         evaluated += 1;
-        let e = Entry { prog: p, score: s, found_by: by.to_string(), test: None, held: None, sizes: sizes_label.clone() };
+        let e = Entry {
+            prog: p,
+            score: s,
+            found_by: by.to_string(),
+            test: None,
+            held: None,
+            sizes: sizes_label.clone(),
+        };
         if e.score.solved > 0 {
             post(e.clone());
         }
@@ -1268,7 +1441,17 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         .iter()
         .map(|(name, text)| {
             let p = parse_prog(text).unwrap();
-            (name.to_string(), Entry { score: score(&p, &t), prog: p, found_by: "classic".into(), test: None, held: None, sizes: sizes_label.clone() })
+            (
+                name.to_string(),
+                Entry {
+                    score: score(&p, &t),
+                    prog: p,
+                    found_by: "classic".into(),
+                    test: None,
+                    held: None,
+                    sizes: sizes_label.clone(),
+                },
+            )
         })
         .collect();
     match mode {
@@ -1278,8 +1461,21 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
             'outer: for sz in 1..=9 {
                 let mut go = true;
                 each_tree(sz, &small_iter, &mut |f| {
-                    for h in [E::Sub(Box::new(E::X), Box::new(E::Y)), E::Sub(Box::new(E::X), Box::new(E::C(1)))] {
-                        eval(Prog::Iter { f: f.clone(), h, x0: E::C(2) }, "exhaustive", &mut scored, &mut seen, &mut units);
+                    for h in [
+                        E::Sub(Box::new(E::X), Box::new(E::Y)),
+                        E::Sub(Box::new(E::X), Box::new(E::C(1))),
+                    ] {
+                        eval(
+                            Prog::Iter {
+                                f: f.clone(),
+                                h,
+                                x0: E::C(2),
+                            },
+                            "exhaustive",
+                            &mut scored,
+                            &mut seen,
+                            &mut units,
+                        );
                         if done(units) {
                             go = false;
                             return false;
@@ -1292,7 +1488,13 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
                 }
                 each_tree(sz, &small_rel, &mut |s| {
                     for fb in [0, 64, 256] {
-                        eval(Prog::Rel { s: s.clone(), fb }, "exhaustive", &mut scored, &mut seen, &mut units);
+                        eval(
+                            Prog::Rel { s: s.clone(), fb },
+                            "exhaustive",
+                            &mut scored,
+                            &mut seen,
+                            &mut units,
+                        );
                         if done(units) {
                             go = false;
                             return false;
@@ -1308,7 +1510,13 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
                     for e in trees(sz, false).into_iter().filter(|e| int_only(e)) {
                         for w in lg::all_worlds() {
                             for r in [0, 30, 100] {
-                                eval(Prog::Grp { w, e: e.clone(), r }, "exhaustive", &mut scored, &mut seen, &mut units);
+                                eval(
+                                    Prog::Grp { w, e: e.clone(), r },
+                                    "exhaustive",
+                                    &mut scored,
+                                    &mut seen,
+                                    &mut units,
+                                );
                                 if done(units) {
                                     break 'outer;
                                 }
@@ -1320,7 +1528,13 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         }
         "random" => {
             while !done(units) {
-                eval(random_prog(&mut rng), "random", &mut scored, &mut seen, &mut units);
+                eval(
+                    random_prog(&mut rng),
+                    "random",
+                    &mut scored,
+                    &mut seen,
+                    &mut units,
+                );
             }
         }
         _ => {
@@ -1337,7 +1551,13 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
                 }
             }
             while pop.len() < pop_size * 2 && !done(units) {
-                if eval(random_prog(&mut rng), "evolve", &mut scored, &mut seen, &mut units) {
+                if eval(
+                    random_prog(&mut rng),
+                    "evolve",
+                    &mut scored,
+                    &mut seen,
+                    &mut units,
+                ) {
                     pop.push(scored.last().unwrap().clone());
                 }
             }
@@ -1354,7 +1574,11 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
                         a.min(b)
                     };
                     let (a, b) = (pick(&mut rng), pick(&mut rng));
-                    let child = if rng.below(10) == 0 { random_prog(&mut rng) } else { mutate(&pop[a].prog, &pop[b].prog, &mut rng) };
+                    let child = if rng.below(10) == 0 {
+                        random_prog(&mut rng)
+                    } else {
+                        mutate(&pop[a].prog, &pop[b].prog, &mut rng)
+                    };
                     if eval(child, "evolve", &mut scored, &mut seen, &mut units) {
                         children.push(scored.last().unwrap().clone());
                     }
@@ -1382,7 +1606,11 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
     scored.truncate(10);
     let seconds = clock.seconds();
     // check the best ones on numbers the search never saw
-    let test = if default { TrainSet::test() } else { TrainSet::with(1_000_001, &test_sizes, TEST_PER_SIZE) };
+    let test = if default {
+        TrainSet::test()
+    } else {
+        TrainSet::with(1_000_001, &test_sizes, TEST_PER_SIZE)
+    };
     let rho_test = score(&parse_prog(CLASSICS[0].1).unwrap(), &test);
     for e in scored.iter_mut().take(5) {
         if e.score.solved > 0 {
@@ -1393,7 +1621,20 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         }
     }
     let (train_count, test_count) = (t.cases.len(), test.cases.len());
-    SearchResult { evaluated, distinct, best: scored, classics, units, seconds, rho_test, train_sizes, test_sizes, train_count, test_count, seeded }
+    SearchResult {
+        evaluated,
+        distinct,
+        best: scored,
+        classics,
+        units,
+        seconds,
+        rho_test,
+        train_sizes,
+        test_sizes,
+        train_count,
+        test_count,
+        seeded,
+    }
 }
 
 /// whether e uses only i, constants, + - * and ^k
@@ -1419,7 +1660,12 @@ pub fn each_tree(size: usize, small: &[Vec<E>], f: &mut dyn FnMut(E) -> bool) ->
         return true;
     }
     let ok = each_tree(size - 1, small, &mut |a| {
-        for u in [E::Pow(Box::new(a.clone()), 2), E::PowI(Box::new(a.clone())), E::Luc(Box::new(a.clone())), E::Inv(Box::new(a.clone()))] {
+        for u in [
+            E::Pow(Box::new(a.clone()), 2),
+            E::PowI(Box::new(a.clone())),
+            E::Luc(Box::new(a.clone())),
+            E::Inv(Box::new(a.clone())),
+        ] {
             if !f(u) {
                 return false;
             }
@@ -1498,7 +1744,8 @@ mod tests {
         let (n, p, q) = lab::semiprime(16, 3);
         for text in ["iter(x^2 + 1, x - y, 2)", "rel(rti, 0)", "rel(rti, 64)"] {
             lab::start_budget(1e8, 10.0);
-            let f = run_prog(&parse_prog(text).unwrap(), &n).unwrap_or_else(|| panic!("{} failed", text));
+            let f = run_prog(&parse_prog(text).unwrap(), &n)
+                .unwrap_or_else(|| panic!("{} failed", text));
             lab::end_budget();
             assert!(f == p || f == q);
         }
@@ -1512,7 +1759,13 @@ mod tests {
 
     #[test]
     fn group_programs_parse_and_run() {
-        for t in ["grp(mul, i, 0)", "grp(quad(-1), i^2, 50)", "grp(ec(3), i, 100)", "grp(mat, 2*i, 0)", "grp(cubic(2), i, 0)"] {
+        for t in [
+            "grp(mul, i, 0)",
+            "grp(quad(-1), i^2, 50)",
+            "grp(ec(3), i, 100)",
+            "grp(mat, 2*i, 0)",
+            "grp(cubic(2), i, 0)",
+        ] {
             assert_eq!(parse_prog(t).unwrap().to_string(), t);
         }
         let (n, p, q) = lab::semiprime(18, 2);

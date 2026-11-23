@@ -5,7 +5,7 @@
 use crate::build::*;
 use crate::calc::{self, deriv, expand, simplify, subst};
 use crate::cas;
-use crate::eval::{equation_lhs, R, Session};
+use crate::eval::{R, Session, equation_lhs};
 use crate::expr::{Const, Expr, Func, Obj};
 use crate::num::Number;
 use crate::numeric;
@@ -30,7 +30,9 @@ fn row(v: Vec<Expr>) -> Expr {
 
 fn int_of(e: &Expr, f: &str) -> R<i128> {
     let v = match e {
-        Expr::Num(n) if !n.is_exact() && n.is_integer() && n.to_f64().abs() < 1e15 => return Ok(n.to_f64() as i128),
+        Expr::Num(n) if !n.is_exact() && n.is_integer() && n.to_f64().abs() < 1e15 => {
+            return Ok(n.to_f64() as i128);
+        }
         e => e.num().filter(|n| n.is_exact()).and_then(|n| n.as_int()),
     };
     v.ok_or_else(|| format!("{} needs whole numbers, got {}", f, show(e)))
@@ -39,7 +41,10 @@ fn int_of(e: &Expr, f: &str) -> R<i128> {
 fn nonneg(e: &Expr, f: &str) -> R<u128> {
     let n = int_of(e, f)?;
     if n < 0 {
-        return Err(format!("{} needs a number that is not negative, got {}", f, n));
+        return Err(format!(
+            "{} needs a number that is not negative, got {}",
+            f, n
+        ));
     }
     Ok(n as u128)
 }
@@ -59,7 +64,11 @@ fn log10_digits(e: &Expr) -> Option<f64> {
             let lx = match x.as_bigint() {
                 Some(k) => {
                     let f = k.to_f64().unwrap_or(f64::INFINITY);
-                    if f.is_finite() { f.abs().log10() } else { k.bits() as f64 * std::f64::consts::LOG10_2 }
+                    if f.is_finite() {
+                        f.abs().log10()
+                    } else {
+                        k.bits() as f64 * std::f64::consts::LOG10_2
+                    }
                 }
                 None => x.to_f64().abs().log10(),
             };
@@ -78,7 +87,11 @@ pub(crate) fn is_huge(e: &Expr) -> bool {
 /// why e is not a whole number we can work with, in words
 pub(crate) fn not_whole(e: &Expr, f: &str) -> String {
     if let Some(l) = log10_digits(e).filter(|_| is_huge(e)) {
-        let digits = if l < 15.0 { format!("about {:.0} digits", 10f64.powf(l)) } else { format!("about 10^{:.0} digits", l) };
+        let digits = if l < 15.0 {
+            format!("about {:.0} digits", 10f64.powf(l))
+        } else {
+            format!("about 10^{:.0} digits", l)
+        };
         return format!(
             "{}: this number is too large to compute: it would have {}. Galileo computes exact whole numbers up to about a million digits",
             f, digits
@@ -106,7 +119,9 @@ pub(crate) fn not_whole(e: &Expr, f: &str) -> String {
 /// a whole number of any size (or a float that is exactly a small whole number)
 pub(crate) fn big_of(e: &Expr, f: &str) -> R<BigInt> {
     let v = match e {
-        Expr::Num(n) if !n.is_exact() && n.is_integer() && n.to_f64().abs() < 1e15 => return Ok(BigInt::from(n.to_f64() as i128)),
+        Expr::Num(n) if !n.is_exact() && n.is_integer() && n.to_f64().abs() < 1e15 => {
+            return Ok(BigInt::from(n.to_f64() as i128));
+        }
         e => e.num().and_then(|n| n.as_bigint()),
     };
     v.ok_or_else(|| not_whole(e, f))
@@ -115,7 +130,10 @@ pub(crate) fn big_of(e: &Expr, f: &str) -> R<BigInt> {
 fn big_nonneg(e: &Expr, f: &str) -> R<BigInt> {
     let n = big_of(e, f)?;
     if n.is_negative() {
-        return Err(format!("{} needs a number that is not negative, got {}", f, n));
+        return Err(format!(
+            "{} needs a number that is not negative, got {}",
+            f, n
+        ));
     }
     Ok(n)
 }
@@ -153,10 +171,18 @@ pub fn factored_text(n: &BigInt) -> R<String> {
     }
     let a = n.abs();
     if a.is_one() {
-        return Ok(if n.is_negative() { "-1".into() } else { "1".into() });
+        return Ok(if n.is_negative() {
+            "-1".into()
+        } else {
+            "1".into()
+        });
     }
     for (p, e) in nt::factorize(&a)? {
-        parts.push(if e == 1 { p.to_string() } else { format!("{}^{}", p, e) });
+        parts.push(if e == 1 {
+            p.to_string()
+        } else {
+            format!("{}^{}", p, e)
+        });
     }
     Ok(parts.join(" * "))
 }
@@ -171,7 +197,10 @@ pub fn univariate_poly(e: &Expr) -> bool {
     }
     let x = Expr::sym(&syms[0]);
     let mono = |t: &Expr| -> bool {
-        let power = |f: &Expr| *f == x || matches!(f, Expr::Pow(b, k) if **b == x && k.num().is_some_and(|n| n.is_integer() && !n.is_negative()));
+        let power = |f: &Expr| {
+            *f == x
+                || matches!(f, Expr::Pow(b, k) if **b == x && k.num().is_some_and(|n| n.is_integer() && !n.is_negative()))
+        };
         match t {
             Expr::Num(_) => true,
             Expr::Mul(f) => f.len() == 2 && f[0].is_number() && power(&f[1]),
@@ -193,7 +222,10 @@ pub fn has_i(e: &Expr) -> bool {
 
 fn cmul(a: (Expr, Expr), b: (Expr, Expr)) -> (Expr, Expr) {
     (
-        sub(mul2(a.0.clone(), b.0.clone()), mul2(a.1.clone(), b.1.clone())),
+        sub(
+            mul2(a.0.clone(), b.0.clone()),
+            mul2(a.1.clone(), b.1.clone()),
+        ),
         add2(mul2(a.0, b.1), mul2(a.1, b.0)),
     )
 }
@@ -226,7 +258,10 @@ pub fn parts(e: &Expr) -> R<(Expr, Expr)> {
             // e^(a + b i) = e^a (cos b + i sin b)
             let (a, t) = parts(p)?;
             let r = exp(a);
-            Ok((mul2(r.clone(), func(Func::Cos, t.clone())), mul2(r, func(Func::Sin, t))))
+            Ok((
+                mul2(r.clone(), func(Func::Cos, t.clone())),
+                mul2(r, func(Func::Sin, t)),
+            ))
         }
         Expr::Pow(b, p) if !has_i(p) && p.num().is_some_and(|n| n.is_exact() && n.is_integer()) => {
             let n = p.num().unwrap().as_int().unwrap();
@@ -236,7 +271,10 @@ pub fn parts(e: &Expr) -> R<(Expr, Expr)> {
             let z = parts(b)?;
             let z = if n < 0 {
                 // 1/(a + b i) = (a - b i)/(a^2 + b^2)
-                let d = simplify(&add2(pow(z.0.clone(), Expr::int(2)), pow(z.1.clone(), Expr::int(2))));
+                let d = simplify(&add2(
+                    pow(z.0.clone(), Expr::int(2)),
+                    pow(z.1.clone(), Expr::int(2)),
+                ));
                 (div(z.0, d.clone()), div(neg(z.1), d))
             } else {
                 z
@@ -263,7 +301,10 @@ pub fn parts(e: &Expr) -> R<(Expr, Expr)> {
             ))
         }
         Expr::Func(Func::Abs, _) => Ok((e.clone(), Expr::zero())),
-        _ => Err(format!("can't split {} into real and imaginary parts", show(e))),
+        _ => Err(format!(
+            "can't split {} into real and imaginary parts",
+            show(e)
+        )),
     }
 }
 
@@ -298,7 +339,10 @@ fn split_angle(a: &Expr) -> Option<(Expr, Expr)> {
     match a {
         Expr::Add(v) if v.len() >= 2 => Some((v[0].clone(), add(v[1..].to_vec()))),
         Expr::Mul(f) => {
-            let n = f[0].num().filter(|n| n.is_exact() && n.is_integer())?.as_int()?;
+            let n = f[0]
+                .num()
+                .filter(|n| n.is_exact() && n.is_integer())?
+                .as_int()?;
             if n >= 2 {
                 let x = mul(f[1..].to_vec());
                 Some((mul2(Expr::int(n - 1), x.clone()), x))
@@ -315,8 +359,13 @@ pub fn trig_expand(e: &Expr) -> Expr {
     let e = e.map_children(&mut |c| trig_expand(c));
     match &e {
         Expr::Func(f @ (Func::Sin | Func::Cos | Func::Tan), a) => {
-            let Some((p, q)) = split_angle(a) else { return e };
-            let (sp, cp) = (trig_expand(&func(Func::Sin, p.clone())), trig_expand(&func(Func::Cos, p.clone())));
+            let Some((p, q)) = split_angle(a) else {
+                return e;
+            };
+            let (sp, cp) = (
+                trig_expand(&func(Func::Sin, p.clone())),
+                trig_expand(&func(Func::Cos, p.clone())),
+            );
             let (sq, cq) = (func(Func::Sin, q.clone()), func(Func::Cos, q.clone()));
             let r = match f {
                 Func::Sin => add2(mul2(sp, cq), mul2(cp, sq)),
@@ -350,7 +399,11 @@ fn reduce_term(t: &Expr) -> Expr {
     let mut flat = vec![];
     for f in factors {
         match &f {
-            Expr::Pow(b, p) if trig_factor(b).is_some() && p.num().is_some_and(|n| n.is_exact() && n.is_integer() && !n.is_negative()) => {
+            Expr::Pow(b, p)
+                if trig_factor(b).is_some()
+                    && p.num()
+                        .is_some_and(|n| n.is_exact() && n.is_integer() && !n.is_negative()) =>
+            {
                 for _ in 0..p.num().unwrap().as_int().unwrap() {
                     flat.push((**b).clone());
                 }
@@ -358,7 +411,9 @@ fn reduce_term(t: &Expr) -> Expr {
             _ => flat.push(f),
         }
     }
-    let idx: Vec<usize> = (0..flat.len()).filter(|&i| trig_factor(&flat[i]).is_some()).collect();
+    let idx: Vec<usize> = (0..flat.len())
+        .filter(|&i| trig_factor(&flat[i]).is_some())
+        .collect();
     if idx.len() < 2 {
         return t.clone();
     }
@@ -372,7 +427,12 @@ fn reduce_term(t: &Expr) -> Expr {
         (true, false) => mul2(half, add2(func(Func::Sin, s), func(Func::Sin, d))),
         (false, true) => mul2(half, sub(func(Func::Sin, s), func(Func::Sin, d))),
     };
-    let rest: Vec<Expr> = flat.iter().enumerate().filter(|(i, _)| *i != idx[0] && *i != idx[1]).map(|(_, f)| f.clone()).collect();
+    let rest: Vec<Expr> = flat
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != idx[0] && *i != idx[1])
+        .map(|(_, f)| f.clone())
+        .collect();
     let mut all = rest;
     all.push(pair);
     trig_reduce(&expand(&mul(all)))
@@ -413,7 +473,11 @@ pub fn solve_trig(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
     let fun = fs[0];
     let u = "u__";
     fn replace(e: &Expr, from: &Expr, to: &Expr) -> Expr {
-        if e == from { to.clone() } else { e.map_children(&mut |c| replace(c, from, to)) }
+        if e == from {
+            to.clone()
+        } else {
+            e.map_children(&mut |c| replace(c, from, to))
+        }
     }
     let g = replace(f, &func(fun, Expr::sym(x)), &Expr::sym(u));
     if g.contains_sym(x) {
@@ -428,7 +492,11 @@ pub fn solve_trig(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
         let v = numeric::value(&t);
         let k = (v / (2.0 * std::f64::consts::PI)).floor();
         let r = simplify(&sub(t, mul2(Expr::int(k as i128), two_pi.clone())));
-        if (numeric::value(&r) - 2.0 * std::f64::consts::PI).abs() < 1e-12 { Expr::zero() } else { r }
+        if (numeric::value(&r) - 2.0 * std::f64::consts::PI).abs() < 1e-12 {
+            Expr::zero()
+        } else {
+            r
+        }
     };
     let mut out: Vec<Expr> = vec![];
     for r in roots {
@@ -453,8 +521,15 @@ pub fn solve_trig(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
         };
         let float = r.num().is_some_and(|n| !n.is_exact());
         for c in cands {
-            let c = if float { calc::evalf(&norm(c)) } else { norm(c) };
-            if !out.iter().any(|o| (numeric::value(o) - numeric::value(&c)).abs() < 1e-12) {
+            let c = if float {
+                calc::evalf(&norm(c))
+            } else {
+                norm(c)
+            };
+            if !out
+                .iter()
+                .any(|o| (numeric::value(o) - numeric::value(&c)).abs() < 1e-12)
+            {
                 out.push(c);
             }
         }
@@ -487,7 +562,11 @@ pub fn solve_inverse(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
         });
     }
     fn replace(e: &Expr, from: &Expr, to: &Expr) -> Expr {
-        if e == from { to.clone() } else { e.map_children(&mut |c| replace(c, from, to)) }
+        if e == from {
+            to.clone()
+        } else {
+            e.map_children(&mut |c| replace(c, from, to))
+        }
     }
     let mut found = vec![];
     find(f, x, &mut found);
@@ -515,7 +594,10 @@ pub fn solve_inverse(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
                 if v.is_finite() && v <= 0.0 {
                     continue;
                 }
-                ((**h).clone(), div(func(Func::Log, r.clone()), func(Func::Log, (**b).clone())))
+                (
+                    (**h).clone(),
+                    div(func(Func::Log, r.clone()), func(Func::Log, (**b).clone())),
+                )
             }
             _ => continue,
         };
@@ -539,10 +621,24 @@ pub fn solve_inverse(f: &Expr, x: &str) -> Option<R<Vec<Expr>>> {
 
 // ---------- implicit curves (marching squares) ----------
 
-fn contour(f: &dyn Fn(f64, f64) -> f64, x0: f64, x1: f64, y0: f64, y1: f64, n: usize) -> Vec<(f64, f64)> {
-    let xs: Vec<f64> = (0..=n).map(|i| x0 + (x1 - x0) * i as f64 / n as f64).collect();
-    let ys: Vec<f64> = (0..=n).map(|j| y0 + (y1 - y0) * j as f64 / n as f64).collect();
-    let v: Vec<Vec<f64>> = xs.iter().map(|&x| ys.iter().map(|&y| f(x, y)).collect()).collect();
+fn contour(
+    f: &dyn Fn(f64, f64) -> f64,
+    x0: f64,
+    x1: f64,
+    y0: f64,
+    y1: f64,
+    n: usize,
+) -> Vec<(f64, f64)> {
+    let xs: Vec<f64> = (0..=n)
+        .map(|i| x0 + (x1 - x0) * i as f64 / n as f64)
+        .collect();
+    let ys: Vec<f64> = (0..=n)
+        .map(|j| y0 + (y1 - y0) * j as f64 / n as f64)
+        .collect();
+    let v: Vec<Vec<f64>> = xs
+        .iter()
+        .map(|&x| ys.iter().map(|&y| f(x, y)).collect())
+        .collect();
     let mut segs: Vec<((f64, f64), (f64, f64))> = vec![];
     let cross = |pa: (f64, f64), va: f64, pb: (f64, f64), vb: f64| {
         let t = va / (va - vb);
@@ -550,7 +646,12 @@ fn contour(f: &dyn Fn(f64, f64) -> f64, x0: f64, x1: f64, y0: f64, y1: f64, n: u
     };
     for i in 0..n {
         for j in 0..n {
-            let c = [(xs[i], ys[j]), (xs[i + 1], ys[j]), (xs[i + 1], ys[j + 1]), (xs[i], ys[j + 1])];
+            let c = [
+                (xs[i], ys[j]),
+                (xs[i + 1], ys[j]),
+                (xs[i + 1], ys[j + 1]),
+                (xs[i], ys[j + 1]),
+            ];
             let w = [v[i][j], v[i + 1][j], v[i + 1][j + 1], v[i][j + 1]];
             if w.iter().any(|z| !z.is_finite()) {
                 continue;
@@ -580,7 +681,9 @@ fn contour(f: &dyn Fn(f64, f64) -> f64, x0: f64, x1: f64, y0: f64, y1: f64, n: u
         }
     }
     // chain the segments into polylines, separated by NaN breaks
-    let close = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 * (1.0 + a.0.abs()) && (a.1 - b.1).abs() < 1e-9 * (1.0 + a.1.abs());
+    let close = |a: (f64, f64), b: (f64, f64)| {
+        (a.0 - b.0).abs() < 1e-9 * (1.0 + a.0.abs()) && (a.1 - b.1).abs() < 1e-9 * (1.0 + a.1.abs())
+    };
     let mut used = vec![false; segs.len()];
     let mut out = vec![];
     for s in 0..segs.len() {
@@ -626,9 +729,16 @@ fn contour(f: &dyn Fn(f64, f64) -> f64, x0: f64, x1: f64, y0: f64, y1: f64, n: u
 fn perm_of(e: &Expr, f: &str) -> R<Vec<usize>> {
     let v: Vec<Expr> = match e {
         Expr::Matrix(m) if m.len() == 1 => m[0].clone(),
-        Expr::Matrix(m) if m.iter().all(|r| r.len() == 1) => m.iter().map(|r| r[0].clone()).collect(),
+        Expr::Matrix(m) if m.iter().all(|r| r.len() == 1) => {
+            m.iter().map(|r| r[0].clone()).collect()
+        }
         Expr::Num(_) => vec![e.clone()],
-        _ => return Err(format!("{}: a permutation is a row such as [2, 3, 1] (1 goes to 2, 2 to 3, 3 to 1)", f)),
+        _ => {
+            return Err(format!(
+                "{}: a permutation is a row such as [2, 3, 1] (1 goes to 2, 2 to 3, 3 to 1)",
+                f
+            ));
+        }
     };
     let n = v.len();
     let mut p = vec![];
@@ -636,7 +746,12 @@ fn perm_of(e: &Expr, f: &str) -> R<Vec<usize>> {
     for x in &v {
         let k = int_of(x, f)?;
         if k < 1 || k as usize > n || seen[k as usize] {
-            return Err(format!("{}: [{}] is not a permutation of 1..{}", f, v.iter().map(show).collect::<Vec<_>>().join(", "), n));
+            return Err(format!(
+                "{}: [{}] is not a permutation of 1..{}",
+                f,
+                v.iter().map(show).collect::<Vec<_>>().join(", "),
+                n
+            ));
         }
         seen[k as usize] = true;
         p.push(k as usize);
@@ -681,7 +796,17 @@ fn cycles_text(p: &[usize]) -> String {
     if c.is_empty() {
         return "()".into();
     }
-    c.iter().map(|c| format!("({})", c.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(" "))).collect()
+    c.iter()
+        .map(|c| {
+            format!(
+                "({})",
+                c.iter()
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        })
+        .collect()
 }
 
 fn parse_cycles(s: &str, n: usize) -> R<Vec<usize>> {
@@ -689,13 +814,18 @@ fn parse_cycles(s: &str, n: usize) -> R<Vec<usize>> {
     let mut rest = s.trim();
     let mut cyc: Vec<Vec<usize>> = vec![];
     while !rest.is_empty() {
-        let open = rest.find('(').ok_or("perm: write cycles like \"(1 2 3)(4 5)\"")?;
+        let open = rest
+            .find('(')
+            .ok_or("perm: write cycles like \"(1 2 3)(4 5)\"")?;
         let close = rest.find(')').ok_or("perm: missing )")?;
         let inner = &rest[open + 1..close];
         let c: Vec<usize> = inner
             .split(|ch: char| ch == ' ' || ch == ',')
             .filter(|t| !t.is_empty())
-            .map(|t| t.parse::<usize>().map_err(|_| format!("perm: {} is not a number", t)))
+            .map(|t| {
+                t.parse::<usize>()
+                    .map_err(|_| format!("perm: {} is not a number", t))
+            })
             .collect::<R<_>>()?;
         if c.iter().any(|&k| k < 1 || k > n) {
             return Err(format!("perm: cycle entries must be between 1 and {}", n));
@@ -715,11 +845,17 @@ fn parse_cycles(s: &str, n: usize) -> R<Vec<usize>> {
 }
 
 fn perm_order(p: &[usize]) -> u128 {
-    cycles(p).iter().fold(1u128, |acc, c| acc / nt::small::gcd(acc, c.len() as u128) * c.len() as u128)
+    cycles(p).iter().fold(1u128, |acc, c| {
+        acc / nt::small::gcd(acc, c.len() as u128) * c.len() as u128
+    })
 }
 
 fn perm_sign(p: &[usize]) -> i128 {
-    if cycles(p).iter().map(|c| c.len() - 1).sum::<usize>() % 2 == 0 { 1 } else { -1 }
+    if cycles(p).iter().map(|c| c.len() - 1).sum::<usize>() % 2 == 0 {
+        1
+    } else {
+        -1
+    }
 }
 
 // ---------- sums ----------
@@ -762,12 +898,18 @@ pub fn symbolic_sum(f: &Expr, k: &str, a: &Expr, b: &Expr, b_inf: bool) -> R<Exp
         if b_inf {
             let r = numeric::value(&ratio);
             if r.is_finite() && r.abs() >= 1.0 {
-                return Err(format!("sum: the series diverges (each term is {} times the previous one)", show(&ratio)));
+                return Err(format!(
+                    "sum: the series diverges (each term is {} times the previous one)",
+                    show(&ratio)
+                ));
             }
             return Ok(simplify(&div(first, sub(Expr::one(), ratio))));
         }
         let count = add2(sub(b.clone(), Expr::int(a0)), Expr::one());
-        return Ok(simplify(&div(mul2(first, sub(pow(ratio.clone(), count), Expr::one())), sub(ratio, Expr::one()))));
+        return Ok(simplify(&div(
+            mul2(first, sub(pow(ratio.clone(), count), Expr::one())),
+            sub(ratio, Expr::one()),
+        )));
     }
     // p-series 1/k^p with p <= 1 diverge
     if b_inf {
@@ -779,7 +921,11 @@ pub fn symbolic_sum(f: &Expr, k: &str, a: &Expr, b: &Expr, b_inf: bool) -> R<Exp
     }
     // zeta(2), zeta(4), zeta(6)
     if b_inf && a0 == 1 {
-        for (m, v) in [(2, div(pow(pi(), Expr::int(2)), Expr::int(6))), (4, div(pow(pi(), Expr::int(4)), Expr::int(90))), (6, div(pow(pi(), Expr::int(6)), Expr::int(945)))] {
+        for (m, v) in [
+            (2, div(pow(pi(), Expr::int(2)), Expr::int(6))),
+            (4, div(pow(pi(), Expr::int(4)), Expr::int(90))),
+            (6, div(pow(pi(), Expr::int(6)), Expr::int(945))),
+        ] {
             if cas::is_zero(&sub(f.clone(), pow(Expr::sym(k), Expr::int(-m)))) {
                 return Ok(v);
             }
@@ -811,28 +957,55 @@ fn ode_node(n: &Node, y: &str, x: &str, order: &mut usize) -> R<Node> {
                 _ => Node::Transpose(Box::new(ode_node(&n_inner(n), y, x, order)?)),
             }
         }
-        Node::Call(s, args) if s.trim_end_matches('\'') == y && args.len() == 1 && matches!(&args[0], Node::Ident(v) if v == x) => {
+        Node::Call(s, args)
+            if s.trim_end_matches('\'') == y
+                && args.len() == 1
+                && matches!(&args[0], Node::Ident(v) if v == x) =>
+        {
             ph(s.len() - y.len(), order)
         }
         Node::Call(s, args) if s == "diff" || s == "deriv" => {
             // diff(y, x) or diff(y(x), x, 2)
-            let is_y = matches!(args.first(), Some(Node::Ident(v)) if v == y) || matches!(args.first(), Some(Node::Call(v, _)) if v == y);
+            let is_y = matches!(args.first(), Some(Node::Ident(v)) if v == y)
+                || matches!(args.first(), Some(Node::Call(v, _)) if v == y);
             if is_y && args.len() >= 2 {
                 let k = match args.get(2) {
-                    Some(Node::Num(s)) => s.parse::<usize>().map_err(|_| "dsolve: bad derivative order")?,
+                    Some(Node::Num(s)) => s
+                        .parse::<usize>()
+                        .map_err(|_| "dsolve: bad derivative order")?,
                     None => 1,
                     _ => return Err("dsolve: write the derivative order as a number".into()),
                 };
                 ph(k, order)
             } else {
-                Node::Call(s.clone(), args.iter().map(|a| ode_node(a, y, x, order)).collect::<R<_>>()?)
+                Node::Call(
+                    s.clone(),
+                    args.iter()
+                        .map(|a| ode_node(a, y, x, order))
+                        .collect::<R<_>>()?,
+                )
             }
         }
-        Node::Call(s, args) => Node::Call(s.clone(), args.iter().map(|a| ode_node(a, y, x, order)).collect::<R<_>>()?),
+        Node::Call(s, args) => Node::Call(
+            s.clone(),
+            args.iter()
+                .map(|a| ode_node(a, y, x, order))
+                .collect::<R<_>>()?,
+        ),
         Node::Neg(a) => Node::Neg(Box::new(ode_node(a, y, x, order)?)),
-        Node::Bin(op, a, b) => Node::Bin(*op, Box::new(ode_node(a, y, x, order)?), Box::new(ode_node(b, y, x, order)?)),
+        Node::Bin(op, a, b) => Node::Bin(
+            *op,
+            Box::new(ode_node(a, y, x, order)?),
+            Box::new(ode_node(b, y, x, order)?),
+        ),
         Node::Matrix(rows) => Node::Matrix(
-            rows.iter().map(|r| r.iter().map(|e| ode_node(e, y, x, order)).collect::<R<Vec<_>>>()).collect::<R<_>>()?,
+            rows.iter()
+                .map(|r| {
+                    r.iter()
+                        .map(|e| ode_node(e, y, x, order))
+                        .collect::<R<Vec<_>>>()
+                })
+                .collect::<R<_>>()?,
         ),
         other => other.clone(),
     })
@@ -861,7 +1034,10 @@ fn forcing_term(t: &Expr, x: &str) -> Option<(Expr, usize, Expr, Expr)> {
         match &f {
             Expr::Sym(s) if s == x => p += 1,
             Expr::Pow(base, e) if matches!(&**base, Expr::Sym(s) if s == x) => {
-                p += e.num().filter(|n| n.is_exact() && n.is_integer() && !n.is_negative())?.as_int()? as usize;
+                p += e
+                    .num()
+                    .filter(|n| n.is_exact() && n.is_integer() && !n.is_negative())?
+                    .as_int()? as usize;
             }
             Expr::Pow(base, e) if **base == Expr::Const(Const::E) => {
                 let k = simplify(&div((**e).clone(), Expr::sym(x)));
@@ -891,7 +1067,9 @@ impl Session {
     /// letters("HELLO") = [7 4 11 11 14], word([7 4 11 11 14]) = "HELLO";
     /// encode("Hi") = the bytes as one number (base 256), decode undoes it
     fn text_cmd(&mut self, f: &str, args: &[Node]) -> R<Expr> {
-        let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+        let [a] = args else {
+            return Err(format!("{} takes 1 argument", f));
+        };
         let v = self.eval(a)?;
         let text = |v: &Expr| match v {
             Expr::Str(s) => Ok(s.clone()),
@@ -900,11 +1078,19 @@ impl Session {
         match f {
             "letters" => {
                 let s = text(&v)?;
-                let ks: Vec<Expr> = s.chars().filter(|c| c.is_ascii_alphabetic()).map(|c| Expr::int((c.to_ascii_uppercase() as u8 - b'A') as i128)).collect();
+                let ks: Vec<Expr> = s
+                    .chars()
+                    .filter(|c| c.is_ascii_alphabetic())
+                    .map(|c| Expr::int((c.to_ascii_uppercase() as u8 - b'A') as i128))
+                    .collect();
                 if ks.is_empty() {
                     return Err("letters: the text has no letters".into());
                 }
-                Ok(if ks.len() == 1 { ks[0].clone() } else { row(ks) })
+                Ok(if ks.len() == 1 {
+                    ks[0].clone()
+                } else {
+                    row(ks)
+                })
             }
             "word" => {
                 let items: Vec<Expr> = match v {
@@ -923,14 +1109,21 @@ impl Session {
                 if s.len() > 100_000 {
                     return Err("encode: at most 100000 characters".into());
                 }
-                Ok(bnum(BigInt::from_bytes_be(num_bigint::Sign::Plus, s.as_bytes())))
+                Ok(bnum(BigInt::from_bytes_be(
+                    num_bigint::Sign::Plus,
+                    s.as_bytes(),
+                )))
             }
             _ => {
                 let n = big_of(&v, f)?;
                 if n.is_negative() {
                     return Err("decode needs a number of 0 or more".into());
                 }
-                let bytes = if n.is_zero() { vec![] } else { n.to_bytes_be().1 };
+                let bytes = if n.is_zero() {
+                    vec![]
+                } else {
+                    n.to_bytes_be().1
+                };
                 Ok(Expr::Str(String::from_utf8_lossy(&bytes).into_owned()))
             }
         }
@@ -942,9 +1135,8 @@ impl Session {
             return Some(r);
         }
         let r = match f {
-            "isprime" | "nextprime" | "prevprime" | "totient" | "eulerphi" | "sigma" | "isqrt" | "primepi" | "prime" | "pollard" => {
-                self.int_unary(f, args)
-            }
+            "isprime" | "nextprime" | "prevprime" | "totient" | "eulerphi" | "sigma" | "isqrt"
+            | "primepi" | "prime" | "pollard" => self.int_unary(f, args),
             "ifactor" | "factors" | "divisors" | "primroot" => self.int_info(f, args),
             "primes" => self.primes(args),
             "powmod" => self.powmod(args),
@@ -955,18 +1147,25 @@ impl Session {
             "table" => self.table(args),
             "iterate" => self.iterate(args),
             "implicitplot" => self.implicitplot(args),
-            "perm" | "compose" | "pinverse" | "porder" | "psign" | "cycles" | "generate" | "cayley" => self.perms(f, args),
+            "perm" | "compose" | "pinverse" | "porder" | "psign" | "cycles" | "generate"
+            | "cayley" => self.perms(f, args),
             "dsolve" => self.dsolve(args),
             "letters" | "word" | "encode" | "decode" => self.text_cmd(f, args),
             "orbitdata" => self.orbitdata(args),
             "mandelbrot" | "julia" => self.escape_set(f, args),
             "rows" | "cols" | "length" => (|| {
-                let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+                let [a] = args else {
+                    return Err(format!("{} takes 1 argument", f));
+                };
                 let (r, c) = match self.eval(a)? {
                     Expr::Matrix(m) => (m.len(), m.first().map_or(0, |r| r.len())),
                     _ => (1, 1),
                 };
-                Ok(Expr::int(match f { "rows" => r, "cols" => c, _ => r.max(c) } as i128))
+                Ok(Expr::int(match f {
+                    "rows" => r,
+                    "cols" => c,
+                    _ => r.max(c),
+                } as i128))
             })(),
             "polydiv" => self.polydiv(args),
             _ => return None,
@@ -979,14 +1178,20 @@ impl Session {
     }
 
     fn int_unary(&mut self, f: &str, args: &[Node]) -> R<Expr> {
-        let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+        let [a] = args else {
+            return Err(format!("{} takes 1 argument", f));
+        };
         let v = self.eval(a)?;
         each(&v, &mut |x| {
             let bn = big_nonneg(x, f)?;
             match f {
                 "isprime" => return Ok(Expr::Bool(nt::is_prime(&bn))),
                 "nextprime" => return Ok(bnum(nt::next_prime(&bn))),
-                "prevprime" => return Ok(bnum(nt::prev_prime(&bn).ok_or("prevprime: there is no prime below 2")?)),
+                "prevprime" => {
+                    return Ok(bnum(
+                        nt::prev_prime(&bn).ok_or("prevprime: there is no prime below 2")?,
+                    ));
+                }
                 "totient" | "eulerphi" => {
                     if bn.is_zero() {
                         return Err(format!("{}(0) is not defined", f));
@@ -997,18 +1202,28 @@ impl Session {
                     if bn.is_zero() {
                         return Err("sigma(0) is not defined".into());
                     }
-                    return Ok(bnum(nt::divisors(&bn).map_err(|e| format!("sigma: {}", e))?.iter().sum()));
+                    return Ok(bnum(
+                        nt::divisors(&bn)
+                            .map_err(|e| format!("sigma: {}", e))?
+                            .iter()
+                            .sum(),
+                    ));
                 }
                 "isqrt" => return Ok(bnum(nt::isqrt(&bn))),
                 "pollard" => {
                     if bn < BigInt::from(4) || nt::is_prime(&bn) {
                         return Err(format!("pollard: {} has no proper factor", bn));
                     }
-                    return Ok(bnum(nt::pollard_rho(&bn).ok_or("pollard: no factor found in reasonable time")?));
+                    return Ok(bnum(
+                        nt::pollard_rho(&bn)
+                            .ok_or("pollard: no factor found in reasonable time")?,
+                    ));
                 }
                 _ => {}
             }
-            let n = bn.to_u128().ok_or_else(|| format!("{}: {} is too large", f, bn))?;
+            let n = bn
+                .to_u128()
+                .ok_or_else(|| format!("{}: {} is too large", f, bn))?;
             Ok(match f {
                 "primepi" => {
                     if n > 50_000_000 {
@@ -1020,7 +1235,10 @@ impl Session {
                     if n == 0 || n > 3_000_000 {
                         return Err("prime(k): k from 1 to 3000000".into());
                     }
-                    let mut limit = 20usize.max((n as f64 * ((n as f64).ln() + (n as f64).ln().ln().max(1.0))) as usize + 10);
+                    let mut limit = 20usize.max(
+                        (n as f64 * ((n as f64).ln() + (n as f64).ln().ln().max(1.0))) as usize
+                            + 10,
+                    );
                     loop {
                         let ps = nt::primes_upto(limit);
                         if ps.len() >= n as usize {
@@ -1035,7 +1253,9 @@ impl Session {
     }
 
     fn int_info(&mut self, f: &str, args: &[Node]) -> R<Expr> {
-        let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+        let [a] = args else {
+            return Err(format!("{} takes 1 argument", f));
+        };
         let v = self.eval(a)?;
         let n = big_of(&v, f)?;
         let two = BigInt::from(2);
@@ -1047,7 +1267,11 @@ impl Session {
                     return Err("factors: give a whole number of 2 or more".into());
                 }
                 let fs = nt::factorize(&n).map_err(err)?;
-                Ok(Expr::Matrix(fs.into_iter().map(|(p, e)| vec![bnum(p), Expr::int(e as i128)]).collect()))
+                Ok(Expr::Matrix(
+                    fs.into_iter()
+                        .map(|(p, e)| vec![bnum(p), Expr::int(e as i128)])
+                        .collect(),
+                ))
             }
             "divisors" => {
                 if !n.is_positive() {
@@ -1055,7 +1279,11 @@ impl Session {
                 }
                 let ds = nt::divisors(&n).map_err(err)?;
                 if ds.len() > 100_000 {
-                    return Err(format!("divisors: {} has {} divisors, too many to list", n, ds.len()));
+                    return Err(format!(
+                        "divisors: {} has {} divisors, too many to list",
+                        n,
+                        ds.len()
+                    ));
                 }
                 Ok(row(ds.into_iter().map(bnum).collect()))
             }
@@ -1063,7 +1291,10 @@ impl Session {
                 if n < two {
                     return Err("primroot: give a whole number of 2 or more".into());
                 }
-                nt::primitive_root(&n).map_err(err)?.map(bnum).ok_or_else(|| format!("{} has no primitive root", n))
+                nt::primitive_root(&n)
+                    .map_err(err)?
+                    .map(bnum)
+                    .ok_or_else(|| format!("{} has no primitive root", n))
             }
         }
     }
@@ -1073,45 +1304,78 @@ impl Session {
         let (lo, hi) = match v.as_slice() {
             [b] => (0, nonneg(b, "primes")?),
             [a, b] => (nonneg(a, "primes")?, nonneg(b, "primes")?),
-            _ => return Err("usage: primes(n) lists the primes up to n; primes(a, b) those from a to b".into()),
+            _ => {
+                return Err(
+                    "usage: primes(n) lists the primes up to n; primes(a, b) those from a to b"
+                        .into(),
+                );
+            }
         };
         if hi > 10_000_000 {
             return Err("primes: at most 10000000".into());
         }
-        let ps: Vec<Expr> = nt::primes_upto(hi as usize).into_iter().filter(|&p| p as u128 >= lo).map(|p| Expr::int(p as i128)).collect();
+        let ps: Vec<Expr> = nt::primes_upto(hi as usize)
+            .into_iter()
+            .filter(|&p| p as u128 >= lo)
+            .map(|p| Expr::int(p as i128))
+            .collect();
         if ps.len() > 100_000 {
-            return Err("primes: that's more than 100000 primes; use primepi(n) to count them".into());
+            return Err(
+                "primes: that's more than 100000 primes; use primepi(n) to count them".into(),
+            );
         }
         Ok(row(ps))
     }
 
     fn powmod(&mut self, args: &[Node]) -> R<Expr> {
         let v = self.arg_vals(args)?;
-        let [a, b, m] = v.as_slice() else { return Err("usage: powmod(a, b, n) is a^b mod n".into()) };
-        let (a, b, m) = (big_of(a, "powmod")?, big_of(b, "powmod")?, big_of(m, "powmod")?);
+        let [a, b, m] = v.as_slice() else {
+            return Err("usage: powmod(a, b, n) is a^b mod n".into());
+        };
+        let (a, b, m) = (
+            big_of(a, "powmod")?,
+            big_of(b, "powmod")?,
+            big_of(m, "powmod")?,
+        );
         if !m.is_positive() {
             return Err("powmod: the modulus must be positive".into());
         }
-        let base = if b.is_negative() { nt::modinv(&a, &m).ok_or_else(|| format!("powmod: {} has no inverse mod {}", a, m))? } else { a };
+        let base = if b.is_negative() {
+            nt::modinv(&a, &m).ok_or_else(|| format!("powmod: {} has no inverse mod {}", a, m))?
+        } else {
+            a
+        };
         Ok(bnum(nt::powmod(&base, &b.abs(), &m)))
     }
 
     fn int_binary(&mut self, f: &str, args: &[Node]) -> R<Expr> {
         let v = self.arg_vals(args)?;
-        let [a, m] = v.as_slice() else { return Err(format!("usage: {}(a, n)", f)) };
+        let [a, m] = v.as_slice() else {
+            return Err(format!("usage: {}(a, n)", f));
+        };
         let (a, m) = (big_of(a, f)?, big_of(m, f)?);
         if !m.is_positive() {
             return Err(format!("{}: the modulus must be positive", f));
         }
         match f {
-            "modinv" => nt::modinv(&a, &m).map(bnum).ok_or_else(|| format!("modinv: {} has no inverse mod {} (they share a factor)", a, m)),
-            _ => Ok(bnum(nt::mult_order(&num_integer::Integer::mod_floor(&a, &m), &m).map_err(|e| format!("multorder: {}", e))?)),
+            "modinv" => nt::modinv(&a, &m).map(bnum).ok_or_else(|| {
+                format!(
+                    "modinv: {} has no inverse mod {} (they share a factor)",
+                    a, m
+                )
+            }),
+            _ => Ok(bnum(
+                nt::mult_order(&num_integer::Integer::mod_floor(&a, &m), &m)
+                    .map_err(|e| format!("multorder: {}", e))?,
+            )),
         }
     }
 
     fn crt(&mut self, args: &[Node]) -> R<Expr> {
         let v = self.arg_vals(args)?;
-        let [r, m] = v.as_slice() else { return Err("usage: crt([r1, r2, ...], [m1, m2, ...]) solves x = r_i mod m_i".into()) };
+        let [r, m] = v.as_slice() else {
+            return Err("usage: crt([r1, r2, ...], [m1, m2, ...]) solves x = r_i mod m_i".into());
+        };
         let flat = |e: &Expr| -> R<Vec<BigInt>> {
             match e {
                 Expr::Matrix(m) => m.iter().flatten().map(|x| big_of(x, "crt")).collect(),
@@ -1130,7 +1394,9 @@ impl Session {
     }
 
     fn complex(&mut self, f: &str, args: &[Node]) -> R<Expr> {
-        let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+        let [a] = args else {
+            return Err(format!("{} takes 1 argument", f));
+        };
         let v = self.eval(a)?;
         each(&v, &mut |z| {
             let (re, im) = tidy_parts(z)?;
@@ -1141,7 +1407,10 @@ impl Session {
                 "rect" => add2(re, mul2(im, Expr::Const(Const::I))),
                 "arg" => angle(&re, &im),
                 _ => {
-                    let r = simplify(&sqrt(add2(pow(re.clone(), Expr::int(2)), pow(im.clone(), Expr::int(2)))));
+                    let r = simplify(&sqrt(add2(
+                        pow(re.clone(), Expr::int(2)),
+                        pow(im.clone(), Expr::int(2)),
+                    )));
                     row(vec![r, angle(&re, &im)])
                 }
             })
@@ -1149,9 +1418,17 @@ impl Session {
     }
 
     fn trig(&mut self, f: &str, args: &[Node]) -> R<Expr> {
-        let [a] = args else { return Err(format!("{} takes 1 argument", f)) };
+        let [a] = args else {
+            return Err(format!("{} takes 1 argument", f));
+        };
         let v = self.eval(a)?;
-        each(&v, &mut |e| Ok(if f == "trigexpand" { trig_expand(e) } else { trig_reduce(e) }))
+        each(&v, &mut |e| {
+            Ok(if f == "trigexpand" {
+                trig_expand(e)
+            } else {
+                trig_reduce(e)
+            })
+        })
     }
 
     /// evaluate a body for k = a, a+step, ..., b (the body sees k as a number)
@@ -1202,7 +1479,11 @@ impl Session {
                     Some(s) => self.eval(s)?,
                     None => Expr::one(),
                 };
-                let (an, bn, sn) = (a.num().ok_or(usage)?, b.num().ok_or(usage)?, s.num().ok_or(usage)?);
+                let (an, bn, sn) = (
+                    a.num().ok_or(usage)?,
+                    b.num().ok_or(usage)?,
+                    s.num().ok_or(usage)?,
+                );
                 if sn.is_zero() {
                     return Err("table: the step can't be 0".into());
                 }
@@ -1213,20 +1494,38 @@ impl Session {
                 if count > 100_000.0 {
                     return Err("table: at most 100000 entries".into());
                 }
-                (0..=count as i128).map(|j| Expr::Num(an.add(sn.mul(Number::int(j))))).collect()
+                (0..=count as i128)
+                    .map(|j| Expr::Num(an.add(sn.mul(Number::int(j)))))
+                    .collect()
             }
             _ => return Err(usage.into()),
         };
         let out = self.with_values(body, &k, &vals)?;
         // rows stack into a matrix
-        if !out.is_empty() && out.iter().all(|r| matches!(r, Expr::Matrix(m) if m.len() == 1)) {
-            let rows: Vec<Vec<Expr>> = out.into_iter().map(|r| if let Expr::Matrix(mut m) = r { m.remove(0) } else { unreachable!() }).collect();
+        if !out.is_empty()
+            && out
+                .iter()
+                .all(|r| matches!(r, Expr::Matrix(m) if m.len() == 1))
+        {
+            let rows: Vec<Vec<Expr>> = out
+                .into_iter()
+                .map(|r| {
+                    if let Expr::Matrix(mut m) = r {
+                        m.remove(0)
+                    } else {
+                        unreachable!()
+                    }
+                })
+                .collect();
             if rows.iter().all(|r| r.len() == rows[0].len()) {
                 return Ok(Expr::Matrix(rows));
             }
             return Err("table: the rows have different lengths".into());
         }
-        if out.iter().any(|v| !v.is_scalar() && !matches!(v, Expr::Bool(_) | Expr::Str(_))) {
+        if out
+            .iter()
+            .any(|v| !v.is_scalar() && !matches!(v, Expr::Bool(_) | Expr::Str(_)))
+        {
             return Err("table: each entry must be a number, an expression or a row".into());
         }
         Ok(row(out))
@@ -1249,7 +1548,9 @@ impl Session {
     /// keep the next ones, as rows [r x]. Computed with decimals, fast.
     fn orbitdata(&mut self, args: &[Node]) -> R<Expr> {
         let usage = "usage: orbitdata(rule, x, x0, r, r0, r1, nr, skip, keep): rows [r x] of the orbits of x -> rule for nr+1 values of r";
-        let [rule, x, x0, r, rest @ ..] = args else { return Err(usage.into()) };
+        let [rule, x, x0, r, rest @ ..] = args else {
+            return Err(usage.into());
+        };
         if rest.len() != 5 {
             return Err(usage.into());
         }
@@ -1290,10 +1591,15 @@ impl Session {
             "usage: julia(c, re0, re1, im0, im1, n): the points z0 of an n-wide grid whose orbit under z -> z^2 + c stays bounded"
         };
         let (c, rest) = if f == "julia" {
-            let Some((c, rest)) = args.split_first() else { return Err(usage.into()) };
+            let Some((c, rest)) = args.split_first() else {
+                return Err(usage.into());
+            };
             let cv = self.eval(c)?;
             let (re, im) = parts(&cv)?;
-            let (re, im) = (numeric::value(&calc::evalf(&re)), numeric::value(&calc::evalf(&im)));
+            let (re, im) = (
+                numeric::value(&calc::evalf(&re)),
+                numeric::value(&calc::evalf(&im)),
+            );
             if !(re.is_finite() && im.is_finite()) {
                 return Err(format!("julia: c must be a number, got {}", show(&cv)));
             }
@@ -1353,7 +1659,9 @@ impl Session {
         }
         let mut out = vec![cur.clone()];
         for _ in 0..n {
-            let mut next = self.with_values(body, &x, std::slice::from_ref(&cur))?.remove(0);
+            let mut next = self
+                .with_values(body, &x, std::slice::from_ref(&cur))?
+                .remove(0);
             if next.size() > 400 {
                 next = calc::evalf(&next);
             }
@@ -1365,7 +1673,9 @@ impl Session {
 
     fn implicitplot(&mut self, args: &[Node]) -> R<Expr> {
         let usage = "usage: implicitplot(F, x, x0, x1, y, y0, y1) draws the curve F = 0 (or an equation such as x^2 + y^2 == 1) for x0 <= x <= x1, y0 <= y <= y1; a list of equations draws several curves";
-        let [fnode, x, x0, x1, y, y0, y1] = args else { return Err(usage.into()) };
+        let [fnode, x, x0, x1, y, y0, y1] = args else {
+            return Err(usage.into());
+        };
         let (xn, yn) = (name(x, "implicitplot: x")?, name(y, "implicitplot: y")?);
         let fv = self.eval_hidden(fnode, &[xn.clone(), yn.clone()])?;
         let curves: Vec<Expr> = match fv {
@@ -1390,16 +1700,34 @@ impl Session {
             let g = equation_lhs(c);
             let free = numeric::free(&g, &[xn.as_str(), yn.as_str()]);
             if !free.is_empty() {
-                return Err(format!("implicitplot: give values to {} first", free.join(", ")));
+                return Err(format!(
+                    "implicitplot: give values to {} first",
+                    free.join(", ")
+                ));
             }
             let code = numeric::compile(&g, &[xn.as_str(), yn.as_str()]);
-            let pts = contour(&|a, b| numeric::run(&code, &[a, b]), lims[0], lims[1], lims[2], lims[3], 200);
+            let pts = contour(
+                &|a, b| numeric::run(&code, &[a, b]),
+                lims[0],
+                lims[1],
+                lims[2],
+                lims[3],
+                200,
+            );
             let label = labels.get(i).cloned().unwrap_or_else(|| show(c));
-            series.push(Series { label, points: pts, ..Default::default() });
+            series.push(Series {
+                label,
+                points: pts,
+                ..Default::default()
+            });
         }
         let mut fig = Figure::new(series, &xn, &yn, true);
         // keep the window the user asked for: add invisible corner points
-        fig.series.push(Series { label: String::new(), points: vec![], ..Default::default() });
+        fig.series.push(Series {
+            label: String::new(),
+            points: vec![],
+            ..Default::default()
+        });
         fig.series.pop();
         Ok(Expr::Obj(Rc::new(Obj::Figure(fig))))
     }
@@ -1479,11 +1807,14 @@ impl Session {
 
     /// [quotient, remainder] of polynomial long division
     fn polydiv(&mut self, args: &[Node]) -> R<Expr> {
-        let [p, q, x] = args else { return Err("usage: polydiv(p, q, x) gives [quotient, remainder] with p = quotient*q + remainder".into()) };
+        let [p, q, x] = args else {
+            return Err("usage: polydiv(p, q, x) gives [quotient, remainder] with p = quotient*q + remainder".into());
+        };
         let x = name(x, "polydiv: x")?;
         let pv = self.eval_hidden(p, std::slice::from_ref(&x))?;
         let qv = self.eval_hidden(q, std::slice::from_ref(&x))?;
-        let mut a = cas::poly_coeffs(&expand(&pv), &x).ok_or("polydiv: p must be a polynomial in x")?;
+        let mut a =
+            cas::poly_coeffs(&expand(&pv), &x).ok_or("polydiv: p must be a polynomial in x")?;
         let b = cas::poly_coeffs(&expand(&qv), &x).ok_or("polydiv: q must be a polynomial in x")?;
         let b: Vec<Expr> = b.into_iter().map(|c| simplify(&c)).collect();
         let mut bl = b.clone();
@@ -1505,7 +1836,13 @@ impl Session {
             quot[k] = lead;
             a.pop();
         }
-        let poly = |c: &[Expr]| add(c.iter().enumerate().map(|(k, v)| mul2(v.clone(), pow(xs.clone(), Expr::int(k as i128)))).collect());
+        let poly = |c: &[Expr]| {
+            add(c
+                .iter()
+                .enumerate()
+                .map(|(k, v)| mul2(v.clone(), pow(xs.clone(), Expr::int(k as i128))))
+                .collect())
+        };
         Ok(row(vec![poly(&quot), poly(&a)]))
     }
 
@@ -1524,7 +1861,9 @@ impl Session {
         let mut hid: Vec<String> = (0..=order).map(|k| format!("{}__{}", y, k)).collect();
         hid.push(x.clone());
         let e = equation_lhs(&self.eval_hidden(&node, &hid)?);
-        let ys: Vec<Expr> = (0..=order).map(|k| Expr::sym(&format!("{}__{}", y, k))).collect();
+        let ys: Vec<Expr> = (0..=order)
+            .map(|k| Expr::sym(&format!("{}__{}", y, k)))
+            .collect();
         // linear: E = sum a_k y^(k) - g(x)
         let mut a = vec![];
         for k in 0..=order {
@@ -1547,13 +1886,17 @@ impl Session {
             // y' + p y = q: integrating factor
             let p = simplify(&div(a[0].clone(), a[1].clone()));
             let q = simplify(&div(g.clone(), a[1].clone()));
-            let ip = cas::antiderivative(&p, &x).ok_or("dsolve: can't integrate the coefficient of y")?;
+            let ip = cas::antiderivative(&p, &x)
+                .ok_or("dsolve: can't integrate the coefficient of y")?;
             let mu = simplify(&exp(ip));
-            let iq = cas::antiderivative(&simplify(&mul2(mu.clone(), q)), &x).ok_or("dsolve: can't do the integral for this right-hand side")?;
+            let iq = cas::antiderivative(&simplify(&mul2(mu.clone(), q)), &x)
+                .ok_or("dsolve: can't do the integral for this right-hand side")?;
             let c1 = Expr::sym("C1");
             (simplify(&div(add2(iq, c1.clone()), mu)), vec![c1])
         } else {
-            return Err("dsolve: equations of order 2 and higher need constant coefficients".into());
+            return Err(
+                "dsolve: equations of order 2 and higher need constant coefficients".into(),
+            );
         };
         let _ = xs;
         if args.len() == 3 {
@@ -1566,7 +1909,12 @@ impl Session {
             v => vec![v],
         };
         if ics.len() != order {
-            return Err(format!("dsolve: a order-{} equation needs {} start values: y(x0){}", order, order, if order > 1 { ", y'(x0), ..." } else { "" }));
+            return Err(format!(
+                "dsolve: a order-{} equation needs {} start values: y(x0){}",
+                order,
+                order,
+                if order > 1 { ", y'(x0), ..." } else { "" }
+            ));
         }
         let mut eqs = vec![];
         let mut d = sol.clone();
@@ -1587,8 +1935,13 @@ impl Session {
     fn dsolve_constant(&mut self, a: &[Expr], g: &Expr, x: &str) -> R<(Expr, Vec<Expr>)> {
         let n = a.len() - 1;
         let r = Expr::sym("r__");
-        let charpoly = add((0..=n).map(|k| mul2(a[k].clone(), pow(r.clone(), Expr::int(k as i128)))).collect());
-        let roots: Vec<Expr> = cas::solve(&charpoly, "r__")?.iter().map(sqrt_assume).collect();
+        let charpoly = add((0..=n)
+            .map(|k| mul2(a[k].clone(), pow(r.clone(), Expr::int(k as i128))))
+            .collect());
+        let roots: Vec<Expr> = cas::solve(&charpoly, "r__")?
+            .iter()
+            .map(sqrt_assume)
+            .collect();
         let xs = Expr::sym(x);
         // multiplicity: how many derivatives vanish at the root
         let mult = |root: &Expr| -> usize {
@@ -1603,32 +1956,55 @@ impl Session {
         let mut basis: Vec<Expr> = vec![];
         let mut done: Vec<Expr> = vec![];
         for root in &roots {
-            if done.iter().any(|d| cas::is_zero(&sub(d.clone(), root.clone()))) {
+            if done
+                .iter()
+                .any(|d| cas::is_zero(&sub(d.clone(), root.clone())))
+            {
                 continue;
             }
             let (re, im) = tidy_parts(root)?;
             let m = mult(root);
             if cas::is_zero(&im) {
                 for j in 0..m {
-                    basis.push(mul2(pow(xs.clone(), Expr::int(j as i128)), exp(mul2(re.clone(), xs.clone()))));
+                    basis.push(mul2(
+                        pow(xs.clone(), Expr::int(j as i128)),
+                        exp(mul2(re.clone(), xs.clone())),
+                    ));
                 }
                 done.push(root.clone());
             } else {
-                let b = if value_pos(&im) < 0.0 { neg(im.clone()) } else { im.clone() };
+                let b = if value_pos(&im) < 0.0 {
+                    neg(im.clone())
+                } else {
+                    im.clone()
+                };
                 for j in 0..m {
-                    let xe = mul2(pow(xs.clone(), Expr::int(j as i128)), exp(mul2(re.clone(), xs.clone())));
-                    basis.push(mul2(xe.clone(), func(Func::Cos, mul2(b.clone(), xs.clone()))));
+                    let xe = mul2(
+                        pow(xs.clone(), Expr::int(j as i128)),
+                        exp(mul2(re.clone(), xs.clone())),
+                    );
+                    basis.push(mul2(
+                        xe.clone(),
+                        func(Func::Cos, mul2(b.clone(), xs.clone())),
+                    ));
                     basis.push(mul2(xe, func(Func::Sin, mul2(b.clone(), xs.clone()))));
                 }
                 done.push(root.clone());
-                done.push(add2(re.clone(), mul2(neg(im.clone()), Expr::Const(Const::I))));
+                done.push(add2(
+                    re.clone(),
+                    mul2(neg(im.clone()), Expr::Const(Const::I)),
+                ));
             }
         }
         if basis.len() != n {
             return Err("dsolve: could not find all roots of the characteristic polynomial".into());
         }
         let consts: Vec<Expr> = (1..=n).map(|k| Expr::sym(&format!("C{}", k))).collect();
-        let homogeneous = add(consts.iter().zip(&basis).map(|(c, b)| mul2(c.clone(), b.clone())).collect());
+        let homogeneous = add(consts
+            .iter()
+            .zip(&basis)
+            .map(|(c, b)| mul2(c.clone(), b.clone()))
+            .collect());
         if cas::is_zero(g) {
             return Ok((homogeneous, consts));
         }
@@ -1643,7 +2019,10 @@ impl Session {
             let (_, p, ea, eb) = forcing_term(t, x).ok_or_else(|| {
                 format!("dsolve: can't find a particular solution for the term {} (polynomials, exponentials, sines and cosines work)", show(t))
             })?;
-            match groups.iter_mut().find(|(ga, gb, _, _)| cas::is_zero(&sub(ga.clone(), ea.clone())) && cas::is_zero(&sub(gb.clone(), eb.clone()))) {
+            match groups.iter_mut().find(|(ga, gb, _, _)| {
+                cas::is_zero(&sub(ga.clone(), ea.clone()))
+                    && cas::is_zero(&sub(gb.clone(), eb.clone()))
+            }) {
                 Some(gr) => {
                     gr.2 = gr.2.max(p);
                     gr.3.push(t.clone());
@@ -1663,10 +2042,20 @@ impl Session {
         let mut parts_out = vec![];
         for (gi, (ea, eb, p, gterms)) in groups.iter().enumerate() {
             let lambda = add2(ea.clone(), mul2(eb.clone(), Expr::Const(Const::I)));
-            let s = if roots.iter().any(|r| cas::is_zero(&sub(r.clone(), lambda.clone()))) { mult(&lambda) } else { 0 };
+            let s = if roots
+                .iter()
+                .any(|r| cas::is_zero(&sub(r.clone(), lambda.clone())))
+            {
+                mult(&lambda)
+            } else {
+                0
+            };
             let e_ax = exp(mul2(ea.clone(), xs.clone()));
             let trig = !cas::is_zero(eb);
-            let (cosx, sinx) = (func(Func::Cos, mul2(eb.clone(), xs.clone())), func(Func::Sin, mul2(eb.clone(), xs.clone())));
+            let (cosx, sinx) = (
+                func(Func::Cos, mul2(eb.clone(), xs.clone())),
+                func(Func::Sin, mul2(eb.clone(), xs.clone())),
+            );
             let mut unknowns: Vec<String> = vec![];
             let mut trial = vec![];
             for j in 0..=*p {
@@ -1674,7 +2063,12 @@ impl Session {
                 let c = format!("A__{}_{}", gi, j);
                 if trig {
                     let d = format!("B__{}_{}", gi, j);
-                    trial.push(mul(vec![Expr::sym(&c), xp.clone(), e_ax.clone(), cosx.clone()]));
+                    trial.push(mul(vec![
+                        Expr::sym(&c),
+                        xp.clone(),
+                        e_ax.clone(),
+                        cosx.clone(),
+                    ]));
                     trial.push(mul(vec![Expr::sym(&d), xp, e_ax.clone(), sinx.clone()]));
                     unknowns.push(c);
                     unknowns.push(d);
@@ -1711,12 +2105,30 @@ impl Session {
 
 /// Undetermined coefficients, exactly: divide the residual by e^(a x), write
 /// cos(b x), sin(b x) as symbols, and require every coefficient to vanish
-fn match_coefficients(resid: &Expr, a: &Expr, cosx: &Expr, sinx: &Expr, x: &str, unknowns: &[String]) -> Option<Vec<Expr>> {
+fn match_coefficients(
+    resid: &Expr,
+    a: &Expr,
+    cosx: &Expr,
+    sinx: &Expr,
+    x: &str,
+    unknowns: &[String],
+) -> Option<Vec<Expr>> {
     fn replace(e: &Expr, from: &Expr, to: &Expr) -> Expr {
-        if e == from { to.clone() } else { e.map_children(&mut |c| replace(c, from, to)) }
+        if e == from {
+            to.clone()
+        } else {
+            e.map_children(&mut |c| replace(c, from, to))
+        }
     }
-    let r = expand(&mul2(resid.clone(), exp(neg(mul2(a.clone(), Expr::sym(x))))));
-    let r = replace(&replace(&r, cosx, &Expr::sym("C__")), sinx, &Expr::sym("S__"));
+    let r = expand(&mul2(
+        resid.clone(),
+        exp(neg(mul2(a.clone(), Expr::sym(x)))),
+    ));
+    let r = replace(
+        &replace(&r, cosx, &Expr::sym("C__")),
+        sinx,
+        &Expr::sym("S__"),
+    );
     let r = expand(&r);
     let coeffs = cas::poly_coeffs(&r, x)?;
     let mut eqs = vec![];
@@ -1724,7 +2136,11 @@ fn match_coefficients(resid: &Expr, a: &Expr, cosx: &Expr, sinx: &Expr, x: &str,
         let c = expand(&c);
         let cc = simplify(&deriv(&c, "C__"));
         let sc = simplify(&deriv(&c, "S__"));
-        let rest = simplify(&subst(&subst(&c, "C__", &Expr::zero()), "S__", &Expr::zero()));
+        let rest = simplify(&subst(
+            &subst(&c, "C__", &Expr::zero()),
+            "S__",
+            &Expr::zero(),
+        ));
         for q in [cc, sc, rest] {
             if q.contains_sym("C__") || q.contains_sym("S__") || q.contains_sym(x) {
                 return None;
@@ -1735,7 +2151,9 @@ fn match_coefficients(resid: &Expr, a: &Expr, cosx: &Expr, sinx: &Expr, x: &str,
         }
     }
     let names: Vec<String> = unknowns.to_vec();
-    cas::solve_linear(&eqs, &names).ok().map(|v| v.into_iter().map(|e| simplify(&e)).collect())
+    cas::solve_linear(&eqs, &names)
+        .ok()
+        .map(|v| v.into_iter().map(|e| simplify(&e)).collect())
 }
 
 /// numeric value with every variable set to a (different) positive number
@@ -1755,7 +2173,11 @@ fn sqrt_assume(e: &Expr) -> Expr {
         return e;
     }
     let v = value_pos(b);
-    let (inside, unit) = if v < 0.0 { (simplify(&neg((**b).clone())), true) } else { ((**b).clone(), false) };
+    let (inside, unit) = if v < 0.0 {
+        (simplify(&neg((**b).clone())), true)
+    } else {
+        ((**b).clone(), false)
+    };
     let factors = match &inside {
         Expr::Mul(f) => f.clone(),
         other => vec![other.clone()],
@@ -1764,8 +2186,15 @@ fn sqrt_assume(e: &Expr) -> Expr {
     for f in factors {
         match &f {
             Expr::Num(_) => out.push(sqrt(f.clone())),
-            Expr::Pow(s, p) if p.num().is_some_and(|n| n.is_exact() && n.is_integer() && n.as_int().unwrap() % 2 == 0) => {
-                out.push(pow((**s).clone(), Expr::int(p.num().unwrap().as_int().unwrap() / 2)))
+            Expr::Pow(s, p)
+                if p.num().is_some_and(|n| {
+                    n.is_exact() && n.is_integer() && n.as_int().unwrap() % 2 == 0
+                }) =>
+            {
+                out.push(pow(
+                    (**s).clone(),
+                    Expr::int(p.num().unwrap().as_int().unwrap() / 2),
+                ))
             }
             _ => rest.push(f),
         }
@@ -1805,7 +2234,9 @@ fn least_squares(eqs: &[Expr], vars: &[String]) -> R<Vec<Expr>> {
         n[r][m] = (0..eqs.len()).map(|i| a[i][r] * b[i]).sum();
     }
     for c in 0..m {
-        let p = (c..m).max_by(|&i, &j| n[i][c].abs().total_cmp(&n[j][c].abs())).unwrap();
+        let p = (c..m)
+            .max_by(|&i, &j| n[i][c].abs().total_cmp(&n[j][c].abs()))
+            .unwrap();
         n.swap(c, p);
         if n[c][c].abs() < 1e-12 {
             return Err("dsolve: could not determine the particular solution".into());
@@ -1856,7 +2287,10 @@ mod tests {
     #[test]
     fn trig() {
         assert_eq!(run("trigexpand(sin(2*x))"), "2*sin(x)*cos(x)");
-        assert_eq!(run("simplify(trigreduce(sin(x)^2) - (1 - cos(2*x))/2)"), "0");
+        assert_eq!(
+            run("simplify(trigreduce(sin(x)^2) - (1 - cos(2*x))/2)"),
+            "0"
+        );
     }
     #[test]
     fn sums_and_tables() {
@@ -1873,7 +2307,10 @@ mod tests {
     #[test]
     fn trig_equations() {
         assert_eq!(run("solve(sin(x) == 1/2, x)"), "pi/6\t5*pi/6");
-        assert_eq!(run("solve(2*sin(x)^2 - sin(x) - 1, x)"), "pi/2\t7*pi/6\t11*pi/6");
+        assert_eq!(
+            run("solve(2*sin(x)^2 - sin(x) - 1, x)"),
+            "pi/2\t7*pi/6\t11*pi/6"
+        );
     }
     #[test]
     fn odes() {

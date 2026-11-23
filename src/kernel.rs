@@ -11,14 +11,17 @@
 //!
 //! Each reply is one line of JSON. `cursor` counts characters (Unicode code points).
 
-use crate::display::{shown, Bundle, Shown};
+use crate::display::{Bundle, Shown, shown};
 use crate::eval::Session;
 use crate::help;
 use crate::plot::jstr;
 use std::io::{BufRead, Read, Write};
 
 fn bundle_json(b: &Bundle) -> String {
-    let fields: Vec<String> = b.iter().map(|(k, v)| format!("{}:{}", jstr(k), jstr(v))).collect();
+    let fields: Vec<String> = b
+        .iter()
+        .map(|(k, v)| format!("{}:{}", jstr(k), jstr(v)))
+        .collect();
     format!("{{{}}}", fields.join(","))
 }
 
@@ -39,13 +42,21 @@ pub fn execute(s: &mut Session, code: &str) -> String {
                 }
             }
             Err(e) => {
-                let name = if e.starts_with("parse error") { "SyntaxError" } else { "Error" };
+                let name = if e.starts_with("parse error") {
+                    "SyntaxError"
+                } else {
+                    "Error"
+                };
                 let msg = e.strip_prefix("parse error: ").unwrap_or(&e);
                 error = format!("{{\"ename\":{},\"evalue\":{}}}", jstr(name), jstr(msg));
             }
         }
     }
-    format!("{{\"outputs\":[{}],\"error\":{}}}", outputs.join(","), error)
+    format!(
+        "{{\"outputs\":[{}],\"error\":{}}}",
+        outputs.join(","),
+        error
+    )
 }
 
 fn is_name(c: char) -> bool {
@@ -77,9 +88,21 @@ pub fn complete(s: &Session, code: &str, cursor: usize) -> String {
     names.extend(s.variable_names());
     names.sort();
     names.dedup();
-    let matches: Vec<String> =
-        if prefix.is_empty() { vec![] } else { names.into_iter().filter(|n| n.starts_with(&prefix)).map(|n| jstr(&n)).collect() };
-    format!("{{\"matches\":[{}],\"start\":{},\"end\":{}}}", matches.join(","), start, end)
+    let matches: Vec<String> = if prefix.is_empty() {
+        vec![]
+    } else {
+        names
+            .into_iter()
+            .filter(|n| n.starts_with(&prefix))
+            .map(|n| jstr(&n))
+            .collect()
+    };
+    format!(
+        "{{\"matches\":[{}],\"start\":{},\"end\":{}}}",
+        matches.join(","),
+        start,
+        end
+    )
 }
 
 /// Shift+Tab: help for the name under (or just before) the cursor
@@ -125,7 +148,10 @@ fn handle(s: &mut Session, header: &str, body: &str) -> String {
         Some("complete") => complete(s, body, cursor),
         Some("inspect") => inspect(body, cursor),
         Some("version") => format!("{{\"version\":{}}}", jstr(env!("CARGO_PKG_VERSION"))),
-        _ => format!("{{\"error\":{}}}", jstr(&format!("unknown request {}", header))),
+        _ => format!(
+            "{{\"error\":{}}}",
+            jstr(&format!("unknown request {}", header))
+        ),
     }
 }
 
@@ -144,7 +170,11 @@ pub fn serve() {
         if header.is_empty() {
             continue;
         }
-        let len: usize = header.split_whitespace().last().and_then(|n| n.parse().ok()).unwrap_or(0);
+        let len: usize = header
+            .split_whitespace()
+            .last()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0);
         let mut buf = vec![0u8; len];
         if input.read_exact(&mut buf).is_err() {
             return;

@@ -87,7 +87,10 @@ fn mul(w: World, md: &M, x: &[BigInt], y: &[BigInt]) -> Vec<BigInt> {
         World::Mul => vec![md.m(&x[0], &y[0])],
         World::Quad(d) => {
             let bd = md.m(&x[1], &y[1]) * d;
-            vec![md.s(md.m(&x[0], &y[0]) + bd), md.s(md.m(&x[0], &y[1]) + md.m(&x[1], &y[0]))]
+            vec![
+                md.s(md.m(&x[0], &y[0]) + bd),
+                md.s(md.m(&x[0], &y[1]) + md.m(&x[1], &y[0])),
+            ]
         }
         World::Cubic(c) => {
             // (x0 + x1 t + x2 t^2)(y0 + y1 t + y2 t^2), t^3 = c
@@ -99,7 +102,12 @@ fn mul(w: World, md: &M, x: &[BigInt], y: &[BigInt]) -> Vec<BigInt> {
         }
         World::Mat => {
             let p = |i: usize, j: usize| md.m(&x[i], &y[j]);
-            vec![md.s(p(0, 0) + p(1, 2)), md.s(p(0, 1) + p(1, 3)), md.s(p(2, 0) + p(3, 2)), md.s(p(2, 1) + p(3, 3))]
+            vec![
+                md.s(p(0, 0) + p(1, 2)),
+                md.s(p(0, 1) + p(1, 3)),
+                md.s(p(2, 0) + p(3, 2)),
+                md.s(p(2, 1) + p(3, 3)),
+            ]
         }
         World::Ec(_) => unreachable!(),
     }
@@ -169,7 +177,11 @@ fn start(w: World, n: &BigInt, t: i64) -> Option<(World, Vec<BigInt>, BigInt)> {
             // a24 = (A + 2)/4 with A = a + t; point x = s + 1
             let aa = a + 7 * t;
             let inv4 = crate::numtheory::modinv(&BigInt::from(4), n)?;
-            (World::Ec(aa), vec![b(s + 1), b(1)], (BigInt::from(aa + 2) * inv4).mod_floor(n))
+            (
+                World::Ec(aa),
+                vec![b(s + 1), b(1)],
+                (BigInt::from(aa + 2) * inv4).mod_floor(n),
+            )
         }
     })
 }

@@ -7,7 +7,9 @@ pub const SAMPLES: usize = 400;
 pub const CURVE3D_SAMPLES: usize = 600;
 pub const GRID: usize = 41;
 
-const PALETTE: [&str; 8] = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#be185d", "#4d7c0f"];
+const PALETTE: [&str; 8] = [
+    "#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#be185d", "#4d7c0f",
+];
 
 // ---------- JSON helpers ----------
 
@@ -53,17 +55,32 @@ fn short_nums(v: &[f64], short: bool) -> String {
     if !short {
         return jnums(v);
     }
-    let parts: Vec<String> = v.iter().map(|d| if d.is_finite() { format!("{}", format!("{:.4e}", d).parse::<f64>().unwrap_or(*d)) } else { "null".into() }).collect();
+    let parts: Vec<String> = v
+        .iter()
+        .map(|d| {
+            if d.is_finite() {
+                format!("{}", format!("{:.4e}", d).parse::<f64>().unwrap_or(*d))
+            } else {
+                "null".into()
+            }
+        })
+        .collect();
     format!("[{}]", parts.join(","))
 }
 
 fn obj(fields: &[(&str, String)]) -> String {
-    let v: Vec<String> = fields.iter().map(|(k, v)| format!("{}:{}", jstr(k), v)).collect();
+    let v: Vec<String> = fields
+        .iter()
+        .map(|(k, v)| format!("{}:{}", jstr(k), v))
+        .collect();
     format!("{{{}}}", v.join(","))
 }
 
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn finite(d: f64) -> bool {
@@ -90,7 +107,11 @@ fn ticks(lo: f64, hi: f64, target: usize) -> Vec<f64> {
         return vec![];
     }
     let mag = 10f64.powf(raw.log10().floor());
-    let step = [1.0, 2.0, 5.0, 10.0].iter().map(|m| m * mag).find(|s| *s >= raw).unwrap_or(10.0 * mag);
+    let step = [1.0, 2.0, 5.0, 10.0]
+        .iter()
+        .map(|m| m * mag)
+        .find(|s| *s >= raw)
+        .unwrap_or(10.0 * mag);
     let mut t = (lo / step).ceil() * step;
     let mut out = vec![];
     while t <= hi + step * 1e-9 && out.len() < 100 {
@@ -130,7 +151,13 @@ struct Bounds {
 
 impl Figure {
     pub fn new(series: Vec<Series>, x_label: &str, y_label: &str, equal_aspect: bool) -> Figure {
-        Figure { series, x_label: x_label.into(), y_label: y_label.into(), title: String::new(), equal_aspect }
+        Figure {
+            series,
+            x_label: x_label.into(),
+            y_label: y_label.into(),
+            title: String::new(),
+            equal_aspect,
+        }
     }
 
     pub fn overlay(&self, o: &Figure) -> Figure {
@@ -146,8 +173,12 @@ impl Figure {
 
     /// Data bounds, ignoring poles: when a few points blow up (tan, 1/x), clip to the bulk
     fn bounds(&self) -> Bounds {
-        let mut pts: Vec<(f64, f64)> =
-            self.series.iter().flat_map(|s| s.points.iter().copied()).filter(|p| finite(p.0) && finite(p.1)).collect();
+        let mut pts: Vec<(f64, f64)> = self
+            .series
+            .iter()
+            .flat_map(|s| s.points.iter().copied())
+            .filter(|p| finite(p.0) && finite(p.1))
+            .collect();
         for s in &self.series {
             for (p, e) in s.points.iter().zip(&s.errors) {
                 if finite(p.0) && finite(p.1) && finite(*e) {
@@ -157,7 +188,12 @@ impl Figure {
             }
         }
         if pts.is_empty() {
-            return Bounds { x0: -1.0, x1: 1.0, y0: -1.0, y1: 1.0 };
+            return Bounds {
+                x0: -1.0,
+                x1: 1.0,
+                y0: -1.0,
+                y1: 1.0,
+            };
         }
         let mut ys: Vec<f64> = pts.iter().map(|p| p.1).collect();
         ys.sort_by(|a, b| a.total_cmp(b));
@@ -165,7 +201,11 @@ impl Figure {
         let (lo, hi) = (ys[0], ys[ys.len() - 1]);
         let (q1, q9) = (q(0.02), q(0.98));
         let core = q9 - q1;
-        let (mut y0, mut y1) = if core > 0.0 && hi - lo > 20.0 * core { (q1 - core * 0.5, q9 + core * 0.5) } else { (lo, hi) };
+        let (mut y0, mut y1) = if core > 0.0 && hi - lo > 20.0 * core {
+            (q1 - core * 0.5, q9 + core * 0.5)
+        } else {
+            (lo, hi)
+        };
         // clipping is for curves running off to a pole; data points always stay visible
         for s in self.series.iter().filter(|s| s.markers) {
             for &(x, y) in &s.points {
@@ -175,13 +215,26 @@ impl Figure {
                 }
             }
         }
-        let (ya, yb) = if y1 - y0 < 1e-12 * y0.abs().max(1.0) { (y0 - 1.0, y1 + 1.0) } else { (y0, y1) };
+        let (ya, yb) = if y1 - y0 < 1e-12 * y0.abs().max(1.0) {
+            (y0 - 1.0, y1 + 1.0)
+        } else {
+            (y0, y1)
+        };
         let pad = (yb - ya) * 0.05;
         let xa = pts.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
         let xb = pts.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
-        let (xa, xb) = if xb - xa < 1e-12 * xa.abs().max(1.0) { (xa - 1.0, xb + 1.0) } else { (xa, xb) };
+        let (xa, xb) = if xb - xa < 1e-12 * xa.abs().max(1.0) {
+            (xa - 1.0, xb + 1.0)
+        } else {
+            (xa, xb)
+        };
         if !self.equal_aspect {
-            return Bounds { x0: xa, x1: xb, y0: ya - pad, y1: yb + pad };
+            return Bounds {
+                x0: xa,
+                x1: xb,
+                y0: ya - pad,
+                y1: yb + pad,
+            };
         }
         // same units per pixel on both axes (the SVG plot area is 560 x 336)
         let ratio = 336.0 / 560.0;
@@ -190,10 +243,20 @@ impl Figure {
         let (cx, cy) = ((xa + xb) / 2.0, (ya + yb) / 2.0);
         if h / w > ratio {
             let w2 = h / ratio;
-            Bounds { x0: cx - w2 / 2.0, x1: cx + w2 / 2.0, y0: cy - h / 2.0, y1: cy + h / 2.0 }
+            Bounds {
+                x0: cx - w2 / 2.0,
+                x1: cx + w2 / 2.0,
+                y0: cy - h / 2.0,
+                y1: cy + h / 2.0,
+            }
         } else {
             let h2 = w * ratio;
-            Bounds { x0: cx - w / 2.0, x1: cx + w / 2.0, y0: cy - h2 / 2.0, y1: cy + h2 / 2.0 }
+            Bounds {
+                x0: cx - w / 2.0,
+                x1: cx + w / 2.0,
+                y0: cy - h2 / 2.0,
+                y1: cy + h2 / 2.0,
+            }
         }
     }
 
@@ -204,7 +267,8 @@ impl Figure {
         let mut prev: Option<f64> = None;
         for &(x, y) in &s.points {
             let ok = finite(x) && finite(y);
-            let jump = prev.is_some_and(|p| ok && ((p > b.y1 && y < b.y0) || (p < b.y0 && y > b.y1)));
+            let jump =
+                prev.is_some_and(|p| ok && ((p > b.y1 && y < b.y0) || (p < b.y0 && y > b.y1)));
             if (!ok || jump) && !cur.is_empty() {
                 out.push(std::mem::take(&mut cur));
             }
@@ -243,14 +307,36 @@ impl Figure {
                         ("type", jstr("scatter")),
                         ("mode", jstr("markers")),
                         ("name", jstr(&s.label)),
-                        ("x", short_nums(&pts.iter().map(|p| p.0).collect::<Vec<_>>(), pts.len() > 1500)),
-                        ("y", short_nums(&pts.iter().map(|p| p.1).collect::<Vec<_>>(), pts.len() > 1500)),
-                        ("marker", obj(&[("color", jstr(PALETTE[i % PALETTE.len()])), ("size", if pts.len() > 1500 { "2" } else { "8" }.into())])),
+                        (
+                            "x",
+                            short_nums(
+                                &pts.iter().map(|p| p.0).collect::<Vec<_>>(),
+                                pts.len() > 1500,
+                            ),
+                        ),
+                        (
+                            "y",
+                            short_nums(
+                                &pts.iter().map(|p| p.1).collect::<Vec<_>>(),
+                                pts.len() > 1500,
+                            ),
+                        ),
+                        (
+                            "marker",
+                            obj(&[
+                                ("color", jstr(PALETTE[i % PALETTE.len()])),
+                                ("size", if pts.len() > 1500 { "2" } else { "8" }.into()),
+                            ]),
+                        ),
                     ];
                     if !s.errors.is_empty() {
                         fields.push((
                             "error_y",
-                            obj(&[("type", jstr("data")), ("array", jnums(&s.errors)), ("visible", "true".into())]),
+                            obj(&[
+                                ("type", jstr("data")),
+                                ("array", jnums(&s.errors)),
+                                ("visible", "true".into()),
+                            ]),
                         ));
                     }
                     return obj(&fields);
@@ -261,7 +347,13 @@ impl Figure {
                     ("name", jstr(&s.label)),
                     ("x", jnums(&xs)),
                     ("y", jnums(&ys)),
-                    ("line", obj(&[("color", jstr(PALETTE[i % PALETTE.len()])), ("width", "2".into())])),
+                    (
+                        "line",
+                        obj(&[
+                            ("color", jstr(PALETTE[i % PALETTE.len()])),
+                            ("width", "2".into()),
+                        ]),
+                    ),
                 ])
             })
             .collect();
@@ -277,15 +369,35 @@ impl Figure {
         let grid = obj(&[("gridcolor", jstr("#e5e7eb"))]);
         let layout = obj(&[
             ("title", obj(&[("text", jstr(&self.title))])),
-            ("xaxis", obj(&[("title", obj(&[("text", jstr(&self.x_label))])), ("zeroline", "true".into())])),
+            (
+                "xaxis",
+                obj(&[
+                    ("title", obj(&[("text", jstr(&self.x_label))])),
+                    ("zeroline", "true".into()),
+                ]),
+            ),
             ("yaxis", obj(&yaxis)),
             ("showlegend", "true".into()),
             ("legend", {
                 let (w, h) = self.legend_size();
                 let corner = self.legend_corner(&b, (w + 8.0) / 560.0, (h + 8.0) / 336.0);
-                let (x, xa) = if corner % 2 == 0 { ("0.01", "left") } else { ("0.99", "right") };
-                let (y, ya) = if corner < 2 { ("0.99", "top") } else { ("0.01", "bottom") };
-                obj(&[("x", x.into()), ("y", y.into()), ("xanchor", jstr(xa)), ("yanchor", jstr(ya)), ("bgcolor", jstr("rgba(255,255,255,0.8)"))])
+                let (x, xa) = if corner % 2 == 0 {
+                    ("0.01", "left")
+                } else {
+                    ("0.99", "right")
+                };
+                let (y, ya) = if corner < 2 {
+                    ("0.99", "top")
+                } else {
+                    ("0.01", "bottom")
+                };
+                obj(&[
+                    ("x", x.into()),
+                    ("y", y.into()),
+                    ("xanchor", jstr(xa)),
+                    ("yanchor", jstr(ya)),
+                    ("bgcolor", jstr("rgba(255,255,255,0.8)")),
+                ])
             }),
             (
                 "margin",
@@ -300,10 +412,20 @@ impl Figure {
             ("height", "440".into()),
             (
                 "template",
-                obj(&[("layout", obj(&[("plot_bgcolor", jstr("white")), ("xaxis", grid.clone()), ("yaxis", grid)]))]),
+                obj(&[(
+                    "layout",
+                    obj(&[
+                        ("plot_bgcolor", jstr("white")),
+                        ("xaxis", grid.clone()),
+                        ("yaxis", grid),
+                    ]),
+                )]),
             ),
         ]);
-        obj(&[("data", format!("[{}]", traces.join(","))), ("layout", layout)])
+        obj(&[
+            ("data", format!("[{}]", traces.join(","))),
+            ("layout", layout),
+        ])
     }
 
     /// Which corner of the plot area the legend covers least data in:
@@ -337,14 +459,25 @@ impl Figure {
 
     /// The legend box in the SVG: width and height in pixels
     fn legend_size(&self) -> (f64, f64) {
-        let w = 46 + 7 * self.series.iter().map(|s| s.label.chars().count()).max().unwrap_or(0);
+        let w = 46
+            + 7 * self
+                .series
+                .iter()
+                .map(|s| s.label.chars().count())
+                .max()
+                .unwrap_or(0);
         (w as f64, (18 * self.series.len() + 2) as f64)
     }
 
     pub fn svg(&self) -> String {
         let (width, height) = (640.0, 400.0);
         let b = self.bounds();
-        let (ml, mr, mt, mb) = (60.0, 20.0, if self.title.is_empty() { 20.0 } else { 40.0 }, 44.0);
+        let (ml, mr, mt, mb) = (
+            60.0,
+            20.0,
+            if self.title.is_empty() { 20.0 } else { 40.0 },
+            44.0,
+        );
         let (pw, ph) = (width - ml - mr, height - mt - mb);
         let sx = |x: f64| ml + (x - b.x0) / (b.x1 - b.x0) * pw;
         let sy = |y: f64| mt + (1.0 - (y - b.y0) / (b.y1 - b.y0)) * ph;
@@ -377,12 +510,28 @@ impl Figure {
             );
         }
         if b.x0 < 0.0 && b.x1 > 0.0 {
-            let _ = write!(s, r##"<line x1="{0:.2}" y1="{1:.2}" x2="{0:.2}" y2="{2:.2}" stroke="#9ca3af"/>"##, sx(0.0), mt, mt + ph);
+            let _ = write!(
+                s,
+                r##"<line x1="{0:.2}" y1="{1:.2}" x2="{0:.2}" y2="{2:.2}" stroke="#9ca3af"/>"##,
+                sx(0.0),
+                mt,
+                mt + ph
+            );
         }
         if b.y0 < 0.0 && b.y1 > 0.0 {
-            let _ = write!(s, r##"<line x1="{1:.2}" y1="{0:.2}" x2="{2:.2}" y2="{0:.2}" stroke="#9ca3af"/>"##, sy(0.0), ml, ml + pw);
+            let _ = write!(
+                s,
+                r##"<line x1="{1:.2}" y1="{0:.2}" x2="{2:.2}" y2="{0:.2}" stroke="#9ca3af"/>"##,
+                sy(0.0),
+                ml,
+                ml + pw
+            );
         }
-        let _ = write!(s, r##"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="none" stroke="#6b7280"/>"##, ml, mt, pw, ph);
+        let _ = write!(
+            s,
+            r##"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="none" stroke="#6b7280"/>"##,
+            ml, mt, pw, ph
+        );
         s.push_str(r#"<g clip-path="url(#plotarea)" fill="none" stroke-width="2" stroke-linejoin="round">"#);
         let span = b.y1 - b.y0;
         for (i, ser) in self.series.iter().enumerate() {
@@ -415,7 +564,12 @@ impl Figure {
                             xx + 4.0
                         );
                     }
-                    let _ = write!(s, r#"<circle cx="{:.2}" cy="{:.2}" r="4" fill="{c}" stroke="white" stroke-width="1"/>"#, sx(x), sy(y));
+                    let _ = write!(
+                        s,
+                        r#"<circle cx="{:.2}" cy="{:.2}" r="4" fill="{c}" stroke="white" stroke-width="1"/>"#,
+                        sx(x),
+                        sy(y)
+                    );
                 }
                 continue;
             }
@@ -423,27 +577,61 @@ impl Figure {
             for run in self.runs(ser, &b) {
                 for (k, (x, y)) in run.iter().enumerate() {
                     let yy = y.clamp(b.y0 - span, b.y1 + span);
-                    let _ = write!(d, "{}{:.2},{:.2}", if k == 0 { "M" } else { "L" }, sx(*x), sy(yy));
+                    let _ = write!(
+                        d,
+                        "{}{:.2},{:.2}",
+                        if k == 0 { "M" } else { "L" },
+                        sx(*x),
+                        sy(yy)
+                    );
                 }
             }
-            let _ = write!(s, r#"<path d="{}" stroke="{}"/>"#, d, PALETTE[i % PALETTE.len()]);
+            let _ = write!(
+                s,
+                r#"<path d="{}" stroke="{}"/>"#,
+                d,
+                PALETTE[i % PALETTE.len()]
+            );
         }
         s.push_str("</g>");
         if !self.title.is_empty() {
-            let _ = write!(s, r##"<text x="{:.2}" y="24" text-anchor="middle" font-size="14" fill="#111827">{}</text>"##, ml + pw / 2.0, esc(&self.title));
+            let _ = write!(
+                s,
+                r##"<text x="{:.2}" y="24" text-anchor="middle" font-size="14" fill="#111827">{}</text>"##,
+                ml + pw / 2.0,
+                esc(&self.title)
+            );
         }
         if !self.x_label.is_empty() {
-            let _ = write!(s, r##"<text x="{:.2}" y="{:.2}" text-anchor="middle" fill="#111827">{}</text>"##, ml + pw / 2.0, height - 8.0, esc(&self.x_label));
+            let _ = write!(
+                s,
+                r##"<text x="{:.2}" y="{:.2}" text-anchor="middle" fill="#111827">{}</text>"##,
+                ml + pw / 2.0,
+                height - 8.0,
+                esc(&self.x_label)
+            );
         }
         if !self.y_label.is_empty() {
             let y = mt + ph / 2.0;
-            let _ = write!(s, r##"<text x="14" y="{y:.2}" text-anchor="middle" fill="#111827" transform="rotate(-90 14 {y:.2})">{}</text>"##, esc(&self.y_label));
+            let _ = write!(
+                s,
+                r##"<text x="14" y="{y:.2}" text-anchor="middle" fill="#111827" transform="rotate(-90 14 {y:.2})">{}</text>"##,
+                esc(&self.y_label)
+            );
         }
         if !self.series.is_empty() {
             let (w, h) = self.legend_size();
             let corner = self.legend_corner(&b, (w + 8.0) / pw, (h + 8.0) / ph);
-            let lx = if corner % 2 == 0 { ml + 4.0 } else { ml + pw - 4.0 - w };
-            let ly = if corner < 2 { mt + 4.0 } else { mt + ph - 4.0 - h };
+            let lx = if corner % 2 == 0 {
+                ml + 4.0
+            } else {
+                ml + pw - 4.0 - w
+            };
+            let ly = if corner < 2 {
+                mt + 4.0
+            } else {
+                mt + ph - 4.0 - h
+            };
             let _ = write!(
                 s,
                 r##"<rect x="{:.2}" y="{:.2}" width="{}" height="{}" fill="white" fill-opacity="0.85" stroke="#e5e7eb"/>"##,
@@ -453,9 +641,18 @@ impl Figure {
                 let y = ly + 10.0 + i as f64 * 18.0;
                 let c = PALETTE[i % PALETTE.len()];
                 if ser.markers {
-                    let _ = write!(s, r#"<circle cx="{:.2}" cy="{y:.2}" r="4" fill="{c}"/>"#, lx + 16.0);
+                    let _ = write!(
+                        s,
+                        r#"<circle cx="{:.2}" cy="{y:.2}" r="4" fill="{c}"/>"#,
+                        lx + 16.0
+                    );
                 } else {
-                    let _ = write!(s, r#"<line x1="{:.2}" y1="{y:.2}" x2="{:.2}" y2="{y:.2}" stroke="{c}" stroke-width="2"/>"#, lx + 6.0, lx + 26.0);
+                    let _ = write!(
+                        s,
+                        r#"<line x1="{:.2}" y1="{y:.2}" x2="{:.2}" y2="{y:.2}" stroke="{c}" stroke-width="2"/>"#,
+                        lx + 6.0,
+                        lx + 26.0
+                    );
                 }
                 let _ = write!(
                     s,
@@ -476,7 +673,8 @@ impl Figure {
         let b = self.bounds();
         let mut grid = vec![vec![' '; width]; height];
         let col = |x: f64| ((x - b.x0) / (b.x1 - b.x0) * (width - 1) as f64).round() as i64;
-        let row = |y: f64| ((1.0 - (y - b.y0) / (b.y1 - b.y0)) * (height - 1) as f64).round() as i64;
+        let row =
+            |y: f64| ((1.0 - (y - b.y0) / (b.y1 - b.y0)) * (height - 1) as f64).round() as i64;
         if b.y0 < 0.0 && b.y1 > 0.0 {
             let r0 = row(0.0) as usize;
             grid[r0].iter_mut().for_each(|c| *c = '-');
@@ -501,13 +699,25 @@ impl Figure {
             .iter()
             .enumerate()
             .map(|(i, line)| {
-                let label = if i == 0 { top.as_str() } else if i == height - 1 { bot.as_str() } else { "" };
+                let label = if i == 0 {
+                    top.as_str()
+                } else if i == height - 1 {
+                    bot.as_str()
+                } else {
+                    ""
+                };
                 format!("{:>yl$} |{}", label, line.iter().collect::<String>())
             })
             .collect();
         lines.push(format!("{} +{}", " ".repeat(yl), "-".repeat(width)));
         let (xl, xr) = (fmt_tick(b.x0), fmt_tick(b.x1));
-        lines.push(format!("{}{}{}{}", " ".repeat(yl + 2), xl, " ".repeat(width.saturating_sub(xl.len() + xr.len()).max(1)), xr));
+        lines.push(format!(
+            "{}{}{}{}",
+            " ".repeat(yl + 2),
+            xl,
+            " ".repeat(width.saturating_sub(xl.len() + xr.len()).max(1)),
+            xr
+        ));
         for (i, s) in self.series.iter().enumerate() {
             lines.push(format!("  {} {}", marks[i % marks.len()], s.label));
         }
@@ -555,20 +765,41 @@ pub struct Figure3D {
 }
 
 const SURFACE_SCALES: [&str; 5] = ["Viridis", "Reds", "Blues", "Greens", "Purples"];
-const CURVE_COLORS: [&str; 6] = ["#dc2626", "#f59e0b", "#2563eb", "#16a34a", "#9333ea", "#0f172a"];
-const SOLID: [P3; 4] = [(220.0, 38.0, 38.0), (37.0, 99.0, 235.0), (22.0, 163.0, 74.0), (147.0, 51.0, 234.0)];
+const CURVE_COLORS: [&str; 6] = [
+    "#dc2626", "#f59e0b", "#2563eb", "#16a34a", "#9333ea", "#0f172a",
+];
+const SOLID: [P3; 4] = [
+    (220.0, 38.0, 38.0),
+    (37.0, 99.0, 235.0),
+    (22.0, 163.0, 74.0),
+    (147.0, 51.0, 234.0),
+];
 
 fn finite3(p: &P3) -> bool {
     finite(p.0) && finite(p.1) && finite(p.2)
 }
 
 fn viridis(t: f64) -> P3 {
-    let stops = [(68.0, 1.0, 84.0), (59.0, 82.0, 139.0), (33.0, 145.0, 140.0), (94.0, 201.0, 98.0), (253.0, 231.0, 37.0)];
-    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.5 } * (stops.len() - 1) as f64;
+    let stops = [
+        (68.0, 1.0, 84.0),
+        (59.0, 82.0, 139.0),
+        (33.0, 145.0, 140.0),
+        (94.0, 201.0, 98.0),
+        (253.0, 231.0, 37.0),
+    ];
+    let t = if t.is_finite() {
+        t.clamp(0.0, 1.0)
+    } else {
+        0.5
+    } * (stops.len() - 1) as f64;
     let i = (t as usize).min(stops.len() - 2);
     let f = t - i as f64;
     let (a, b) = (stops[i], stops[i + 1]);
-    (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f, a.2 + (b.2 - a.2) * f)
+    (
+        a.0 + (b.0 - a.0) * f,
+        a.1 + (b.1 - a.1) * f,
+        a.2 + (b.2 - a.2) * f,
+    )
 }
 
 fn rgb(c: P3, k: f64) -> String {
@@ -583,11 +814,20 @@ fn dot3(a: P3, b: P3) -> f64 {
     a.0 * b.0 + a.1 * b.1 + a.2 * b.2
 }
 fn cross3(a: P3, b: P3) -> P3 {
-    (a.1 * b.2 - a.2 * b.1, a.2 * b.0 - a.0 * b.2, a.0 * b.1 - a.1 * b.0)
+    (
+        a.1 * b.2 - a.2 * b.1,
+        a.2 * b.0 - a.0 * b.2,
+        a.0 * b.1 - a.1 * b.0,
+    )
 }
 
 impl Figure3D {
-    pub fn new(surfaces: Vec<Surface>, curves: Vec<Curve>, labels: [&str; 3], equal_aspect: bool) -> Figure3D {
+    pub fn new(
+        surfaces: Vec<Surface>,
+        curves: Vec<Curve>,
+        labels: [&str; 3],
+        equal_aspect: bool,
+    ) -> Figure3D {
         Figure3D {
             surfaces,
             curves,
@@ -601,17 +841,31 @@ impl Figure3D {
         Figure3D {
             surfaces: self.surfaces.iter().chain(&o.surfaces).cloned().collect(),
             curves: self.curves.iter().chain(&o.curves).cloned().collect(),
-            title: if self.title.is_empty() { o.title.clone() } else { self.title.clone() },
+            title: if self.title.is_empty() {
+                o.title.clone()
+            } else {
+                self.title.clone()
+            },
             labels: self.labels.clone(),
             equal_aspect: self.equal_aspect || o.equal_aspect,
         }
     }
 
     pub fn text(&self) -> String {
-        let mut parts: Vec<String> =
-            self.surfaces.iter().map(|s| format!("surface {} ({}x{} grid)", s.label, s.rows(), s.cols())).collect();
-        parts.extend(self.curves.iter().map(|c| format!("curve {} ({} points)", c.label, c.points.len())));
-        format!("3D figure: {}\n(shown as a 3D graphic in Jupyter notebooks)", parts.join("; "))
+        let mut parts: Vec<String> = self
+            .surfaces
+            .iter()
+            .map(|s| format!("surface {} ({}x{} grid)", s.label, s.rows(), s.cols()))
+            .collect();
+        parts.extend(
+            self.curves
+                .iter()
+                .map(|c| format!("curve {} ({} points)", c.label, c.points.len())),
+        );
+        format!(
+            "3D figure: {}\n(shown as a 3D graphic in Jupyter notebooks)",
+            parts.join("; ")
+        )
     }
 
     fn points(&self) -> Vec<P3> {
@@ -638,13 +892,18 @@ impl Figure3D {
             }
             let lo = pts.iter().map(f).fold(f64::INFINITY, f64::min);
             let hi = pts.iter().map(f).fold(f64::NEG_INFINITY, f64::max);
-            if hi - lo < 1e-12 { (lo - 1.0, hi + 1.0) } else { (lo, hi) }
+            if hi - lo < 1e-12 {
+                (lo - 1.0, hi + 1.0)
+            } else {
+                (lo, hi)
+            }
         };
         [b(&|p| p.0), b(&|p| p.1), b(&|p| p.2)]
     }
 
     pub fn plotly(&self) -> String {
-        let grid = |g: &Vec<Vec<f64>>| format!("[{}]", g.iter().map(jnums).collect::<Vec<_>>().join(","));
+        let grid =
+            |g: &Vec<Vec<f64>>| format!("[{}]", g.iter().map(jnums).collect::<Vec<_>>().join(","));
         let mut traces: Vec<String> = self
             .surfaces
             .iter()
@@ -658,7 +917,10 @@ impl Figure3D {
                     ("z", grid(&s.z)),
                     ("colorscale", jstr(SURFACE_SCALES[i % SURFACE_SCALES.len()])),
                     ("showscale", "false".into()),
-                    ("opacity", if self.curves.is_empty() { "1" } else { "0.85" }.into()),
+                    (
+                        "opacity",
+                        if self.curves.is_empty() { "1" } else { "0.85" }.into(),
+                    ),
                     ("showlegend", "true".into()),
                 ])
             })
@@ -668,10 +930,25 @@ impl Figure3D {
                 ("type", jstr("scatter3d")),
                 ("mode", jstr("lines")),
                 ("name", jstr(&c.label)),
-                ("x", jnums(&c.points.iter().map(|p| p.0).collect::<Vec<_>>())),
-                ("y", jnums(&c.points.iter().map(|p| p.1).collect::<Vec<_>>())),
-                ("z", jnums(&c.points.iter().map(|p| p.2).collect::<Vec<_>>())),
-                ("line", obj(&[("color", jstr(CURVE_COLORS[i % CURVE_COLORS.len()])), ("width", "6".into())])),
+                (
+                    "x",
+                    jnums(&c.points.iter().map(|p| p.0).collect::<Vec<_>>()),
+                ),
+                (
+                    "y",
+                    jnums(&c.points.iter().map(|p| p.1).collect::<Vec<_>>()),
+                ),
+                (
+                    "z",
+                    jnums(&c.points.iter().map(|p| p.2).collect::<Vec<_>>()),
+                ),
+                (
+                    "line",
+                    obj(&[
+                        ("color", jstr(CURVE_COLORS[i % CURVE_COLORS.len()])),
+                        ("width", "6".into()),
+                    ]),
+                ),
             ])
         }));
         let axis = |t: &str| {
@@ -690,8 +967,21 @@ impl Figure3D {
                     ("xaxis", axis(&self.labels[0])),
                     ("yaxis", axis(&self.labels[1])),
                     ("zaxis", axis(&self.labels[2])),
-                    ("aspectmode", jstr(if self.equal_aspect { "data" } else { "cube" })),
-                    ("camera", obj(&[("eye", obj(&[("x", "1.6".into()), ("y", "-1.6".into()), ("z", "1.0".into())]))])),
+                    (
+                        "aspectmode",
+                        jstr(if self.equal_aspect { "data" } else { "cube" }),
+                    ),
+                    (
+                        "camera",
+                        obj(&[(
+                            "eye",
+                            obj(&[
+                                ("x", "1.6".into()),
+                                ("y", "-1.6".into()),
+                                ("z", "1.0".into()),
+                            ]),
+                        )]),
+                    ),
                 ]),
             ),
             ("showlegend", "true".into()),
@@ -708,7 +998,10 @@ impl Figure3D {
             ("width", "700".into()),
             ("height", "560".into()),
         ]);
-        obj(&[("data", format!("[{}]", traces.join(","))), ("layout", layout)])
+        obj(&[
+            ("data", format!("[{}]", traces.join(","))),
+            ("layout", layout),
+        ])
     }
 
     /// Static rendering: a shaded, depth-sorted projection
@@ -719,13 +1012,27 @@ impl Figure3D {
         let centers = bounds.map(|(a, b)| (a + b) / 2.0);
         let hmax = halves.iter().cloned().fold(0.0, f64::max);
         let scales = if self.equal_aspect { [hmax; 3] } else { halves };
-        let norm = |p: P3| ((p.0 - centers[0]) / scales[0], (p.1 - centers[1]) / scales[1], (p.2 - centers[2]) / scales[2]);
-        let (ex, ey, ez) = (halves[0] / scales[0], halves[1] / scales[1], halves[2] / scales[2]);
+        let norm = |p: P3| {
+            (
+                (p.0 - centers[0]) / scales[0],
+                (p.1 - centers[1]) / scales[1],
+                (p.2 - centers[2]) / scales[2],
+            )
+        };
+        let (ex, ey, ez) = (
+            halves[0] / scales[0],
+            halves[1] / scales[1],
+            halves[2] / scales[2],
+        );
         let (az, el) = (35f64.to_radians(), 25f64.to_radians());
         let project = |p: P3| -> P3 {
             let x1 = p.0 * az.cos() - p.1 * az.sin();
             let y1 = p.0 * az.sin() + p.1 * az.cos();
-            (x1, p.2 * el.cos() + y1 * el.sin(), y1 * el.cos() - p.2 * el.sin())
+            (
+                x1,
+                p.2 * el.cos() + y1 * el.sin(),
+                y1 * el.cos() - p.2 * el.sin(),
+            )
         };
         let mut corners = vec![];
         for sx in [-1.0, 1.0] {
@@ -755,10 +1062,17 @@ impl Figure3D {
         );
         for (i, a) in corners.iter().enumerate() {
             for b in corners.iter().skip(i + 1) {
-                let diff = [a.0 != b.0, a.1 != b.1, a.2 != b.2].iter().filter(|x| **x).count();
+                let diff = [a.0 != b.0, a.1 != b.1, a.2 != b.2]
+                    .iter()
+                    .filter(|x| **x)
+                    .count();
                 if diff == 1 {
                     let (p, q) = (scr(*a), scr(*b));
-                    let _ = write!(out, r##"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#cbd5e1"/>"##, p.0, p.1, q.0, q.1);
+                    let _ = write!(
+                        out,
+                        r##"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#cbd5e1"/>"##,
+                        p.0, p.1, q.0, q.1
+                    );
                 }
             }
         }
@@ -770,7 +1084,12 @@ impl Figure3D {
         for (si, surf) in self.surfaces.iter().enumerate() {
             for i in 0..surf.rows().saturating_sub(1) {
                 for j in 0..surf.cols().saturating_sub(1) {
-                    let raw = [surf.at(i, j), surf.at(i + 1, j), surf.at(i + 1, j + 1), surf.at(i, j + 1)];
+                    let raw = [
+                        surf.at(i, j),
+                        surf.at(i + 1, j),
+                        surf.at(i + 1, j + 1),
+                        surf.at(i, j + 1),
+                    ];
                     if !raw.iter().all(finite3) {
                         continue;
                     }
@@ -778,9 +1097,17 @@ impl Figure3D {
                     let depth = q.iter().map(|p| project(*p).2).sum::<f64>() / 4.0;
                     let nrm = cross3(sub3(q[2], q[0]), sub3(q[3], q[1]));
                     let len = dot3(nrm, nrm).sqrt();
-                    let shade = if len < 1e-12 { 0.8 } else { 0.55 + 0.45 * (dot3(nrm, light) / len).abs() };
+                    let shade = if len < 1e-12 {
+                        0.8
+                    } else {
+                        0.55 + 0.45 * (dot3(nrm, light) / len).abs()
+                    };
                     let zmean = raw.iter().map(|p| p.2).sum::<f64>() / 4.0;
-                    let base = if si == 0 { viridis((zmean - z0) / (z1 - z0)) } else { SOLID[(si - 1) % SOLID.len()] };
+                    let base = if si == 0 {
+                        viridis((zmean - z0) / (z1 - z0))
+                    } else {
+                        SOLID[(si - 1) % SOLID.len()]
+                    };
                     let fill = rgb(base, shade);
                     let pts: Vec<String> = q
                         .iter()
@@ -841,29 +1168,76 @@ impl Figure3D {
             );
         };
         let bottom: Vec<P3> = corners.iter().copied().filter(|c| c.2 < 0.0).collect();
-        let near = *bottom.iter().min_by(|a, b| project(**a).2.total_cmp(&project(**b).2)).unwrap();
-        let side = |p: P3| if scr(p).0 < scr(near).0 { "end" } else { "start" };
+        let near = *bottom
+            .iter()
+            .min_by(|a, b| project(**a).2.total_cmp(&project(**b).2))
+            .unwrap();
+        let side = |p: P3| {
+            if scr(p).0 < scr(near).0 {
+                "end"
+            } else {
+                "start"
+            }
+        };
         let dxs = |a: &str| if a == "end" { -4.0 } else { 4.0 };
         let [(bx0, bx1), (by0, by1), (bz0, bz1)] = bounds;
         let (xa, xb) = ((-ex, near.1, -ez), (ex, near.1, -ez));
         label(xa, &fmt(bx0), side(xa), dxs(side(xa)), 14.0, false);
         label(xb, &fmt(bx1), side(xb), dxs(side(xb)), 14.0, false);
-        label((0.0, near.1, -ez), &self.labels[0], "middle", 0.0, 24.0, true);
+        label(
+            (0.0, near.1, -ez),
+            &self.labels[0],
+            "middle",
+            0.0,
+            24.0,
+            true,
+        );
         let (ya, yb) = ((near.0, -ey, -ez), (near.0, ey, -ez));
         label(ya, &fmt(by0), side(ya), dxs(side(ya)), 14.0, false);
         label(yb, &fmt(by1), side(yb), dxs(side(yb)), 14.0, false);
-        label((near.0, 0.0, -ez), &self.labels[1], "middle", 0.0, 24.0, true);
-        let left = *bottom.iter().min_by(|a, b| scr(**a).0.total_cmp(&scr(**b).0)).unwrap();
+        label(
+            (near.0, 0.0, -ez),
+            &self.labels[1],
+            "middle",
+            0.0,
+            24.0,
+            true,
+        );
+        let left = *bottom
+            .iter()
+            .min_by(|a, b| scr(**a).0.total_cmp(&scr(**b).0))
+            .unwrap();
         label((left.0, left.1, -ez), &fmt(bz0), "end", -8.0, 0.0, false);
         label((left.0, left.1, ez), &fmt(bz1), "end", -8.0, 8.0, false);
-        label((left.0, left.1, 0.0), &self.labels[2], "end", -10.0, 4.0, true);
+        label(
+            (left.0, left.1, 0.0),
+            &self.labels[2],
+            "end",
+            -10.0,
+            4.0,
+            true,
+        );
         let mut entries: Vec<(String, String)> = self
             .surfaces
             .iter()
             .enumerate()
-            .map(|(i, su)| (su.label.clone(), if i == 0 { rgb(viridis(0.5), 1.0) } else { rgb(SOLID[(i - 1) % SOLID.len()], 1.0) }))
+            .map(|(i, su)| {
+                (
+                    su.label.clone(),
+                    if i == 0 {
+                        rgb(viridis(0.5), 1.0)
+                    } else {
+                        rgb(SOLID[(i - 1) % SOLID.len()], 1.0)
+                    },
+                )
+            })
             .collect();
-        entries.extend(self.curves.iter().enumerate().map(|(i, c)| (c.label.clone(), CURVE_COLORS[i % CURVE_COLORS.len()].to_string())));
+        entries.extend(self.curves.iter().enumerate().map(|(i, c)| {
+            (
+                c.label.clone(),
+                CURVE_COLORS[i % CURVE_COLORS.len()].to_string(),
+            )
+        }));
         for (i, (text, color)) in entries.iter().enumerate() {
             let y = 16 + i * 18;
             let _ = write!(
@@ -875,7 +1249,11 @@ impl Figure3D {
             );
         }
         if !self.title.is_empty() {
-            let _ = write!(out, r##"<text x="320" y="24" text-anchor="middle" font-size="14" fill="#111827">{}</text>"##, esc(&self.title));
+            let _ = write!(
+                out,
+                r##"<text x="320" y="24" text-anchor="middle" font-size="14" fill="#111827">{}</text>"##,
+                esc(&self.title)
+            );
         }
         out.push_str("</svg>");
         out

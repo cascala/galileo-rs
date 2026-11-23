@@ -19,29 +19,50 @@ type KPoly = Vec<Qd>;
 
 impl Qd {
     fn zero() -> Qd {
-        Qd { a: BigRational::zero(), b: BigRational::zero() }
+        Qd {
+            a: BigRational::zero(),
+            b: BigRational::zero(),
+        }
     }
     fn rat(a: BigRational) -> Qd {
-        Qd { a, b: BigRational::zero() }
+        Qd {
+            a,
+            b: BigRational::zero(),
+        }
     }
     fn is_zero(&self) -> bool {
         self.a.is_zero() && self.b.is_zero()
     }
     fn add(&self, o: &Qd) -> Qd {
-        Qd { a: &self.a + &o.a, b: &self.b + &o.b }
+        Qd {
+            a: &self.a + &o.a,
+            b: &self.b + &o.b,
+        }
     }
     fn sub(&self, o: &Qd) -> Qd {
-        Qd { a: &self.a - &o.a, b: &self.b - &o.b }
+        Qd {
+            a: &self.a - &o.a,
+            b: &self.b - &o.b,
+        }
     }
     fn mul(&self, o: &Qd, d: &BigRational) -> Qd {
-        Qd { a: &self.a * &o.a + &self.b * &o.b * d, b: &self.a * &o.b + &self.b * &o.a }
+        Qd {
+            a: &self.a * &o.a + &self.b * &o.b * d,
+            b: &self.a * &o.b + &self.b * &o.a,
+        }
     }
     fn inv(&self, d: &BigRational) -> Qd {
         let n = &self.a * &self.a - &self.b * &self.b * d;
-        Qd { a: &self.a / &n, b: -&self.b / &n }
+        Qd {
+            a: &self.a / &n,
+            b: -&self.b / &n,
+        }
     }
     fn conj(&self) -> Qd {
-        Qd { a: self.a.clone(), b: -self.b.clone() }
+        Qd {
+            a: self.a.clone(),
+            b: -self.b.clone(),
+        }
     }
 }
 
@@ -116,28 +137,45 @@ fn kshift(p: &[Qd], c: &Qd, d: &BigRational) -> KPoly {
 /// Irreducible monic factors over Q(sqrt(d)) of an irreducible integer polynomial g
 fn split_irreducible(g: &ZPoly, d: &BigInt) -> Option<Vec<KPoly>> {
     let dr = BigRational::from_integer(d.clone());
-    let gk: KPoly = g.iter().map(|c| Qd::rat(BigRational::from_integer(c.clone()))).collect();
+    let gk: KPoly = g
+        .iter()
+        .map(|c| Qd::rat(BigRational::from_integer(c.clone())))
+        .collect();
     if g.len() <= 2 {
         return Some(vec![kmonic(&gk, &dr)]);
     }
     for k in 0..20i64 {
-        let shift = Qd { a: BigRational::zero(), b: BigRational::from_integer(BigInt::from(-k)) };
+        let shift = Qd {
+            a: BigRational::zero(),
+            b: BigRational::from_integer(BigInt::from(-k)),
+        };
         let a = kshift(&gk, &shift, &dr);
         let abar: KPoly = a.iter().map(|c| c.conj()).collect();
         let norm = kmul(&a, &abar, &dr);
         if norm.iter().any(|c| !c.b.is_zero()) {
             return None;
         }
-        let den = norm.iter().fold(BigInt::one(), |acc, c| num_integer::Integer::lcm(&acc, c.a.denom()));
-        let nz: ZPoly = norm.iter().map(|c| (&c.a * BigRational::from_integer(den.clone())).to_integer()).collect();
+        let den = norm.iter().fold(BigInt::one(), |acc, c| {
+            num_integer::Integer::lcm(&acc, c.a.denom())
+        });
+        let nz: ZPoly = norm
+            .iter()
+            .map(|c| (&c.a * BigRational::from_integer(den.clone())).to_integer())
+            .collect();
         let (_, fs) = af::factor_zpoly(&nz)?;
         if fs.iter().any(|(_, m)| *m > 1) {
             continue;
         }
-        let back = Qd { a: BigRational::zero(), b: BigRational::from_integer(BigInt::from(k)) };
+        let back = Qd {
+            a: BigRational::zero(),
+            b: BigRational::from_integer(BigInt::from(k)),
+        };
         let mut out = vec![];
         for (nj, _) in fs {
-            let njk: KPoly = nj.iter().map(|c| Qd::rat(BigRational::from_integer(c.clone()))).collect();
+            let njk: KPoly = nj
+                .iter()
+                .map(|c| Qd::rat(BigRational::from_integer(c.clone())))
+                .collect();
             let h = kgcd(&a, &njk, &dr);
             if h.len() > 1 {
                 out.push(kshift(&h, &back, &dr));

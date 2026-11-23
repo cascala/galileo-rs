@@ -112,7 +112,11 @@ impl Number {
             Big(r) => r.to_f64().unwrap_or_else(|| {
                 // too large for f64
                 let s = if r.is_negative() { -1.0 } else { 1.0 };
-                if r.numer().bits() > r.denom().bits() { s * f64::INFINITY } else { 0.0 }
+                if r.numer().bits() > r.denom().bits() {
+                    s * f64::INFINITY
+                } else {
+                    0.0
+                }
             }),
             Float(f) => *f,
         }
@@ -171,13 +175,20 @@ impl Number {
 
     pub fn neg(&self) -> Number {
         match self {
-            Rat(n, d) => n.checked_neg().map(|n| Rat(n, *d)).unwrap_or_else(|| norm(-self.big().unwrap())),
+            Rat(n, d) => n
+                .checked_neg()
+                .map(|n| Rat(n, *d))
+                .unwrap_or_else(|| norm(-self.big().unwrap())),
             Big(r) => norm(-(**r).clone()),
             Float(f) => Float(-f),
         }
     }
     pub fn abs(&self) -> Number {
-        if self.is_negative() { self.neg() } else { self.clone() }
+        if self.is_negative() {
+            self.neg()
+        } else {
+            self.clone()
+        }
     }
 
     pub fn add(&self, o: impl Borrow<Number>) -> Number {
@@ -208,7 +219,8 @@ impl Number {
             let (a, b, c, d) = (*a, *b, *c, *d);
             let g1 = gcd(a, d).max(1);
             let g2 = gcd(c, b).max(1);
-            let r = (|| Number::rat((a / g1).checked_mul(c / g2)?, (b / g2).checked_mul(d / g1)?))();
+            let r =
+                (|| Number::rat((a / g1).checked_mul(c / g2)?, (b / g2).checked_mul(d / g1)?))();
             if let Some(r) = r {
                 return r;
             }
@@ -243,7 +255,13 @@ impl Number {
         if eb.is_integer() {
             // 0, 1 and -1 to any whole power
             if self.is_zero() {
-                return if eb.is_negative() { None } else if eb.is_zero() { Some(Number::one()) } else { Some(Number::zero()) };
+                return if eb.is_negative() {
+                    None
+                } else if eb.is_zero() {
+                    Some(Number::one())
+                } else {
+                    Some(Number::zero())
+                };
             }
             if self.is_one() {
                 return Some(Number::one());
@@ -266,7 +284,10 @@ impl Number {
             if bits.saturating_mul(p as u64) > MAX_BITS {
                 return None;
             }
-            return Some(norm(BigRational::new_raw(b.numer().pow(p), b.denom().pow(p))));
+            return Some(norm(BigRational::new_raw(
+                b.numer().pow(p),
+                b.denom().pow(p),
+            )));
         }
         // rational exponent p/q: exact if numerator and denominator are perfect q-th powers
         if self.is_negative() {
@@ -320,7 +341,11 @@ pub fn fmt_float(f: f64) -> String {
         return s;
     }
     let s = format!("{}", f);
-    if s.contains('.') || s.contains('e') { s } else { s + ".0" }
+    if s.contains('.') || s.contains('e') {
+        s
+    } else {
+        s + ".0"
+    }
 }
 
 impl fmt::Display for Number {
@@ -343,8 +368,14 @@ mod tests {
         let a = Number::rat(1, 3).unwrap();
         let b = Number::rat(2, 6).unwrap();
         assert_eq!(a.add(b), Number::rat(2, 3).unwrap());
-        assert_eq!(Number::int(-12).div(Number::int(3)).unwrap(), Number::int(-4));
-        assert_eq!(Number::rat(4, 9).unwrap().pow(Number::rat(1, 2).unwrap()), Number::rat(2, 3));
+        assert_eq!(
+            Number::int(-12).div(Number::int(3)).unwrap(),
+            Number::int(-4)
+        );
+        assert_eq!(
+            Number::rat(4, 9).unwrap().pow(Number::rat(1, 2).unwrap()),
+            Number::rat(2, 3)
+        );
         assert_eq!(Number::int(2).pow(Number::rat(1, 2).unwrap()), None);
         assert_eq!(Number::int(2).pow(Number::int(-2)), Number::rat(1, 4));
         assert_eq!(format!("{}", Number::Float(3.0)), "3.0");

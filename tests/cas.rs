@@ -1,8 +1,8 @@
 //! Integration, limits, Taylor series, solving and the smaller helpers.
 
+use galileo_rs::Output;
 use galileo_rs::eval::Session;
 use galileo_rs::print::show;
-use galileo_rs::Output;
 
 fn one(code: &str) -> String {
     let mut s = Session::new();
@@ -28,7 +28,12 @@ fn antiderivatives() {
         ("1/sqrt(1-x^2)", "asin(x)"),
         ("exp(x)*sin(x)", "exp(x)*(sin(x)-cos(x))/2"),
     ] {
-        assert_eq!(one(&format!("integrate({}, x)", f)), want, "integrate({})", f);
+        assert_eq!(
+            one(&format!("integrate({}, x)", f)),
+            want,
+            "integrate({})",
+            f
+        );
     }
     assert!(one("integrate(exp(-x^2), x)").starts_with("ERROR"));
 }
@@ -63,7 +68,10 @@ fn taylor_series() {
 
 #[test]
 fn solving() {
-    assert_eq!(one("solve(x^2 - 5*x + 6, x)"), "Matrix(2 3)".replace("Matrix(2 3)", &one("[2 3]")));
+    assert_eq!(
+        one("solve(x^2 - 5*x + 6, x)"),
+        "Matrix(2 3)".replace("Matrix(2 3)", &one("[2 3]"))
+    );
     assert_eq!(one("solve(x^3 - 6*x^2 + 11*x - 6, x)"), one("[1 2 3]"));
     assert_eq!(one("solve(2*x + 3, x)"), "-3/2");
     assert_eq!(one("solve([x + y - 3, x - y - 1], [x y])"), one("[2 1]"));

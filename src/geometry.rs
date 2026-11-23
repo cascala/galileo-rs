@@ -25,7 +25,9 @@ pub struct Metric {
 }
 
 fn is_diagonal(m: &Mat) -> bool {
-    m.iter().enumerate().all(|(i, r)| r.iter().enumerate().all(|(j, x)| i == j || x.is_zero()))
+    m.iter()
+        .enumerate()
+        .all(|(i, r)| r.iter().enumerate().all(|(j, x)| i == j || x.is_zero()))
 }
 
 /// Inverse of a symbolic matrix, tidied
@@ -58,7 +60,11 @@ impl Metric {
                 }
             }
         }
-        Ok(Metric { coords, g: g.iter().map(|r| r.iter().map(tidy).collect()).collect(), upper: false })
+        Ok(Metric {
+            coords,
+            g: g.iter().map(|r| r.iter().map(tidy).collect()).collect(),
+            upper: false,
+        })
     }
 
     pub fn dim(&self) -> usize {
@@ -66,15 +72,27 @@ impl Metric {
     }
 
     pub fn lower(&self) -> Result<Mat, String> {
-        if self.upper { inverse(&self.g) } else { Ok(self.g.clone()) }
+        if self.upper {
+            inverse(&self.g)
+        } else {
+            Ok(self.g.clone())
+        }
     }
 
     pub fn raised(&self) -> Result<Mat, String> {
-        if self.upper { Ok(self.g.clone()) } else { inverse(&self.g) }
+        if self.upper {
+            Ok(self.g.clone())
+        } else {
+            inverse(&self.g)
+        }
     }
 
     pub fn inverse(&self) -> Result<Metric, String> {
-        Ok(Metric { coords: self.coords.clone(), g: inverse(&self.g)?, upper: !self.upper })
+        Ok(Metric {
+            coords: self.coords.clone(),
+            g: inverse(&self.g)?,
+            upper: !self.upper,
+        })
     }
 
     fn terms(&self) -> Vec<(Expr, usize, usize)> {
@@ -83,7 +101,11 @@ impl Metric {
         for a in 0..n {
             for b in a..n {
                 let g = &self.g[a][b];
-                let c = if a == b { g.clone() } else { tidy(&mul2(Expr::int(2), g.clone())) };
+                let c = if a == b {
+                    g.clone()
+                } else {
+                    tidy(&mul2(Expr::int(2), g.clone()))
+                };
                 if !c.is_zero() {
                     out.push((c, a, b));
                 }
@@ -99,7 +121,11 @@ impl Metric {
                 .iter()
                 .map(|r| format!("[{}]", r.iter().map(show).collect::<Vec<_>>().join(", ")))
                 .collect();
-            return format!("Inverse metric g^ab (coordinates {}): [{}]", self.coords.join(", "), rows.join(", "));
+            return format!(
+                "Inverse metric g^ab (coordinates {}): [{}]",
+                self.coords.join(", "),
+                rows.join(", ")
+            );
         }
         let ts: Vec<String> = self
             .terms()
@@ -111,7 +137,11 @@ impl Metric {
                 } else {
                     format!("d{} d{}", self.coords[*a], self.coords[*b])
                 };
-                let (negative, c) = if c.is_negative_term() { (true, neg(c.clone())) } else { (false, c.clone()) };
+                let (negative, c) = if c.is_negative_term() {
+                    (true, neg(c.clone()))
+                } else {
+                    (false, c.clone())
+                };
                 let body = match &c {
                     x if x.is_one() => d,
                     Expr::Add(_) => format!("({})*{}", show(&c), d),
@@ -125,12 +155,22 @@ impl Metric {
                 }
             })
             .collect();
-        format!("ds^2 = {}", if ts.is_empty() { "0".into() } else { ts.concat() })
+        format!(
+            "ds^2 = {}",
+            if ts.is_empty() {
+                "0".into()
+            } else {
+                ts.concat()
+            }
+        )
     }
 
     pub fn latex(&self) -> String {
         if self.upper {
-            return format!("$$g^{{ab}} = {}$$", latex::latex(&Expr::Matrix(self.g.clone())));
+            return format!(
+                "$$g^{{ab}} = {}$$",
+                latex::latex(&Expr::Matrix(self.g.clone()))
+            );
         }
         let name = |i: usize| latex::name(&self.coords[i]);
         let ts: Vec<String> = self
@@ -138,18 +178,39 @@ impl Metric {
             .iter()
             .enumerate()
             .map(|(i, (c, a, b))| {
-                let d = if a == b { format!("d{}^2", name(*a)) } else { format!("d{}\\, d{}", name(*a), name(*b)) };
-                let (negative, c) = if c.is_negative_term() { (true, neg(c.clone())) } else { (false, c.clone()) };
+                let d = if a == b {
+                    format!("d{}^2", name(*a))
+                } else {
+                    format!("d{}\\, d{}", name(*a), name(*b))
+                };
+                let (negative, c) = if c.is_negative_term() {
+                    (true, neg(c.clone()))
+                } else {
+                    (false, c.clone())
+                };
                 let cl = match &c {
                     x if x.is_one() => String::new(),
                     Expr::Add(_) => format!("\\left({}\\right)\\, ", latex::latex(&c)),
                     _ => format!("{}\\, ", latex::latex(&c)),
                 };
-                let sign = if negative { if i == 0 { "-" } else { " - " } } else if i == 0 { "" } else { " + " };
+                let sign = if negative {
+                    if i == 0 { "-" } else { " - " }
+                } else if i == 0 {
+                    ""
+                } else {
+                    " + "
+                };
                 format!("{}{}{}", sign, cl, d)
             })
             .collect();
-        format!("$$ds^2 = {}$$", if ts.is_empty() { "0".into() } else { ts.concat() })
+        format!(
+            "$$ds^2 = {}$$",
+            if ts.is_empty() {
+                "0".into()
+            } else {
+                ts.concat()
+            }
+        )
     }
 }
 
@@ -166,11 +227,24 @@ fn diag(coords: &[&str], d: Vec<Expr>) -> Metric {
     for (i, x) in d.into_iter().enumerate() {
         g[i][i] = x;
     }
-    Metric { coords: coords.iter().map(|s| s.to_string()).collect(), g, upper: false }
+    Metric {
+        coords: coords.iter().map(|s| s.to_string()).collect(),
+        g,
+        upper: false,
+    }
 }
 
-pub const TEMPLATES: [&str; 9] =
-    ["minkowski", "polar", "euclidean", "spherical", "two-sphere", "three-sphere", "schwarzschild", "torus", "hyperbolic"];
+pub const TEMPLATES: [&str; 9] = [
+    "minkowski",
+    "polar",
+    "euclidean",
+    "spherical",
+    "two-sphere",
+    "three-sphere",
+    "schwarzschild",
+    "torus",
+    "hyperbolic",
+];
 
 /// Ready-made metrics: metric.generate(name)
 pub fn template(name: &str) -> Option<Metric> {
@@ -178,24 +252,54 @@ pub fn template(name: &str) -> Option<Metric> {
     let cos = |x: &str| func(Func::Cos, sym(x));
     let r = || sym("r");
     Some(match name.trim() {
-        "minkowski" => diag(&["t", "x", "y", "z"], vec![Expr::int(-1), Expr::one(), Expr::one(), Expr::one()]),
+        "minkowski" => diag(
+            &["t", "x", "y", "z"],
+            vec![Expr::int(-1), Expr::one(), Expr::one(), Expr::one()],
+        ),
         "polar" => diag(&["r", "phi"], vec![Expr::one(), sq(r())]),
-        "euclidean" => diag(&["x", "y", "z"], vec![Expr::one(), Expr::one(), Expr::one()]),
-        "spherical" => diag(&["r", "theta", "phi"], vec![Expr::one(), sq(r()), mul2(sq(r()), sq(sin("theta")))]),
-        "two-sphere" => diag(&["theta", "phi"], vec![sq(r()), mul2(sq(r()), sq(sin("theta")))]),
+        "euclidean" => diag(
+            &["x", "y", "z"],
+            vec![Expr::one(), Expr::one(), Expr::one()],
+        ),
+        "spherical" => diag(
+            &["r", "theta", "phi"],
+            vec![Expr::one(), sq(r()), mul2(sq(r()), sq(sin("theta")))],
+        ),
+        "two-sphere" => diag(
+            &["theta", "phi"],
+            vec![sq(r()), mul2(sq(r()), sq(sin("theta")))],
+        ),
         "three-sphere" => diag(
             &["psi", "theta", "phi"],
-            vec![sq(r()), mul2(sq(r()), sq(sin("psi"))), mul(vec![sq(r()), sq(sin("psi")), sq(sin("theta"))])],
+            vec![
+                sq(r()),
+                mul2(sq(r()), sq(sin("psi"))),
+                mul(vec![sq(r()), sq(sin("psi")), sq(sin("theta"))]),
+            ],
         ),
         "schwarzschild" => {
             let f = div(sub(r(), sym("r_s")), r());
             diag(
                 &["t", "r", "theta", "phi"],
-                vec![neg(f.clone()), pow(f, Expr::int(-1)), sq(r()), mul2(sq(r()), sq(sin("theta")))],
+                vec![
+                    neg(f.clone()),
+                    pow(f, Expr::int(-1)),
+                    sq(r()),
+                    mul2(sq(r()), sq(sin("theta"))),
+                ],
             )
         }
-        "torus" => diag(&["theta", "phi"], vec![sq(sym("a")), sq(add2(sym("R"), mul2(sym("a"), cos("theta"))))]),
-        "hyperbolic" => diag(&["x", "y"], vec![pow(sym("y"), Expr::int(-2)), pow(sym("y"), Expr::int(-2))]),
+        "torus" => diag(
+            &["theta", "phi"],
+            vec![
+                sq(sym("a")),
+                sq(add2(sym("R"), mul2(sym("a"), cos("theta")))),
+            ],
+        ),
+        "hyperbolic" => diag(
+            &["x", "y"],
+            vec![pow(sym("y"), Expr::int(-2)), pow(sym("y"), Expr::int(-2))],
+        ),
         _ => return None,
     })
 }
@@ -203,17 +307,28 @@ pub fn template(name: &str) -> Option<Metric> {
 /// The metric induced on a parametrised surface by the Euclidean metric of the
 /// space it lives in (the first fundamental form): g_ij = sum_k dX_k/du_i dX_k/du_j
 pub fn induced(embedding: &[Expr], coords: &[String]) -> Metric {
-    let jac: Vec<Vec<Expr>> = coords.iter().map(|u| embedding.iter().map(|x| deriv(x, u)).collect()).collect();
+    let jac: Vec<Vec<Expr>> = coords
+        .iter()
+        .map(|u| embedding.iter().map(|x| deriv(x, u)).collect())
+        .collect();
     let n = coords.len();
     let mut g = linalg::filled(n, n, Expr::zero());
     for i in 0..n {
         for j in i..n {
-            let s = tidy(&add(jac[i].iter().zip(&jac[j]).map(|(a, b)| mul2(a.clone(), b.clone())).collect()));
+            let s = tidy(&add(jac[i]
+                .iter()
+                .zip(&jac[j])
+                .map(|(a, b)| mul2(a.clone(), b.clone()))
+                .collect()));
             g[i][j] = s.clone();
             g[j][i] = s;
         }
     }
-    Metric { coords: coords.to_vec(), g, upper: false }
+    Metric {
+        coords: coords.to_vec(),
+        g,
+        upper: false,
+    }
 }
 
 // ---------- curvature ----------
@@ -242,7 +357,11 @@ fn sum(ts: Vec<Expr>) -> Expr {
 }
 
 fn prod(a: &Expr, b: &Expr) -> Expr {
-    if a.is_zero() || b.is_zero() { Expr::zero() } else { mul2(a.clone(), b.clone()) }
+    if a.is_zero() || b.is_zero() {
+        Expr::zero()
+    } else {
+        mul2(a.clone(), b.clone())
+    }
 }
 
 fn scale(c: Expr, e: Expr) -> Expr {
@@ -274,7 +393,11 @@ impl Curvature {
     }
 
     fn d(&self, e: &Expr, i: usize) -> Expr {
-        if e.is_zero() { Expr::zero() } else { tidy(&deriv(e, &self.xs[i])) }
+        if e.is_zero() {
+            Expr::zero()
+        } else {
+            tidy(&deriv(e, &self.xs[i]))
+        }
     }
 
     /// Gamma_abc = 1/2 (g_ab,c + g_ac,b - g_bc,a)
@@ -315,7 +438,9 @@ impl Curvature {
             for a in 0..n {
                 for b in 0..n {
                     for c in b..n {
-                        let v = sum((0..n).map(|k| prod(&self.gu[a][k], &first[self.i3(k, b, c)])).collect());
+                        let v = sum((0..n)
+                            .map(|k| prod(&self.gu[a][k], &first[self.i3(k, b, c)]))
+                            .collect());
                         out[self.i3(a, b, c)] = v.clone();
                         out[self.i3(a, c, b)] = v;
                     }
@@ -338,14 +463,21 @@ impl Curvature {
                 for b in 0..n {
                     for c in 0..n {
                         for d in c + 1..n {
-                            let mut ts = vec![self.d(self.gamma(a, b, d), c), neg(self.d(self.gamma(a, b, c), d))];
+                            let mut ts = vec![
+                                self.d(self.gamma(a, b, d), c),
+                                neg(self.d(self.gamma(a, b, c), d)),
+                            ];
                             for e in 0..n {
                                 ts.push(prod(self.gamma(a, c, e), self.gamma(e, b, d)));
                                 let t = prod(self.gamma(a, d, e), self.gamma(e, b, c));
                                 ts.push(if t.is_zero() { t } else { neg(t) });
                             }
                             let v = sum(ts);
-                            r[self.i4(a, b, d, c)] = if v.is_zero() { v.clone() } else { tidy(&neg(v.clone())) };
+                            r[self.i4(a, b, d, c)] = if v.is_zero() {
+                                v.clone()
+                            } else {
+                                tidy(&neg(v.clone()))
+                            };
                             r[self.i4(a, b, c, d)] = v;
                         }
                     }
@@ -365,8 +497,9 @@ impl Curvature {
                 for b in 0..n {
                     for c in 0..n {
                         for d in 0..n {
-                            out[self.i4(a, b, c, d)] =
-                                sum((0..n).map(|e| prod(&self.gl[a][e], &r[self.i4(e, b, c, d)])).collect());
+                            out[self.i4(a, b, c, d)] = sum((0..n)
+                                .map(|e| prod(&self.gl[a][e], &r[self.i4(e, b, c, d)]))
+                                .collect());
                         }
                     }
                 }
@@ -414,7 +547,10 @@ impl Curvature {
         let mut out = vec![Expr::zero(); n * n];
         for a in 0..n {
             for b in 0..n {
-                out[a * n + b] = sum(vec![ric[a * n + b].clone(), scale(rat(-1, 2), prod(&self.gl[a][b], s))]);
+                out[a * n + b] = sum(vec![
+                    ric[a * n + b].clone(),
+                    scale(rat(-1, 2), prod(&self.gl[a][b], s)),
+                ]);
             }
         }
         out
@@ -447,7 +583,12 @@ impl Curvature {
         if n < 3 {
             return Err("the Weyl tensor needs at least 3 dimensions".into());
         }
-        let (rl, ric, s, g) = (self.riemann_lower(), self.ricci(), self.ricci_scalar(), &self.gl);
+        let (rl, ric, s, g) = (
+            self.riemann_lower(),
+            self.ricci(),
+            self.ricci_scalar(),
+            &self.gl,
+        );
         let k = n as i128;
         let r = |a: usize, b: usize| &ric[a * n + b];
         let mut out = vec![Expr::zero(); n * n * n * n];
@@ -464,9 +605,16 @@ impl Curvature {
                         let t3 = mul(vec![
                             rat(1, (k - 1) * (k - 2)),
                             s.clone(),
-                            add(vec![prod(&g[i][l], &g[kk][m]), neg(prod(&g[i][m], &g[kk][l]))]),
+                            add(vec![
+                                prod(&g[i][l], &g[kk][m]),
+                                neg(prod(&g[i][m], &g[kk][l])),
+                            ]),
                         ]);
-                        out[self.i4(i, kk, l, m)] = sum(vec![rl[self.i4(i, kk, l, m)].clone(), scale(rat(1, k - 2), t2), t3]);
+                        out[self.i4(i, kk, l, m)] = sum(vec![
+                            rl[self.i4(i, kk, l, m)].clone(),
+                            scale(rat(1, k - 2), t2),
+                            t3,
+                        ]);
                     }
                 }
             }
@@ -487,15 +635,16 @@ impl Curvature {
                         for c in 0..n {
                             for d in 0..n {
                                 let ix = [a, b, c, d];
-                                cur[self.i4(a, b, c, d)] = sum(
-                                    (0..n)
-                                        .map(|e| {
-                                            let mut jx = ix;
-                                            jx[p] = e;
-                                            prod(&self.gu[ix[p]][e], &prev[self.i4(jx[0], jx[1], jx[2], jx[3])])
-                                        })
-                                        .collect(),
-                                );
+                                cur[self.i4(a, b, c, d)] = sum((0..n)
+                                    .map(|e| {
+                                        let mut jx = ix;
+                                        jx[p] = e;
+                                        prod(
+                                            &self.gu[ix[p]][e],
+                                            &prev[self.i4(jx[0], jx[1], jx[2], jx[3])],
+                                        )
+                                    })
+                                    .collect());
                             }
                         }
                     }
@@ -522,7 +671,12 @@ impl Curvature {
                     for c in 0..n {
                         let g = self.gamma(a, b, c);
                         if !g.is_zero() {
-                            ts.push(mul(vec![Expr::int(-1), g.clone(), dot(&self.xs[b]), dot(&self.xs[c])]));
+                            ts.push(mul(vec![
+                                Expr::int(-1),
+                                g.clone(),
+                                dot(&self.xs[b]),
+                                dot(&self.xs[c]),
+                            ]));
                         }
                     }
                 }
@@ -546,7 +700,12 @@ thread_local! {
 /// Curvature of a metric; recent results are kept, since notebooks usually ask
 /// several questions about one metric
 pub fn curvature(m: &Metric) -> Result<Rc<Curvature>, String> {
-    if let Some(c) = CACHE.with(|c| c.borrow().iter().find(|(k, _)| k == m).map(|(_, v)| v.clone())) {
+    if let Some(c) = CACHE.with(|c| {
+        c.borrow()
+            .iter()
+            .find(|(k, _)| k == m)
+            .map(|(_, v)| v.clone())
+    }) {
         return Ok(c);
     }
     let c = Rc::new(Curvature::new(m)?);
@@ -584,7 +743,11 @@ impl Symmetry {
             Symmetry::LastPair => ix[k - 2] <= ix[k - 1],
             Symmetry::Pair => ix[0] <= ix[1],
             Symmetry::AntiLastPair => ix[2] < ix[3],
-            Symmetry::RiemannLike => ix[0] < ix[1] && ix[2] < ix[3] && (ix[0] < ix[2] || (ix[0] == ix[2] && ix[1] <= ix[3])),
+            Symmetry::RiemannLike => {
+                ix[0] < ix[1]
+                    && ix[2] < ix[3]
+                    && (ix[0] < ix[2] || (ix[0] == ix[2] && ix[1] <= ix[3]))
+            }
         }
     }
 }
@@ -654,14 +817,24 @@ impl Components {
     }
 
     pub fn text(&self) -> String {
-        let head = format!("{} ({}, coordinates {})", self.title, self.symbol, self.coords.join(", "));
+        let head = format!(
+            "{} ({}, coordinates {})",
+            self.title,
+            self.symbol,
+            self.coords.join(", ")
+        );
         let nz = self.non_zero();
         if nz.is_empty() {
             return format!("{}: all components are zero", head);
         }
         let mut lines = vec![format!("{}, non-zero components:", head)];
         for (ix, v) in nz {
-            lines.push(format!("  {}{} = {}", self.symbol, self.text_indices(&ix), show(v)));
+            lines.push(format!(
+                "  {}{} = {}",
+                self.symbol,
+                self.text_indices(&ix),
+                show(v)
+            ));
         }
         lines.join("\n")
     }
@@ -676,7 +849,13 @@ impl Components {
                     let idx: String = ix
                         .iter()
                         .zip(&self.upper)
-                        .map(|(i, up)| format!("{}{{{}}}", if *up { "{}^" } else { "{}_" }, latex::name(&self.coords[*i])))
+                        .map(|(i, up)| {
+                            format!(
+                                "{}{{{}}}",
+                                if *up { "{}^" } else { "{}_" },
+                                latex::name(&self.coords[*i])
+                            )
+                        })
                         .collect();
                     format!("{}{} &= {}", self.latex_symbol, idx, latex::latex(v))
                 })
@@ -687,8 +866,17 @@ impl Components {
     }
 
     pub fn markdown(&self) -> String {
-        let names: Vec<String> = self.coords.iter().map(|c| format!("${}$", latex::name(c))).collect();
-        format!("**{}** (coordinates {})\n\n{}", self.title, names.join(", "), self.latex())
+        let names: Vec<String> = self
+            .coords
+            .iter()
+            .map(|c| format!("${}$", latex::name(c)))
+            .collect();
+        format!(
+            "**{}** (coordinates {})\n\n{}",
+            self.title,
+            names.join(", "),
+            self.latex()
+        )
     }
 }
 
@@ -702,13 +890,23 @@ pub struct Equations {
 impl Equations {
     pub fn text(&self) -> String {
         let mut lines = vec![self.title.clone()];
-        lines.extend(self.eqs.iter().map(|(l, r)| format!("  {} = {}", show(l), show(r))));
+        lines.extend(
+            self.eqs
+                .iter()
+                .map(|(l, r)| format!("  {} = {}", show(l), show(r))),
+        );
         lines.join("\n")
     }
     pub fn latex(&self) -> String {
-        let body: Vec<String> =
-            self.eqs.iter().map(|(l, r)| format!("{} &= {}", latex::latex(l), latex::latex(r))).collect();
-        format!("$$\\begin{{aligned}}\n{}\n\\end{{aligned}}$$", body.join(" \\\\\n"))
+        let body: Vec<String> = self
+            .eqs
+            .iter()
+            .map(|(l, r)| format!("{} &= {}", latex::latex(l), latex::latex(r)))
+            .collect();
+        format!(
+            "$$\\begin{{aligned}}\n{}\n\\end{{aligned}}$$",
+            body.join(" \\\\\n")
+        )
     }
     pub fn markdown(&self) -> String {
         format!("**{}**\n\n{}", self.title, self.latex())
@@ -720,22 +918,28 @@ pub fn named(kind: &str, m: &Metric) -> Result<Expr, String> {
     use crate::expr::Obj;
     let cv = curvature(m)?;
     let n = m.dim();
-    let comps = |title: &str, sym: &str, lsym: &str, upper: Vec<bool>, values: Vec<Expr>, s: Symmetry| {
-        Expr::Obj(Rc::new(Obj::Components(Components {
-            title: title.into(),
-            symbol: sym.into(),
-            latex_symbol: lsym.into(),
-            upper,
-            coords: m.coords.clone(),
-            values,
-            symmetry: s,
-        })))
-    };
+    let comps =
+        |title: &str, sym: &str, lsym: &str, upper: Vec<bool>, values: Vec<Expr>, s: Symmetry| {
+            Expr::Obj(Rc::new(Obj::Components(Components {
+                title: title.into(),
+                symbol: sym.into(),
+                latex_symbol: lsym.into(),
+                upper,
+                coords: m.coords.clone(),
+                values,
+                symmetry: s,
+            })))
+        };
     let (u, l) = (true, false);
     Ok(match kind {
-        "christoffelfirst" => {
-            comps("Christoffel symbols of the first kind", "Gamma", "\\Gamma", vec![l, l, l], cv.first().clone(), Symmetry::LastPair)
-        }
+        "christoffelfirst" => comps(
+            "Christoffel symbols of the first kind",
+            "Gamma",
+            "\\Gamma",
+            vec![l, l, l],
+            cv.first().clone(),
+            Symmetry::LastPair,
+        ),
         "christoffel" | "christoffelsecond" => comps(
             "Christoffel symbols of the second kind",
             "Gamma",
@@ -744,16 +948,54 @@ pub fn named(kind: &str, m: &Metric) -> Result<Expr, String> {
             cv.second().clone(),
             Symmetry::LastPair,
         ),
-        "riemannfirst" => {
-            comps("Riemann curvature tensor", "R", "R", vec![l, l, l, l], cv.riemann_lower().clone(), Symmetry::RiemannLike)
-        }
-        "riemannsecond" | "riemann" => {
-            comps("Riemann curvature tensor", "R", "R", vec![u, l, l, l], cv.riemann().clone(), Symmetry::AntiLastPair)
-        }
-        "riccitensor" => comps("Ricci tensor", "R", "R", vec![l, l], cv.ricci().clone(), Symmetry::Pair),
-        "einsteintensor" => comps("Einstein tensor", "G", "G", vec![l, l], cv.einstein(), Symmetry::Pair),
-        "schoutentensor" => comps("Schouten tensor", "P", "P", vec![l, l], cv.schouten()?, Symmetry::Pair),
-        "weyltensor" => comps("Weyl tensor", "C", "C", vec![l, l, l, l], cv.weyl()?, Symmetry::RiemannLike),
+        "riemannfirst" => comps(
+            "Riemann curvature tensor",
+            "R",
+            "R",
+            vec![l, l, l, l],
+            cv.riemann_lower().clone(),
+            Symmetry::RiemannLike,
+        ),
+        "riemannsecond" | "riemann" => comps(
+            "Riemann curvature tensor",
+            "R",
+            "R",
+            vec![u, l, l, l],
+            cv.riemann().clone(),
+            Symmetry::AntiLastPair,
+        ),
+        "riccitensor" => comps(
+            "Ricci tensor",
+            "R",
+            "R",
+            vec![l, l],
+            cv.ricci().clone(),
+            Symmetry::Pair,
+        ),
+        "einsteintensor" => comps(
+            "Einstein tensor",
+            "G",
+            "G",
+            vec![l, l],
+            cv.einstein(),
+            Symmetry::Pair,
+        ),
+        "schoutentensor" => comps(
+            "Schouten tensor",
+            "P",
+            "P",
+            vec![l, l],
+            cv.schouten()?,
+            Symmetry::Pair,
+        ),
+        "weyltensor" => comps(
+            "Weyl tensor",
+            "C",
+            "C",
+            vec![l, l, l, l],
+            cv.weyl()?,
+            Symmetry::RiemannLike,
+        ),
         "ricciscalar" => cv.ricci_scalar().clone(),
         "einsteinscalar" => tidy(&mul2(rat(2 - n as i128, 2), cv.ricci_scalar().clone())),
         "gausscurvature" => cv.gaussian()?,
@@ -762,7 +1004,12 @@ pub fn named(kind: &str, m: &Metric) -> Result<Expr, String> {
             let rhs = cv.geodesic_rhs();
             Expr::Obj(Rc::new(Obj::Equations(Equations {
                 title: "Geodesic equations (' = d/ds along the curve)".into(),
-                eqs: m.coords.iter().zip(rhs).map(|(x, r)| (ddot(x), r)).collect(),
+                eqs: m
+                    .coords
+                    .iter()
+                    .zip(rhs)
+                    .map(|(x, r)| (ddot(x), r))
+                    .collect(),
             })))
         }
         "inverse" => Expr::Obj(Rc::new(Obj::Metric(m.inverse()?))),

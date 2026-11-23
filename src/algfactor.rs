@@ -116,7 +116,13 @@ pub fn primitive(p: &[BigInt]) -> ZPoly {
 }
 
 fn pderiv(p: &[BigInt]) -> ZPoly {
-    trim(p.iter().enumerate().skip(1).map(|(k, c)| c * BigInt::from(k)).collect())
+    trim(
+        p.iter()
+            .enumerate()
+            .skip(1)
+            .map(|(k, c)| c * BigInt::from(k))
+            .collect(),
+    )
 }
 
 pub fn peval(p: &[BigInt], x: &BigInt) -> BigInt {
@@ -125,7 +131,10 @@ pub fn peval(p: &[BigInt], x: &BigInt) -> BigInt {
 
 /// p(-x)
 fn pneg_x(p: &[BigInt]) -> ZPoly {
-    p.iter().enumerate().map(|(k, c)| if k % 2 == 1 { -c } else { c.clone() }).collect()
+    p.iter()
+        .enumerate()
+        .map(|(k, c)| if k % 2 == 1 { -c } else { c.clone() })
+        .collect()
 }
 
 /// p(x^k)
@@ -170,7 +179,11 @@ fn pgcd(a: &[BigInt], b: &[BigInt]) -> ZPoly {
 // ---------- cyclotomic polynomials ----------
 
 fn small_factor(n: u64) -> Vec<(u64, u32)> {
-    nt::small::factorize(n as u128).unwrap_or_default().into_iter().map(|(p, e)| (p as u64, e)).collect()
+    nt::small::factorize(n as u128)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(p, e)| (p as u64, e))
+        .collect()
 }
 
 pub fn divisors_u64(n: u64) -> Vec<u64> {
@@ -190,7 +203,9 @@ pub fn divisors_u64(n: u64) -> Vec<u64> {
 }
 
 pub fn totient_u64(n: u64) -> u64 {
-    small_factor(n).iter().fold(n, |acc, (p, _)| acc / p * (p - 1))
+    small_factor(n)
+        .iter()
+        .fold(n, |acc, (p, _)| acc / p * (p - 1))
 }
 
 fn mobius(n: u64) -> i32 {
@@ -269,7 +284,11 @@ fn minv(a: u64, p: u64) -> u64 {
 
 fn mreduce(f: &[BigInt], p: u64) -> MPoly {
     let pb = BigInt::from(p);
-    mtrim(f.iter().map(|c| c.mod_floor(&pb).to_u64().unwrap()).collect())
+    mtrim(
+        f.iter()
+            .map(|c| c.mod_floor(&pb).to_u64().unwrap())
+            .collect(),
+    )
 }
 
 fn mmul(a: &[u64], b: &[u64], p: u64) -> MPoly {
@@ -365,7 +384,10 @@ fn mextgcd(a: &[u64], b: &[u64], p: u64) -> (MPoly, MPoly) {
     }
     // r0 is a nonzero constant
     let inv = minv(r0[0], p);
-    (s0.iter().map(|c| c * inv % p).collect(), t0.iter().map(|c| c * inv % p).collect())
+    (
+        s0.iter().map(|c| c * inv % p).collect(),
+        t0.iter().map(|c| c * inv % p).collect(),
+    )
 }
 
 fn mpowmod(base: &[u64], e: &BigInt, f: &[u64], p: u64) -> MPoly {
@@ -416,7 +438,11 @@ fn edf(f: &[u64], d: usize, p: u64, seed: &mut u64) -> Vec<MPoly> {
     if n == d {
         return vec![f.to_vec()];
     }
-    let e = if p == 2 { BigInt::zero() } else { (num_traits::pow(BigInt::from(p), d) - 1u32) / 2u32 };
+    let e = if p == 2 {
+        BigInt::zero()
+    } else {
+        (num_traits::pow(BigInt::from(p), d) - 1u32) / 2u32
+    };
     loop {
         let a: MPoly = mtrim(
             (0..n)
@@ -473,7 +499,11 @@ fn hensel(f: &[BigInt], g: &[u64], h: &[u64], p: u64, k: u32) -> (ZPoly, ZPoly) 
     for _ in 1..k {
         let next = &pj * &pb;
         let diff = pmod(&psub(f, &pmul(&gg, &hh)), &next);
-        let e: MPoly = mtrim(diff.iter().map(|c| (c / &pj).mod_floor(&pb).to_u64().unwrap()).collect());
+        let e: MPoly = mtrim(
+            diff.iter()
+                .map(|c| (c / &pj).mod_floor(&pb).to_u64().unwrap())
+                .collect(),
+        );
         if !e.is_empty() {
             let (q, r) = mdivrem(&mmul(&t, &e, p), g, p);
             let dh = madd(&mmul(&s, &e, p), &mmul(&q, h, p), p);
@@ -528,7 +558,9 @@ fn zassenhaus(f: &[BigInt]) -> ZPoly2 {
             best = Some((p, parts, count));
         }
     }
-    let Some((p, parts, _)) = best else { return vec![f.to_vec()] };
+    let Some((p, parts, _)) = best else {
+        return vec![f.to_vec()];
+    };
     let mut seed = 0x9E3779B97F4A7C15u64;
     let mut modf: Vec<MPoly> = vec![];
     for (g, d) in parts {
@@ -573,7 +605,9 @@ fn zassenhaus(f: &[BigInt]) -> ZPoly2 {
             }
             let lcf = f.last().unwrap().clone();
             // constant term test first
-            let c0 = comb.iter().fold(lcf.clone(), |acc, &j| (acc * &lifted[idx[j]][0]).mod_floor(&m));
+            let c0 = comb.iter().fold(lcf.clone(), |acc, &j| {
+                (acc * &lifted[idx[j]][0]).mod_floor(&m)
+            });
             let c0 = modsym(&c0, &m);
             if !c0.is_zero() && (&lcf * &f[0]) % &c0 == BigInt::zero() {
                 let mut g: ZPoly = vec![lcf.clone()];
@@ -585,7 +619,10 @@ fn zassenhaus(f: &[BigInt]) -> ZPoly2 {
                 if let Some(q) = pdivexact(&f, &g) {
                     out.push(g);
                     f = q;
-                    let keep: Vec<usize> = (0..idx.len()).filter(|j| !comb.contains(j)).map(|j| idx[j]).collect();
+                    let keep: Vec<usize> = (0..idx.len())
+                        .filter(|j| !comb.contains(j))
+                        .map(|j| idx[j])
+                        .collect();
                     idx = keep;
                     found = true;
                     break 'subsets;
@@ -625,7 +662,11 @@ type ZPoly2 = Vec<ZPoly>;
 fn binomial_cyclotomic(n: usize, plus: bool) -> Vec<ZPoly> {
     let n = n as u64;
     if plus {
-        divisors_u64(2 * n).into_iter().filter(|d| n % d != 0).map(cyclotomic).collect()
+        divisors_u64(2 * n)
+            .into_iter()
+            .filter(|d| n % d != 0)
+            .map(cyclotomic)
+            .collect()
     } else {
         divisors_u64(n).into_iter().map(cyclotomic).collect()
     }
@@ -671,7 +712,11 @@ pub fn factor_zpoly(f: &[BigInt]) -> Option<(BigInt, Vec<(ZPoly, u32)>)> {
     }
     // square-free part
     let g = pgcd(&f, &pderiv(&f));
-    let sq = if deg(&g) == 0 { f.clone() } else { pdivexact(&f, &g)? };
+    let sq = if deg(&g) == 0 {
+        f.clone()
+    } else {
+        pdivexact(&f, &g)?
+    };
     let sq = primitive(&sq);
     let mut irr = factor_sqfree(&sq);
     irr.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
@@ -729,7 +774,12 @@ pub fn squarefree(s: u64) -> bool {
 
 /// whether Φ_n(s x^2) has an Aurifeuillean factorization (s squarefree > 1)
 pub fn aurifeuille_applies(s: u64, n: u64) -> bool {
-    s > 1 && if s % 4 == 1 { n % s == 0 && (n / s) % 2 == 1 } else { n % (2 * s) == 0 && (n / (2 * s)) % 2 == 1 }
+    s > 1
+        && if s % 4 == 1 {
+            n % s == 0 && (n / s) % 2 == 1
+        } else {
+            n % (2 * s) == 0 && (n / (2 * s)) % 2 == 1
+        }
 }
 
 /// negacyclic ring Z[t]/(t^n + 1): c * t^a * v
@@ -845,7 +895,10 @@ fn aurifeuille_compute(s: u64, n: u64) -> Option<ZPoly> {
         if chi != 0 {
             let mut unit = vec![BigInt::zero(); nn];
             unit[0] = BigInt::from(chi);
-            for (i, x) in nc_shift(&unit, a as usize * step, false, nn).into_iter().enumerate() {
+            for (i, x) in nc_shift(&unit, a as usize * step, false, nn)
+                .into_iter()
+                .enumerate()
+            {
                 g[i] += x;
             }
         }
@@ -860,7 +913,10 @@ fn aurifeuille_compute(s: u64, n: u64) -> Option<ZPoly> {
         let rational = ck.len() <= 1;
         // value = r (rational) or u √s
         let (val, root) = if rational {
-            (BigRational::from_integer(ck.first().cloned().unwrap_or_default()), false)
+            (
+                BigRational::from_integer(ck.first().cloned().unwrap_or_default()),
+                false,
+            )
         } else {
             let cg = reduce_mod(&nc_mul(&pad(&ck, nn), &g, nn), &m);
             if cg.len() > 1 {
@@ -868,7 +924,11 @@ fn aurifeuille_compute(s: u64, n: u64) -> Option<ZPoly> {
             }
             // c g = q, c = q/√d = q √d / d; √d = √s (d = s) or 2√s
             let q = cg.first().cloned().unwrap_or_default();
-            let u = if d == s { BigRational::new(q, BigInt::from(d)) } else { BigRational::new(q * 2, BigInt::from(d)) };
+            let u = if d == s {
+                BigRational::new(q, BigInt::from(d))
+            } else {
+                BigRational::new(q * 2, BigInt::from(d))
+            };
             (u, true)
         };
         // times s^{k/2}: the √s parts must cancel
@@ -881,12 +941,23 @@ fn aurifeuille_compute(s: u64, n: u64) -> Option<ZPoly> {
             coeffs.push(BigRational::zero());
             continue;
         }
-        let v = if root { val * BigRational::from_integer(half * &sb) } else { val * BigRational::from_integer(half) };
+        let v = if root {
+            val * BigRational::from_integer(half * &sb)
+        } else {
+            val * BigRational::from_integer(half)
+        };
         coeffs.push(v);
     }
     let _ = phi;
-    let den = coeffs.iter().fold(BigInt::one(), |acc, c| acc.lcm(c.denom()));
-    let p: ZPoly = trim(coeffs.iter().map(|c| (c * BigRational::from_integer(den.clone())).to_integer()).collect());
+    let den = coeffs
+        .iter()
+        .fold(BigInt::one(), |acc, c| acc.lcm(c.denom()));
+    let p: ZPoly = trim(
+        coeffs
+            .iter()
+            .map(|c| (c * BigRational::from_integer(den.clone())).to_integer())
+            .collect(),
+    );
     let p = primitive(&p);
     // check Φ_n(s x^2) ∝ P(x) P(-x)
     let target = cyclotomic(n);
@@ -953,7 +1024,11 @@ fn squarefree_split(t: &BigInt) -> Option<(u64, BigInt)> {
 }
 
 fn name_ab(a: &BigInt, b: &BigInt) -> (String, String) {
-    if b.is_one() { (a.to_string(), a.to_string()) } else { (format!("{}, {}", a, b), format!("{}, {}", a, b)) }
+    if b.is_one() {
+        (a.to_string(), a.to_string())
+    } else {
+        (format!("{}, {}", a, b), format!("{}, {}", a, b))
+    }
 }
 
 /// The algebraic pieces of a^n + b^n (plus) or a^n - b^n, a, b >= 1, whose
@@ -974,25 +1049,52 @@ pub fn algebraic_pieces(a: &BigInt, b: &BigInt, n: u64, plus: bool) -> Option<Ve
     if !g.is_one() {
         a /= &g;
         b /= &g;
-        pieces.push(Piece { text: format!("{}^{}", g, n), latex: format!("{}^{{{}}}", g, n), value: num_traits::pow(g.clone(), n as usize), d: 0 });
+        pieces.push(Piece {
+            text: format!("{}^{}", g, n),
+            latex: format!("{}^{{{}}}", g, n),
+            value: num_traits::pow(g.clone(), n as usize),
+            d: 0,
+        });
     }
     if a == b {
         // a^n + a^n = 2 a^n
-        pieces.push(Piece { text: "2".into(), latex: "2".into(), value: BigInt::from(2), d: 0 });
+        pieces.push(Piece {
+            text: "2".into(),
+            latex: "2".into(),
+            value: BigInt::from(2),
+            d: 0,
+        });
         return if pieces.len() > 1 { Some(pieces) } else { None };
     }
     // a = α^k, b = β^k: use the largest common power
     let (ra, ka) = perfect_power(&a);
     let (rb, kb) = perfect_power(&b);
-    let k = if b.is_one() { ka } else if a.is_one() { kb } else { ka.gcd(&kb) };
+    let k = if b.is_one() {
+        ka
+    } else if a.is_one() {
+        kb
+    } else {
+        ka.gcd(&kb)
+    };
     let mut n = n;
     if k > 1 {
-        a = if a.is_one() { a } else { num_traits::pow(ra, (ka / k) as usize) };
-        b = if b.is_one() { b } else { num_traits::pow(rb, (kb / k) as usize) };
+        a = if a.is_one() {
+            a
+        } else {
+            num_traits::pow(ra, (ka / k) as usize)
+        };
+        b = if b.is_one() {
+            b
+        } else {
+            num_traits::pow(rb, (kb / k) as usize)
+        };
         n *= k as u64;
     }
     let ds: Vec<u64> = if plus {
-        divisors_u64(2 * n).into_iter().filter(|d| n % d != 0).collect()
+        divisors_u64(2 * n)
+            .into_iter()
+            .filter(|d| n % d != 0)
+            .collect()
     } else {
         divisors_u64(n)
     };
@@ -1010,19 +1112,40 @@ pub fn algebraic_pieces(a: &BigInt, b: &BigInt, n: u64, plus: bool) -> Option<Ve
             if aurifeuille_applies(*s, d) {
                 if let Some(p) = aurifeuille_poly(*s, d) {
                     let phi = deg(&p);
-                    let l: BigInt = p.iter().enumerate().map(|(i, c)| c * num_traits::pow(y.clone(), i) * num_traits::pow(b.clone(), phi - i)).sum();
+                    let l: BigInt = p
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| {
+                            c * num_traits::pow(y.clone(), i) * num_traits::pow(b.clone(), phi - i)
+                        })
+                        .sum();
                     let gl = l.abs().gcd(&v);
                     if !gl.is_one() && gl != v {
                         let other = &v / &gl;
                         let (lo, hi) = if gl < other { (gl, other) } else { (other, gl) };
-                        pieces.push(Piece { text: format!("L_{}({})", d, nt_), latex: format!("L_{{{}}}({})", d, nl), value: lo, d });
-                        pieces.push(Piece { text: format!("M_{}({})", d, nt_), latex: format!("M_{{{}}}({})", d, nl), value: hi, d });
+                        pieces.push(Piece {
+                            text: format!("L_{}({})", d, nt_),
+                            latex: format!("L_{{{}}}({})", d, nl),
+                            value: lo,
+                            d,
+                        });
+                        pieces.push(Piece {
+                            text: format!("M_{}({})", d, nt_),
+                            latex: format!("M_{{{}}}({})", d, nl),
+                            value: hi,
+                            d,
+                        });
                         continue;
                     }
                 }
             }
         }
-        pieces.push(Piece { text, latex, value: v, d });
+        pieces.push(Piece {
+            text,
+            latex,
+            value: v,
+            d,
+        });
     }
     if pieces.len() <= 1 {
         return None;
@@ -1103,7 +1226,9 @@ pub fn factor_partial_known(n: &BigInt, d: u64) -> (Vec<BigInt>, Vec<BigInt>) {
 /// one factor of a composite m whose prime factors are 1 (mod d)
 fn split_known(m: &BigInt, d: u64) -> Option<BigInt> {
     if d <= 2 {
-        return nt::pollard_pm1(m).or_else(|| nt::pollard_rho(m)).or_else(|| ecm_effort(m));
+        return nt::pollard_pm1(m)
+            .or_else(|| nt::pollard_rho(m))
+            .or_else(|| ecm_effort(m));
     }
     // p odd and p = 1 (mod d) give p = 1 (mod 2d) when d is odd. Only p - 1
     // uses it: it gets d into its exponent for free, which matters when d has a
@@ -1112,7 +1237,9 @@ fn split_known(m: &BigInt, d: u64) -> Option<BigInt> {
     // measured no faster for the d of the Cunningham numbers (Brent and Pollard's
     // x^1024 + 1 for 2^256 + 1 is the case where it pays).
     let k = if d % 2 == 1 { 2 * d } else { d };
-    nt::pollard_pm1_with(m, k).or_else(|| nt::pollard_rho(m)).or_else(|| ecm_effort(m))
+    nt::pollard_pm1_with(m, k)
+        .or_else(|| nt::pollard_rho(m))
+        .or_else(|| ecm_effort(m))
 }
 
 /// Lenstra's ECM after rho has failed: 4*effort curves, with B1 growing with
@@ -1120,7 +1247,13 @@ fn split_known(m: &BigInt, d: u64) -> Option<BigInt> {
 /// factors of up to about 15 digits; ECM reaches 20 and more.
 fn ecm_effort(m: &BigInt) -> Option<BigInt> {
     let e = nt::effort();
-    let b1 = if e >= 50 { 50_000 } else if e >= 5 { 11_000 } else { 2_000 };
+    let b1 = if e >= 50 {
+        50_000
+    } else if e >= 5 {
+        11_000
+    } else {
+        2_000
+    };
     crate::groups::ecm(m, 4 * e.min(10_000), b1).map(|(p, _)| p)
 }
 
@@ -1153,7 +1286,11 @@ fn mp_mul(a: &MPolyZ, b: &MPolyZ) -> MPolyZ {
 
 /// Kronecker substitution: variable i becomes t^(w_i)
 fn kron_encode(f: &MPolyZ, w: &[usize]) -> ZPoly {
-    let deg = f.keys().map(|e| e.iter().zip(w).map(|(x, y)| *x as usize * y).sum::<usize>()).max().unwrap_or(0);
+    let deg = f
+        .keys()
+        .map(|e| e.iter().zip(w).map(|(x, y)| *x as usize * y).sum::<usize>())
+        .max()
+        .unwrap_or(0);
     let mut p = vec![BigInt::zero(); deg + 1];
     for (e, c) in f {
         let k: usize = e.iter().zip(w).map(|(x, y)| *x as usize * y).sum();
@@ -1191,7 +1328,10 @@ fn mp_normalize(f: &MPolyZ) -> (BigInt, MPolyZ) {
     if f.iter().next_back().is_some_and(|(_, c)| c.is_negative()) {
         g = -g;
     }
-    (g.clone(), f.iter().map(|(e, c)| (e.clone(), c / &g)).collect())
+    (
+        g.clone(),
+        f.iter().map(|(e, c)| (e.clone(), c / &g)).collect(),
+    )
 }
 
 /// Factor a polynomial with integer coefficients in nv variables:
@@ -1204,7 +1344,9 @@ pub fn factor_multi(terms: &[MTerm], nv: usize) -> Option<(BigInt, Vec<(Vec<MTer
     if f.is_empty() {
         return None;
     }
-    let dims: Vec<usize> = (0..nv).map(|i| f.keys().map(|e| e[i] as usize).max().unwrap_or(0) + 1).collect();
+    let dims: Vec<usize> = (0..nv)
+        .map(|i| f.keys().map(|e| e[i] as usize).max().unwrap_or(0) + 1)
+        .collect();
     let mut w = vec![1usize; nv];
     for i in 1..nv {
         w[i] = w[i - 1].checked_mul(dims[i - 1])?;
@@ -1242,7 +1384,10 @@ pub fn factor_multi(terms: &[MTerm], nv: usize) -> Option<(BigInt, Vec<(Vec<MTer
                 if mp_mul(&hm, &qm) == cur {
                     found.push(hm);
                     cur = qm;
-                    let keep: Vec<ZPoly> = (0..n).filter(|j| !comb.contains(j)).map(|j| pieces[j].clone()).collect();
+                    let keep: Vec<ZPoly> = (0..n)
+                        .filter(|j| !comb.contains(j))
+                        .map(|j| pieces[j].clone())
+                        .collect();
                     pieces = keep;
                     continue 'outer;
                 }
@@ -1281,13 +1426,24 @@ pub fn factor_multi(terms: &[MTerm], nv: usize) -> Option<(BigInt, Vec<(Vec<MTer
         }
     }
     out.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0)));
-    Some((constant, out.into_iter().map(|(m, k)| (m.into_iter().collect(), k)).collect()))
+    Some((
+        constant,
+        out.into_iter()
+            .map(|(m, k)| (m.into_iter().collect(), k))
+            .collect(),
+    ))
 }
 
 // ---------- factoring modulo a prime ----------
 
 fn mderiv(f: &[u64], p: u64) -> MPoly {
-    mtrim(f.iter().enumerate().skip(1).map(|(k, &c)| (k as u64 % p) * c % p).collect())
+    mtrim(
+        f.iter()
+            .enumerate()
+            .skip(1)
+            .map(|(k, &c)| (k as u64 % p) * c % p)
+            .collect(),
+    )
 }
 
 /// irreducible monic factors of f mod p with multiplicities (f monic, degree >= 1)
@@ -1299,7 +1455,10 @@ fn factor_mod_monic(f: &[u64], p: u64, seed: &mut u64) -> Vec<(MPoly, u32)> {
     if df.is_empty() {
         // f = g(x)^p: the coefficients sit at multiples of p
         let g: MPoly = f.iter().step_by(p as usize).cloned().collect();
-        return factor_mod_monic(&g, p, seed).into_iter().map(|(h, m)| (h, m * p as u32)).collect();
+        return factor_mod_monic(&g, p, seed)
+            .into_iter()
+            .map(|(h, m)| (h, m * p as u32))
+            .collect();
     }
     let g = mgcd(f, &df, p);
     let sq = mmonic(&mdivrem(f, &g, p).0, p);
@@ -1350,9 +1509,19 @@ pub fn factor_mod_p(f: &[BigInt], p: u64) -> Option<(u64, Vec<(Vec<u64>, u32)>)>
 #[derive(Clone, Debug)]
 pub enum Form {
     /// n = a^k + b^k (plus) or a^k - b^k
-    Exact { a: BigInt, b: BigInt, k: u64, plus: bool },
+    Exact {
+        a: BigInt,
+        b: BigInt,
+        k: u64,
+        plus: bool,
+    },
     /// n divides b^k + 1 (plus) or b^k - 1, k the smallest such exponent found
-    Divides { b: u64, k: u64, plus: bool, searched: u64 },
+    Divides {
+        b: u64,
+        k: u64,
+        plus: bool,
+        searched: u64,
+    },
     /// n = f(x) for a polynomial f (with integer coefficients) that factors
     Poly { f: ZPoly, x: BigInt },
     /// n = y^d f(x/y), the homogeneous form of a polynomial f of degree d that factors
@@ -1378,7 +1547,12 @@ pub fn find_form(n: &BigInt, effort: u64) -> Option<Form> {
             let m = if plus { n - 1u32 } else { n + 1u32 };
             let r = m.nth_root(k as u32);
             if r >= BigInt::from(2) && num_traits::pow(r.clone(), k as usize) == m {
-                return Some(Form::Exact { a: r, b: one, k, plus });
+                return Some(Form::Exact {
+                    a: r,
+                    b: one,
+                    k,
+                    plus,
+                });
             }
         }
     }
@@ -1398,14 +1572,25 @@ pub fn find_form(n: &BigInt, effort: u64) -> Option<Form> {
                 }
                 let r = m.nth_root(k as u32);
                 if r > bb && num_traits::pow(r.clone(), k as usize) == m {
-                    return Some(Form::Exact { a: r, b: bb, k, plus });
+                    return Some(Form::Exact {
+                        a: r,
+                        b: bb,
+                        k,
+                        plus,
+                    });
                 }
             }
         }
     }
     // Sophie Germain: n = a^4 + 4 b^4
     for b in 1..=bmax {
-        let f: ZPoly = vec![BigInt::from(4) * num_traits::pow(BigInt::from(b), 4), BigInt::zero(), BigInt::zero(), BigInt::zero(), BigInt::one()];
+        let f: ZPoly = vec![
+            BigInt::from(4) * num_traits::pow(BigInt::from(b), 4),
+            BigInt::zero(),
+            BigInt::zero(),
+            BigInt::zero(),
+            BigInt::one(),
+        ];
         let m = n - &f[0];
         if m.sign() != num_bigint::Sign::Plus {
             break;
@@ -1434,7 +1619,12 @@ pub fn find_form(n: &BigInt, effort: u64) -> Option<Form> {
             }
             x = &x * &bb % n;
             if x.is_one() || x == nm1 {
-                best = Some(Form::Divides { b, k, plus: x == nm1, searched: kmax });
+                best = Some(Form::Divides {
+                    b,
+                    k,
+                    plus: x == nm1,
+                    searched: kmax,
+                });
                 break;
             }
         }
@@ -1446,9 +1636,22 @@ pub fn find_form(n: &BigInt, effort: u64) -> Option<Form> {
 pub fn divisor_pieces(n: &BigInt, b: u64, k: u64, plus: bool) -> Vec<Piece> {
     let bb = BigInt::from(b);
     let pieces = algebraic_pieces(&bb, &BigInt::one(), k, plus).unwrap_or_else(|| {
-        let v = if plus { num_traits::pow(bb.clone(), k as usize) + 1u32 } else { num_traits::pow(bb.clone(), k as usize) - 1u32 };
-        let (text, latex) = if plus { (format!("{}^{}+1", b, k), format!("{}^{{{}}}+1", b, k)) } else { (format!("{}^{}-1", b, k), format!("{}^{{{}}}-1", b, k)) };
-        vec![Piece { text, latex, value: v, d: if plus { 2 * k } else { k } }]
+        let v = if plus {
+            num_traits::pow(bb.clone(), k as usize) + 1u32
+        } else {
+            num_traits::pow(bb.clone(), k as usize) - 1u32
+        };
+        let (text, latex) = if plus {
+            (format!("{}^{}+1", b, k), format!("{}^{{{}}}+1", b, k))
+        } else {
+            (format!("{}^{}-1", b, k), format!("{}^{{{}}}-1", b, k))
+        };
+        vec![Piece {
+            text,
+            latex,
+            value: v,
+            d: if plus { 2 * k } else { k },
+        }]
     });
     let mut rest = n.abs();
     let mut out = vec![];
@@ -1458,10 +1661,20 @@ pub fn divisor_pieces(n: &BigInt, b: u64, k: u64, plus: bool) -> Vec<Piece> {
             continue;
         }
         rest /= &g;
-        out.push(Piece { text: format!("N in {}", p.text), latex: format!("N \\cap {}", p.latex), value: g, d: p.d });
+        out.push(Piece {
+            text: format!("N in {}", p.text),
+            latex: format!("N \\cap {}", p.latex),
+            value: g,
+            d: p.d,
+        });
     }
     if !rest.is_one() {
-        out.push(Piece { text: "rest".into(), latex: "\\text{rest}".into(), value: rest, d: 0 });
+        out.push(Piece {
+            text: "rest".into(),
+            latex: "\\text{rest}".into(),
+            value: rest,
+            d: 0,
+        });
     }
     out
 }
@@ -1511,7 +1724,9 @@ pub fn int_root_from(f: &[BigInt], t: &BigInt, est: Option<&BigInt>) -> Option<B
     }
     // small x: try directly
     if t.bits() < 64 {
-        return (-1000i32..=1000).map(BigInt::from).find(|x| peval(&f, x) == *t);
+        return (-1000i32..=1000)
+            .map(BigInt::from)
+            .find(|x| peval(&f, x) == *t);
     }
     None
 }
@@ -1521,13 +1736,23 @@ pub fn poly_pieces(f: &[BigInt], x: &BigInt, var: &str) -> Option<Vec<Piece>> {
     let (c, fs) = factor_zpoly(f)?;
     let mut out = vec![];
     if !c.abs().is_one() {
-        out.push(Piece { text: c.abs().to_string(), latex: c.abs().to_string(), value: c.abs(), d: 0 });
+        out.push(Piece {
+            text: c.abs().to_string(),
+            latex: c.abs().to_string(),
+            value: c.abs(),
+            d: 0,
+        });
     }
     for (g, m) in fs {
         let v = peval(&g, x).abs();
         let gs = show_zpoly(&g, var);
         for _ in 0..m {
-            out.push(Piece { text: gs.clone(), latex: gs.clone(), value: v.clone(), d: 0 });
+            out.push(Piece {
+                text: gs.clone(),
+                latex: gs.clone(),
+                value: v.clone(),
+                d: 0,
+            });
         }
     }
     Some(out)
@@ -1582,15 +1807,27 @@ fn factors_nontrivially(f: &[BigInt]) -> bool {
 fn builtin_families() -> Vec<(String, ZPoly)> {
     let mut out = vec![];
     for k in -100i32..=100 {
-        let f: ZPoly = vec![BigInt::one(), BigInt::zero(), BigInt::from(k), BigInt::zero(), BigInt::one()];
+        let f: ZPoly = vec![
+            BigInt::one(),
+            BigInt::zero(),
+            BigInt::from(k),
+            BigInt::zero(),
+            BigInt::one(),
+        ];
         if factors_nontrivially(&f) {
             out.push((format!("quartic {}", show_zpoly(&f, "x")), f));
         }
     }
     let mono = |c: &[i64]| -> ZPoly { c.iter().map(|&v| BigInt::from(v)).collect() };
     for (name, f) in [
-        ("Sophie Germain x^4 + 4 (with y: x^4 + 4y^4)", mono(&[4, 0, 0, 0, 1])),
-        ("Lucas x^6 + 27 (with y: x^6 + 27y^6)", mono(&[27, 0, 0, 0, 0, 0, 1])),
+        (
+            "Sophie Germain x^4 + 4 (with y: x^4 + 4y^4)",
+            mono(&[4, 0, 0, 0, 1]),
+        ),
+        (
+            "Lucas x^6 + 27 (with y: x^6 + 27y^6)",
+            mono(&[27, 0, 0, 0, 0, 0, 1]),
+        ),
         ("x^6 - 27", mono(&[-27, 0, 0, 0, 0, 0, 1])),
         ("x^8 + 4", mono(&[4, 0, 0, 0, 0, 0, 0, 0, 1])),
         ("x^8 + x^4 + 1", mono(&[1, 0, 0, 0, 1, 0, 0, 0, 1])),
@@ -1601,13 +1838,23 @@ fn builtin_families() -> Vec<(String, ZPoly)> {
         }
     }
     for (name, cs) in crate::auri_families::AURI_FAMILIES {
-        let sign = if cs.last().is_some_and(|&v| v < 0) { -1 } else { 1 };
+        let sign = if cs.last().is_some_and(|&v| v < 0) {
+            -1
+        } else {
+            1
+        };
         let f: ZPoly = cs.iter().map(|&v| BigInt::from(sign * v)).collect();
         if !out.iter().any(|(_, g)| *g == f) {
             out.push((format!("Aurifeuillean-type {}", name), f));
         }
     }
-    let chernick = pmul(&pmul(&[BigInt::one(), BigInt::from(6)], &[BigInt::one(), BigInt::from(12)]), &[BigInt::one(), BigInt::from(18)]);
+    let chernick = pmul(
+        &pmul(
+            &[BigInt::one(), BigInt::from(6)],
+            &[BigInt::one(), BigInt::from(12)],
+        ),
+        &[BigInt::one(), BigInt::from(18)],
+    );
     out.push(("Chernick (6x + 1)(12x + 1)(18x + 1)".into(), chernick));
     out
 }
@@ -1712,14 +1959,21 @@ pub fn catalogue_match(n: &BigInt) -> Option<(String, ZPoly, BigInt)> {
 }
 
 /// small moduli for the residue filter (all at most 64, so a residue set is a u64 mask)
-const PRUNE_MODULI: [u64; 16] = [64, 27, 25, 49, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53];
+const PRUNE_MODULI: [u64; 16] = [
+    64, 27, 25, 49, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+];
 
 /// n reduced by each pruning modulus
 pub struct Residues(Vec<u64>);
 
 impl Residues {
     pub fn new(n: &BigInt) -> Residues {
-        Residues(PRUNE_MODULI.iter().map(|&m| n.mod_floor(&BigInt::from(m)).to_u64().unwrap()).collect())
+        Residues(
+            PRUNE_MODULI
+                .iter()
+                .map(|&m| n.mod_floor(&BigInt::from(m)).to_u64().unwrap())
+                .collect(),
+        )
     }
 }
 
@@ -1741,7 +1995,10 @@ impl Prepared {
         let masks = PRUNE_MODULI
             .iter()
             .map(|&m| {
-                let fm: Vec<u64> = f.iter().map(|c| c.mod_floor(&BigInt::from(m)).to_u64().unwrap()).collect();
+                let fm: Vec<u64> = f
+                    .iter()
+                    .map(|c| c.mod_floor(&BigInt::from(m)).to_u64().unwrap())
+                    .collect();
                 (0..m)
                     .map(|y| {
                         // coefficients of F(x, y) = sum c_i x^i y^(d-i) mod m
@@ -1768,7 +2025,11 @@ impl Prepared {
 
     /// false when some modulus proves F(x, y) = n has no whole-number solution x
     pub fn may_hit(&self, res: &Residues, y: u64) -> bool {
-        PRUNE_MODULI.iter().zip(&self.masks).zip(&res.0).all(|((&m, mk), &r)| mk[(y % m) as usize] >> r & 1 == 1)
+        PRUNE_MODULI
+            .iter()
+            .zip(&self.masks)
+            .zip(&res.0)
+            .all(|((&m, mk), &r)| mk[(y % m) as usize] >> r & 1 == 1)
     }
 }
 
@@ -1778,7 +2039,10 @@ pub struct RootCache(std::collections::HashMap<(usize, BigInt), BigInt>);
 
 impl RootCache {
     pub fn get(&mut self, n: &BigInt, d: usize, lc: &BigInt) -> BigInt {
-        self.0.entry((d, lc.clone())).or_insert_with(|| (n.abs() / lc.abs()).nth_root(d as u32)).clone()
+        self.0
+            .entry((d, lc.clone()))
+            .or_insert_with(|| (n.abs() / lc.abs()).nth_root(d as u32))
+            .clone()
     }
 }
 
@@ -1793,14 +2057,16 @@ pub fn prepared_families() -> Vec<std::rc::Rc<Prepared>> {
         let mut p = p.borrow_mut();
         let out: Vec<_> = all
             .into_iter()
-            .map(|(name, f)| match p.iter().find(|q| q.name == name && q.f == trim(f.clone())) {
-                Some(q) => q.clone(),
-                None => {
-                    let q = std::rc::Rc::new(Prepared::new(name, f));
-                    p.push(q.clone());
-                    q
-                }
-            })
+            .map(
+                |(name, f)| match p.iter().find(|q| q.name == name && q.f == trim(f.clone())) {
+                    Some(q) => q.clone(),
+                    None => {
+                        let q = std::rc::Rc::new(Prepared::new(name, f));
+                        p.push(q.clone());
+                        q
+                    }
+                },
+            )
             .collect();
         out
     })
@@ -1809,7 +2075,10 @@ pub fn prepared_families() -> Vec<std::rc::Rc<Prepared>> {
 /// the homogeneous form y^d f(x/y) as a polynomial in x for a fixed y
 pub fn homogenize(f: &[BigInt], y: &BigInt) -> ZPoly {
     let d = f.len() - 1;
-    f.iter().enumerate().map(|(i, c)| c * y.pow((d - i) as u32)).collect()
+    f.iter()
+        .enumerate()
+        .map(|(i, c)| c * y.pow((d - i) as u32))
+        .collect()
 }
 
 /// homogeneous text: x^2 - 3*x*y + 9*y^2
@@ -1833,7 +2102,10 @@ pub fn show_hzpoly(p: &[BigInt], x: &str, y: &str) -> String {
             1 => v.to_string(),
             _ => format!("{}^{}", v, e),
         };
-        let mono: Vec<String> = [pw(x, k), pw(y, d - k)].into_iter().filter(|m| !m.is_empty()).collect();
+        let mono: Vec<String> = [pw(x, k), pw(y, d - k)]
+            .into_iter()
+            .filter(|m| !m.is_empty())
+            .collect();
         let mono = mono.join("*");
         if mono.is_empty() {
             s.push_str(&a.to_string());
@@ -1851,7 +2123,10 @@ pub fn show_hzpoly(p: &[BigInt], x: &str, y: &str) -> String {
 /// we look for a whole number x with F(x, y) = n and gcd(x, y) = 1.
 /// Returns the family's name, f, x and y.
 pub fn catalogue_match2(n: &BigInt, effort: u64) -> Option<(String, ZPoly, BigInt, BigInt)> {
-    let fams: Vec<_> = prepared_families().into_iter().filter(|q| q.d >= 2 && !q.f[0].is_zero()).collect();
+    let fams: Vec<_> = prepared_families()
+        .into_iter()
+        .filter(|q| q.d >= 2 && !q.f[0].is_zero())
+        .collect();
     let res = Residues::new(n);
     let mut roots = RootCache::default();
     let ymax = (50 * effort).min(100_000);
@@ -1878,13 +2153,23 @@ pub fn poly2_pieces(f: &[BigInt], x: &BigInt, y: &BigInt) -> Option<Vec<Piece>> 
     let (c, fs) = factor_zpoly(f)?;
     let mut out = vec![];
     if !c.abs().is_one() {
-        out.push(Piece { text: c.abs().to_string(), latex: c.abs().to_string(), value: c.abs(), d: 0 });
+        out.push(Piece {
+            text: c.abs().to_string(),
+            latex: c.abs().to_string(),
+            value: c.abs(),
+            d: 0,
+        });
     }
     for (g, m) in fs {
         let v = peval(&homogenize(&g, y), x).abs();
         let gs = show_hzpoly(&g, "x", "y");
         for _ in 0..m {
-            out.push(Piece { text: gs.clone(), latex: gs.clone(), value: v.clone(), d: 0 });
+            out.push(Piece {
+                text: gs.clone(),
+                latex: gs.clone(),
+                value: v.clone(),
+                d: 0,
+            });
         }
     }
     Some(out)

@@ -1,6 +1,6 @@
 //! Smart constructors that keep expressions canonical.
 
-use crate::expr::{cmp, term_cmp, Const, Expr, Func};
+use crate::expr::{Const, Expr, Func, cmp, term_cmp};
 use crate::num::Number;
 use Expr::*;
 
@@ -58,7 +58,9 @@ pub fn gauss(e: &Expr) -> Option<(Number, Number)> {
     match e {
         Num(n) => Some((n.clone(), Number::zero())),
         Const(Const::I) => Some((Number::zero(), Number::one())),
-        Mul(f) if f.len() == 2 && f[1] == Const(Const::I) => f[0].num().map(|n| (Number::zero(), n)),
+        Mul(f) if f.len() == 2 && f[1] == Const(Const::I) => {
+            f[0].num().map(|n| (Number::zero(), n))
+        }
         Add(t) => {
             let (mut re, mut im) = (Number::zero(), Number::zero());
             for x in t {
@@ -80,7 +82,10 @@ pub fn from_gauss(re: Number, im: Number) -> Expr {
 }
 
 fn gauss_mul(a: (Number, Number), b: (Number, Number)) -> (Number, Number) {
-    (a.0.mul(&b.0).sub(a.1.mul(&b.1)), a.0.mul(&b.1).add(a.1.mul(&b.0)))
+    (
+        a.0.mul(&b.0).sub(a.1.mul(&b.1)),
+        a.0.mul(&b.1).add(a.1.mul(&b.0)),
+    )
 }
 
 /// z^n for a Gaussian number z and a (not too large) integer n
@@ -106,8 +111,11 @@ fn complex_sum(e: &Expr) -> bool {
 pub fn mul(factors: Vec<Expr>) -> Expr {
     // (2+3*i)*(1-i) = 5+i: complex numbers multiply out
     if factors.iter().any(complex_sum) {
-        let (zs, rest): (Vec<Expr>, Vec<Expr>) = factors.into_iter().partition(|f| gauss(f).is_some());
-        let z = zs.iter().fold((Number::one(), Number::zero()), |acc, f| gauss_mul(acc, gauss(f).unwrap()));
+        let (zs, rest): (Vec<Expr>, Vec<Expr>) =
+            factors.into_iter().partition(|f| gauss(f).is_some());
+        let z = zs.iter().fold((Number::one(), Number::zero()), |acc, f| {
+            gauss_mul(acc, gauss(f).unwrap())
+        });
         let mut out = rest;
         out.push(from_gauss(z.0, z.1));
         return mul_inner(out);
@@ -164,7 +172,11 @@ fn mul_inner(factors: Vec<Expr>) -> Expr {
     if !coeff.is_one() {
         out.insert(0, Num(coeff));
     }
-    if out.len() == 1 { out.pop().unwrap() } else { Mul(out) }
+    if out.len() == 1 {
+        out.pop().unwrap()
+    } else {
+        Mul(out)
+    }
 }
 
 pub fn pow(b: Expr, e: Expr) -> Expr {
@@ -219,7 +231,11 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
                     ]);
                 }
             }
-            b if en.is_integer() && en.is_exact() && complex_sum(b) && en.as_int().is_some_and(|n| n.abs() <= 64) => {
+            b if en.is_integer()
+                && en.is_exact()
+                && complex_sum(b)
+                && en.as_int().is_some_and(|n| n.abs() <= 64) =>
+            {
                 if let Some(z) = gauss_pow(gauss(b).unwrap(), en.as_int().unwrap()) {
                     return from_gauss(z.0, z.1);
                 }
@@ -384,8 +400,18 @@ fn sin_pi(k: Number) -> Option<Expr> {
     let s3 = || mul(vec![rat(1, 2), sqrt(Expr::int(3))]);
     let s2 = || mul(vec![rat(1, 2), sqrt(Expr::int(2))]);
     // sin(pi/12) = (sqrt(6) - sqrt(2))/4, sin(5*pi/12) = (sqrt(6) + sqrt(2))/4
-    let s15 = || add(vec![mul(vec![rat(1, 4), sqrt(Expr::int(6))]), mul(vec![rat(-1, 4), sqrt(Expr::int(2))])]);
-    let s75 = || add(vec![mul(vec![rat(1, 4), sqrt(Expr::int(6))]), mul(vec![rat(1, 4), sqrt(Expr::int(2))])]);
+    let s15 = || {
+        add(vec![
+            mul(vec![rat(1, 4), sqrt(Expr::int(6))]),
+            mul(vec![rat(-1, 4), sqrt(Expr::int(2))]),
+        ])
+    };
+    let s75 = || {
+        add(vec![
+            mul(vec![rat(1, 4), sqrt(Expr::int(6))]),
+            mul(vec![rat(1, 4), sqrt(Expr::int(2))]),
+        ])
+    };
     let v = match twelfths {
         1 | 11 => s15(),
         5 | 7 => s75(),
@@ -465,7 +491,9 @@ pub fn func(f: Func, x: Expr) -> Expr {
     }
     let negated = x.is_negative_term();
     match f {
-        Sin | Tan | Asin | Atan | Sinh | Tanh | Asinh | Atanh if negated => return neg(func(f, neg(x))),
+        Sin | Tan | Asin | Atan | Sinh | Tanh | Asinh | Atanh if negated => {
+            return neg(func(f, neg(x)));
+        }
         Cos | Abs | Cosh if negated => return func(f, neg(x)),
         _ => {}
     }
@@ -500,7 +528,11 @@ pub fn func(f: Func, x: Expr) -> Expr {
                     return Expr::zero();
                 }
                 if k.denom() == Some(4) {
-                    return Expr::int(if k.numer().unwrap().rem_euclid(4) == 1 { 1 } else { -1 });
+                    return Expr::int(if k.numer().unwrap().rem_euclid(4) == 1 {
+                        1
+                    } else {
+                        -1
+                    });
                 }
                 if let Some(v) = tan_pi(k) {
                     return v;
@@ -602,12 +634,21 @@ mod tests {
     }
     #[test]
     fn collects_like_terms() {
-        let e = add(vec![x(), mul(vec![Expr::int(2), x()]), Expr::int(3), y(), neg(y())]);
+        let e = add(vec![
+            x(),
+            mul(vec![Expr::int(2), x()]),
+            Expr::int(3),
+            y(),
+            neg(y()),
+        ]);
         assert_eq!(e, add(vec![mul(vec![Expr::int(3), x()]), Expr::int(3)]));
     }
     #[test]
     fn combines_powers() {
-        assert_eq!(mul(vec![x(), x(), pow(x(), Expr::int(3))]), pow(x(), Expr::int(5)));
+        assert_eq!(
+            mul(vec![x(), x(), pow(x(), Expr::int(3))]),
+            pow(x(), Expr::int(5))
+        );
         assert_eq!(div(x(), x()), Expr::one());
     }
     #[test]
@@ -619,7 +660,10 @@ mod tests {
     }
     #[test]
     fn trig_values() {
-        assert_eq!(func(Func::Cos, mul(vec![Expr::int(3), pi()])), Expr::int(-1));
+        assert_eq!(
+            func(Func::Cos, mul(vec![Expr::int(3), pi()])),
+            Expr::int(-1)
+        );
         assert_eq!(func(Func::Sin, mul(vec![rat(1, 6), pi()])), rat(1, 2));
         assert_eq!(func(Func::Cos, neg(x())), func(Func::Cos, x()));
     }

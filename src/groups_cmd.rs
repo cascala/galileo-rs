@@ -1,8 +1,8 @@
 //! Commands for factoring with groups: pm1, ecm, squfof, classfactor, and the
 //! binary quadratic form tools classgroup, reduceform, composeforms, formpow.
 
-use crate::eval::{Session, R};
 use crate::discover::Report;
+use crate::eval::{R, Session};
 use crate::expr::{Expr, Obj};
 use crate::groups::{self as g, Form};
 use crate::num::Number;
@@ -13,7 +13,16 @@ use num_traits::{One, Signed, ToPrimitive};
 use std::rc::Rc;
 
 fn report(kind: &'static str, text: String, markdown: String) -> Expr {
-    Expr::Obj(Rc::new(Obj::Report(Report { kind, text, markdown, formulas: vec![], best: 0, vars: vec![], order: 0, target: 0 })))
+    Expr::Obj(Rc::new(Obj::Report(Report {
+        kind,
+        text,
+        markdown,
+        formulas: vec![],
+        best: 0,
+        vars: vec![],
+        order: 0,
+        target: 0,
+    })))
 }
 
 fn bnum(n: BigInt) -> Expr {
@@ -21,32 +30,51 @@ fn bnum(n: BigInt) -> Expr {
 }
 
 fn form_expr(f: &Form) -> Expr {
-    Expr::Matrix(vec![vec![bnum(f.a.clone()), bnum(f.b.clone()), bnum(f.c.clone())]])
+    Expr::Matrix(vec![vec![
+        bnum(f.a.clone()),
+        bnum(f.b.clone()),
+        bnum(f.c.clone()),
+    ]])
 }
 
 impl Session {
     fn big_arg(&mut self, a: &Node, what: &str) -> R<BigInt> {
         let v = self.eval(a)?;
-        v.num().and_then(|n| n.as_bigint()).ok_or_else(|| format!("{} must be a whole number, got {}", what, show(&v)))
+        v.num()
+            .and_then(|n| n.as_bigint())
+            .ok_or_else(|| format!("{} must be a whole number, got {}", what, show(&v)))
     }
 
     fn form_arg(&mut self, a: &Node, f: &str) -> R<Form> {
         let v = self.eval(a)?;
         let items: Vec<Expr> = match &v {
             Expr::Matrix(m) if m.len() == 1 => m[0].clone(),
-            Expr::Matrix(m) if m.iter().all(|r| r.len() == 1) => m.iter().map(|r| r[0].clone()).collect(),
+            Expr::Matrix(m) if m.iter().all(|r| r.len() == 1) => {
+                m.iter().map(|r| r[0].clone()).collect()
+            }
             _ => vec![],
         };
-        let nums: Option<Vec<BigInt>> = items.iter().map(|e| e.num().and_then(|n| n.as_bigint())).collect();
+        let nums: Option<Vec<BigInt>> = items
+            .iter()
+            .map(|e| e.num().and_then(|n| n.as_bigint()))
+            .collect();
         match nums.as_deref() {
             Some([a, b, c]) => {
                 let f2 = Form::new(a.clone(), b.clone(), c.clone());
                 if !f2.disc().is_negative() || !a.is_positive() {
-                    return Err(format!("{}: the form [a, b, c] needs a > 0 and b^2 - 4ac < 0 (got discriminant {})", f, f2.disc()));
+                    return Err(format!(
+                        "{}: the form [a, b, c] needs a > 0 and b^2 - 4ac < 0 (got discriminant {})",
+                        f,
+                        f2.disc()
+                    ));
                 }
                 Ok(f2)
             }
-            _ => Err(format!("{}: a form is written [a, b, c] for a x^2 + b x y + c y^2, got {}", f, show(&v))),
+            _ => Err(format!(
+                "{}: a form is written [a, b, c] for a x^2 + b x y + c y^2, got {}",
+                f,
+                show(&v)
+            )),
         }
     }
 
@@ -74,9 +102,21 @@ impl Session {
                 };
                 let (f, gg) = g::pm1(&n, b);
                 let text = match f {
-                    Some(p) => format!("found the factor {}: for this prime p, p - 1 has no prime factor above {} (p - 1 = {}), so 3^E = 1 mod p for E = lcm(1..{}), and gcd(3^E - 1, n) = p", p, b, factor_text(&(&p - 1u32)), b),
-                    None if gg.is_one() => format!("no factor: no prime p of n has p - 1 made only of primes up to {} (prime powers up to {}); try a larger B, or ecm(n), which does not depend on p - 1", b, b),
-                    None => format!("no factor: every prime p of n has a {}-smooth p - 1, so 3^E = 1 mod n; try a smaller B", b),
+                    Some(p) => format!(
+                        "found the factor {}: for this prime p, p - 1 has no prime factor above {} (p - 1 = {}), so 3^E = 1 mod p for E = lcm(1..{}), and gcd(3^E - 1, n) = p",
+                        p,
+                        b,
+                        factor_text(&(&p - 1u32)),
+                        b
+                    ),
+                    None if gg.is_one() => format!(
+                        "no factor: no prime p of n has p - 1 made only of primes up to {} (prime powers up to {}); try a larger B, or ecm(n), which does not depend on p - 1",
+                        b, b
+                    ),
+                    None => format!(
+                        "no factor: every prime p of n has a {}-smooth p - 1, so 3^E = 1 mod n; try a smaller B",
+                        b
+                    ),
                 };
                 Ok(Expr::Str(text))
             })(),
@@ -88,21 +128,39 @@ impl Session {
                     _ => return Err("usage: ecm(n), ecm(n, curves) or ecm(n, curves, B1): Lenstra's elliptic curve method (defaults 50 curves, B1 = 11000)".into()),
                 };
                 if !(1..=100_000).contains(&curves) || !(100..=10_000_000).contains(&b1) {
-                    return Err("ecm(n, curves, B1): curves from 1 to 100000, B1 from 100 to 10^7".into());
+                    return Err(
+                        "ecm(n, curves, B1): curves from 1 to 100000, B1 from 100 to 10^7".into(),
+                    );
                 }
                 Ok(Expr::Str(match g::ecm(&n, curves, b1) {
-                    Some((p, c)) => format!("found the factor {} on curve {} of {}: the group of that elliptic curve mod {} has an order made of primes up to {}, plus at most one prime up to {}", p, c, curves, p, b1, 25 * b1),
-                    None => format!("no factor with {} curves and B1 = {}; more curves or a larger B1 find larger factors (B1 = 11000 suits about 20 digits, 50000 about 25, 250000 about 30)", curves, b1),
+                    Some((p, c)) => format!(
+                        "found the factor {} on curve {} of {}: the group of that elliptic curve mod {} has an order made of primes up to {}, plus at most one prime up to {}",
+                        p,
+                        c,
+                        curves,
+                        p,
+                        b1,
+                        25 * b1
+                    ),
+                    None => format!(
+                        "no factor with {} curves and B1 = {}; more curves or a larger B1 find larger factors (B1 = 11000 suits about 20 digits, 50000 about 25, 250000 about 30)",
+                        curves, b1
+                    ),
                 }))
             })(),
             "squfof" => (|| {
-                let [a] = args else { return Err("usage: squfof(n): Shanks' square forms factorization".into()) };
+                let [a] = args else {
+                    return Err("usage: squfof(n): Shanks' square forms factorization".into());
+                };
                 let n = self.composite_arg(a, "squfof")?;
                 if n.bits() > 100 {
                     return Err("squfof: n has more than 100 bits; SQUFOF takes about n^(1/4) steps, which is too many".into());
                 }
                 Ok(Expr::Str(match g::squfof(&n) {
-                    Some((p, k, steps)) => format!("found the factor {} after {} steps of the continued fraction of sqrt({}·n)", p, steps, k),
+                    Some((p, k, steps)) => format!(
+                        "found the factor {} after {} steps of the continued fraction of sqrt({}·n)",
+                        p, steps, k
+                    ),
                     None => "no factor found".into(),
                 }))
             })(),
@@ -116,26 +174,44 @@ impl Session {
                     return Err("classfactor: n has more than 140 bits; the class group is too large for this method".into());
                 }
                 Ok(Expr::Str(match g::class_factor(&n, b, 3) {
-                    Some((p, k, f)) => format!("found the factor {}: the form {} of discriminant -4·{}·n has order 2 (it is ambiguous), and ambiguous forms are factorizations", p, f.text(), k),
-                    None => format!("no factor: the odd part of the class number was not {}-smooth for the multipliers tried; try a larger B", b),
+                    Some((p, k, f)) => format!(
+                        "found the factor {}: the form {} of discriminant -4·{}·n has order 2 (it is ambiguous), and ambiguous forms are factorizations",
+                        p,
+                        f.text(),
+                        k
+                    ),
+                    None => format!(
+                        "no factor: the odd part of the class number was not {}-smooth for the multipliers tried; try a larger B",
+                        b
+                    ),
                 }))
             })(),
             "reduceform" => (|| {
-                let [a] = args else { return Err("usage: reduceform([a, b, c])".into()) };
+                let [a] = args else {
+                    return Err("usage: reduceform([a, b, c])".into());
+                };
                 let f = self.form_arg(a, "reduceform")?;
                 Ok(form_expr(&f.reduce()))
             })(),
             "composeforms" => (|| {
-                let [a, b] = args else { return Err("usage: composeforms([a, b, c], [a2, b2, c2])".into()) };
+                let [a, b] = args else {
+                    return Err("usage: composeforms([a, b, c], [a2, b2, c2])".into());
+                };
                 let f1 = self.form_arg(a, "composeforms")?;
                 let f2 = self.form_arg(b, "composeforms")?;
                 if f1.disc() != f2.disc() {
-                    return Err(format!("composeforms: the discriminants differ ({} and {})", f1.disc(), f2.disc()));
+                    return Err(format!(
+                        "composeforms: the discriminants differ ({} and {})",
+                        f1.disc(),
+                        f2.disc()
+                    ));
                 }
                 Ok(form_expr(&f1.compose(&f2)))
             })(),
             "formpow" => (|| {
-                let [a, k] = args else { return Err("usage: formpow([a, b, c], k)".into()) };
+                let [a, k] = args else {
+                    return Err("usage: formpow([a, b, c], k)".into());
+                };
                 let f = self.form_arg(a, "formpow")?;
                 let k = self.big_arg(k, "formpow: k")?;
                 if k.is_negative() {
@@ -145,17 +221,38 @@ impl Session {
                 Ok(form_expr(&f.reduce().pow(&k)))
             })(),
             "classgroup" => (|| {
-                let [a] = args else { return Err("usage: classgroup(D): the reduced forms of discriminant D < 0".into()) };
+                let [a] = args else {
+                    return Err(
+                        "usage: classgroup(D): the reduced forms of discriminant D < 0".into(),
+                    );
+                };
                 let d = self.big_arg(a, "classgroup: D")?;
-                let d = d.to_i64().filter(|&d| d < 0 && d >= -100_000_000).ok_or("classgroup(D): D is a negative whole number down to -10^8")?;
+                let d = d
+                    .to_i64()
+                    .filter(|&d| d < 0 && d >= -100_000_000)
+                    .ok_or("classgroup(D): D is a negative whole number down to -10^8")?;
                 if d.rem_euclid(4) != 0 && d.rem_euclid(4) != 1 {
-                    return Err(format!("classgroup: a discriminant b^2 - 4ac is 0 or 1 mod 4, and {} is not", d));
+                    return Err(format!(
+                        "classgroup: a discriminant b^2 - 4ac is 0 or 1 mod 4, and {} is not",
+                        d
+                    ));
                 }
                 let fs = g::reduced_forms(d);
                 let h = fs.len();
                 let shown = 40;
-                let mut md = vec![format!("The class group of discriminant {} has **h = {}** classes of primitive forms. Each class has one reduced form $(a, b, c)$, meaning $a x^2 + b x y + c y^2$ with $|b| \\le a \\le c$.", d, h), String::new(), "| form | order | ambiguous |".into(), "|---|---|---|".into()];
-                let mut tx = vec![format!("The class group of discriminant {} has h = {} classes (reduced forms a x^2 + b x y + c y^2):", d, h)];
+                let mut md = vec![
+                    format!(
+                        "The class group of discriminant {} has **h = {}** classes of primitive forms. Each class has one reduced form $(a, b, c)$, meaning $a x^2 + b x y + c y^2$ with $|b| \\le a \\le c$.",
+                        d, h
+                    ),
+                    String::new(),
+                    "| form | order | ambiguous |".into(),
+                    "|---|---|---|".into(),
+                ];
+                let mut tx = vec![format!(
+                    "The class group of discriminant {} has h = {} classes (reduced forms a x^2 + b x y + c y^2):",
+                    d, h
+                )];
                 let mut amb = vec![];
                 for f in &fs {
                     if f.is_ambiguous() {
@@ -163,26 +260,44 @@ impl Session {
                     }
                 }
                 for f in fs.iter().take(shown) {
-                    let ord = g::form_order(f, h as u64).map(|o| o.to_string()).unwrap_or("?".into());
+                    let ord = g::form_order(f, h as u64)
+                        .map(|o| o.to_string())
+                        .unwrap_or("?".into());
                     let a = if f.is_ambiguous() { "yes" } else { "" };
                     md.push(format!("| {} | {} | {} |", f.text(), ord, a));
-                    tx.push(format!("  {}  order {}{}", f.text(), ord, if f.is_ambiguous() { "  ambiguous" } else { "" }));
+                    tx.push(format!(
+                        "  {}  order {}{}",
+                        f.text(),
+                        ord,
+                        if f.is_ambiguous() { "  ambiguous" } else { "" }
+                    ));
                 }
                 if h > shown {
                     md.push(format!("| ... {} more | | |", h - shown));
                     tx.push(format!("  ... {} more", h - shown));
                 }
                 let nn = BigInt::from(-d);
-                let n4 = if d % 4 == 0 { BigInt::from(-d / 4) } else { nn.clone() };
+                let n4 = if d % 4 == 0 {
+                    BigInt::from(-d / 4)
+                } else {
+                    nn.clone()
+                };
                 let facts: Vec<String> = amb
                     .iter()
                     .filter(|f| !f.is_identity())
-                    .filter_map(|f| g::ambiguous_factor(f, &n4).map(|p| format!("{} gives {} = {} · {}", f.text(), n4, p, &n4 / &p)))
+                    .filter_map(|f| {
+                        g::ambiguous_factor(f, &n4)
+                            .map(|p| format!("{} gives {} = {} · {}", f.text(), n4, p, &n4 / &p))
+                    })
                     .collect();
                 let line = format!(
                     "{} ambiguous forms (order 1 or 2). For D = -4N, the ambiguous forms other than the identity are exactly the ways to split N: {}",
                     amb.len(),
-                    if facts.is_empty() { "none here, so N has no such split (N is prime or a prime power, or the split needs a = c forms)".to_string() } else { facts.join("; ") }
+                    if facts.is_empty() {
+                        "none here, so N has no such split (N is prime or a prime power, or the split needs a = c forms)".to_string()
+                    } else {
+                        facts.join("; ")
+                    }
                 );
                 md.push(String::new());
                 md.push(line.clone());
@@ -197,7 +312,17 @@ impl Session {
 /// n written as a product of primes, for messages
 fn factor_text(n: &BigInt) -> String {
     match crate::numtheory::factorize(n) {
-        Ok(fs) => fs.iter().map(|(p, e)| if *e == 1 { p.to_string() } else { format!("{}^{}", p, e) }).collect::<Vec<_>>().join(" * "),
+        Ok(fs) => fs
+            .iter()
+            .map(|(p, e)| {
+                if *e == 1 {
+                    p.to_string()
+                } else {
+                    format!("{}^{}", p, e)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" * "),
         Err(_) => n.to_string(),
     }
 }

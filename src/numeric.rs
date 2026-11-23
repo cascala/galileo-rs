@@ -34,14 +34,17 @@ pub fn compile(e: &Expr, names: &[&str]) -> Code {
         Expr::Pow(b, p) => {
             let cb = compile(b, names);
             match p.num() {
-                Some(n) if n.is_integer() && n.to_f64().abs() < 1e6 => fold(PowI(Box::new(cb), n.to_f64() as i32)),
+                Some(n) if n.is_integer() && n.to_f64().abs() < 1e6 => {
+                    fold(PowI(Box::new(cb), n.to_f64() as i32))
+                }
                 _ => fold(Pow(Box::new(cb), Box::new(compile(p, names)))),
             }
         }
         Expr::Func(f, a) => fold(F(*f, Box::new(compile(a, names)))),
-        Expr::Apply(f, v) if f == "atan2" && v.len() == 2 => {
-            fold(Atan2(Box::new(compile(&v[0], names)), Box::new(compile(&v[1], names))))
-        }
+        Expr::Apply(f, v) if f == "atan2" && v.len() == 2 => fold(Atan2(
+            Box::new(compile(&v[0], names)),
+            Box::new(compile(&v[1], names)),
+        )),
         _ => K(f64::NAN),
     }
 }
@@ -51,7 +54,9 @@ fn fold(c: Code) -> Code {
     let constant = match &c {
         Code::Add(v) | Code::Mul(v) => v.iter().all(|x| matches!(x, Code::K(_))),
         Code::PowI(b, _) | Code::F(_, b) => matches!(**b, Code::K(_)),
-        Code::Pow(a, b) | Code::Atan2(a, b) => matches!(**a, Code::K(_)) && matches!(**b, Code::K(_)),
+        Code::Pow(a, b) | Code::Atan2(a, b) => {
+            matches!(**a, Code::K(_)) && matches!(**b, Code::K(_))
+        }
         _ => false,
     };
     if constant { Code::K(run(&c, &[])) } else { c }
@@ -77,5 +82,8 @@ pub fn value(e: &Expr) -> f64 {
 
 /// Free symbols of `e` other than `bound`, in order of appearance
 pub fn free(e: &Expr, bound: &[&str]) -> Vec<String> {
-    e.symbols().into_iter().filter(|s| !bound.contains(&s.as_str())).collect()
+    e.symbols()
+        .into_iter()
+        .filter(|s| !bound.contains(&s.as_str()))
+        .collect()
 }

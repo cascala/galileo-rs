@@ -10,33 +10,43 @@ use Expr::*;
 pub fn deriv(e: &Expr, x: &str) -> Expr {
     if !e.contains_sym(x) {
         return match e {
-            Matrix(rows) => Matrix(rows.iter().map(|r| r.iter().map(|_| Expr::zero()).collect()).collect()),
+            Matrix(rows) => Matrix(
+                rows.iter()
+                    .map(|r| r.iter().map(|_| Expr::zero()).collect())
+                    .collect(),
+            ),
             _ => Expr::zero(),
         };
     }
     match e {
         Sym(_) => Expr::one(), // contains x, so it is x
         Add(terms) => add(terms.iter().map(|t| deriv(t, x)).collect()),
-        Mul(f) => add(
-            (0..f.len())
-                .map(|i| {
-                    let mut g = f.clone();
-                    g[i] = deriv(&f[i], x);
-                    mul(g)
-                })
-                .collect(),
-        ),
+        Mul(f) => add((0..f.len())
+            .map(|i| {
+                let mut g = f.clone();
+                g[i] = deriv(&f[i], x);
+                mul(g)
+            })
+            .collect()),
         Pow(b, p) => {
             if !p.contains_sym(x) {
                 // p * b^(p-1) * b'
-                mul(vec![(**p).clone(), pow((**b).clone(), sub((**p).clone(), Expr::one())), deriv(b, x)])
+                mul(vec![
+                    (**p).clone(),
+                    pow((**b).clone(), sub((**p).clone(), Expr::one())),
+                    deriv(b, x),
+                ])
             } else {
                 // b^p * (p' log b + p b'/b)
                 mul(vec![
                     e.clone(),
                     add(vec![
                         mul(vec![deriv(p, x), func(Func::Log, (**b).clone())]),
-                        mul(vec![(**p).clone(), deriv(b, x), pow((**b).clone(), Expr::int(-1))]),
+                        mul(vec![
+                            (**p).clone(),
+                            deriv(b, x),
+                            pow((**b).clone(), Expr::int(-1)),
+                        ]),
                     ]),
                 ])
             }
@@ -83,7 +93,11 @@ pub fn deriv(e: &Expr, x: &str) -> Expr {
                 .map(|(k, a)| mul2(Apply(partial_name(f, k), args.clone()), deriv(a, x)))
                 .collect())
         }
-        Matrix(rows) => Matrix(rows.iter().map(|r| r.iter().map(|v| deriv(v, x)).collect()).collect()),
+        Matrix(rows) => Matrix(
+            rows.iter()
+                .map(|r| r.iter().map(|v| deriv(v, x)).collect())
+                .collect(),
+        ),
         _ => Expr::zero(),
     }
 }
@@ -118,7 +132,12 @@ pub fn expand(e: &Expr) -> Expr {
         }
         Pow(b, p) => {
             let bx = expand(b);
-            match (p.num().filter(|n| n.is_integer()).map(|n| n.to_f64() as i128), &bx) {
+            match (
+                p.num()
+                    .filter(|n| n.is_integer())
+                    .map(|n| n.to_f64() as i128),
+                &bx,
+            ) {
                 (Some(n), Add(_)) if n > 1 && n <= 64 => {
                     let mut acc = bx.clone();
                     for _ in 1..n {
@@ -142,7 +161,10 @@ fn distribute(a: &Expr, b: &Expr) -> Expr {
         other => vec![other.clone()],
     };
     let (ta, tb) = (terms(a), terms(b));
-    add(ta.iter().flat_map(|x| tb.iter().map(move |y| expand(&mul2(x.clone(), y.clone())))).collect())
+    add(ta
+        .iter()
+        .flat_map(|x| tb.iter().map(move |y| expand(&mul2(x.clone(), y.clone()))))
+        .collect())
 }
 
 /// Replace a symbol by a value
@@ -236,15 +258,24 @@ fn content(terms: &[Expr]) -> Expr {
             (Some(a), Some(b)) => Some(igcd(a, b)),
             _ => None,
         };
-        let parts: Vec<(Expr, Number)> =
-            parts.into_iter().filter(|(_, p)| p.is_integer() && !p.is_negative()).collect();
+        let parts: Vec<(Expr, Number)> = parts
+            .into_iter()
+            .filter(|(_, p)| p.is_integer() && !p.is_negative())
+            .collect();
         common = Some(match common {
             None => parts,
             Some(cs) => cs
                 .into_iter()
                 .filter_map(|(b, p)| {
                     parts.iter().find(|(b2, _)| *b2 == b).map(|(_, p2)| {
-                        (b, if p.cmp_value(p2).is_le() { p } else { p2.clone() })
+                        (
+                            b,
+                            if p.cmp_value(p2).is_le() {
+                                p
+                            } else {
+                                p2.clone()
+                            },
+                        )
                     })
                 })
                 .collect(),
@@ -292,13 +323,19 @@ pub fn together(e: &Expr) -> Expr {
             }
         }
     }
-    let mut dfactors: Vec<Expr> = dparts.iter().map(|(b, p)| pow(b.clone(), Num(p.clone()))).collect();
+    let mut dfactors: Vec<Expr> = dparts
+        .iter()
+        .map(|(b, p)| pow(b.clone(), Num(p.clone())))
+        .collect();
     dfactors.push(Expr::int(dcoef));
     let den = mul(dfactors);
     if den.is_one() {
         return e.clone();
     }
-    let numer = expand(&add(terms.iter().map(|t| mul2(t.clone(), den.clone())).collect()));
+    let numer = expand(&add(terms
+        .iter()
+        .map(|t| mul2(t.clone(), den.clone()))
+        .collect()));
     cancel(&numer, &den)
 }
 
@@ -326,7 +363,11 @@ fn cancel(numer: &Expr, den: &Expr) -> Expr {
     }
     for (b, p) in &cparts {
         if let Some((_, q)) = dparts.iter().find(|(b2, _)| b2 == b) {
-            let m = if p.cmp_value(q).is_le() { p.clone() } else { q.clone() };
+            let m = if p.cmp_value(q).is_le() {
+                p.clone()
+            } else {
+                q.clone()
+            };
             cancel_f.push(pow(b.clone(), Num(m)));
         }
     }
@@ -356,9 +397,18 @@ pub fn factor(e: &Expr) -> Expr {
 /// Rewrite sin(a)^n (n >= 2) as sin(a)^(n-2) * (1 - cos(a)^2), or the
 /// reverse when `sin_to_cos` is false.
 fn pythagoras(e: &Expr, sin_to_cos: bool) -> Expr {
-    let (from, to) = if sin_to_cos { (Func::Sin, Func::Cos) } else { (Func::Cos, Func::Sin) };
+    let (from, to) = if sin_to_cos {
+        (Func::Sin, Func::Cos)
+    } else {
+        (Func::Cos, Func::Sin)
+    };
     if let Pow(b, p) = e {
-        if let (Func(f, a), Some(n)) = (&**b, p.num().filter(|n| n.is_integer()).map(|n| n.to_f64() as i128)) {
+        if let (Func(f, a), Some(n)) = (
+            &**b,
+            p.num()
+                .filter(|n| n.is_integer())
+                .map(|n| n.to_f64() as i128),
+        ) {
             if *f == from && n >= 2 {
                 let a2 = pythagoras(a, sin_to_cos);
                 return mul(vec![
@@ -425,7 +475,11 @@ pub fn rationalize(e: &Expr) -> Expr {
         Add(_) => together(&inner),
         Mul(_) => {
             let (n, d) = num_den(&inner);
-            if d.is_one() { inner } else { cancel(&expand(&n), &d) }
+            if d.is_one() {
+                inner
+            } else {
+                cancel(&expand(&n), &d)
+            }
         }
         _ => inner,
     }
@@ -460,7 +514,10 @@ mod tests {
     #[test]
     fn factor_common_terms() {
         let a = Expr::sym("a");
-        let e = add(vec![mul2(a.clone(), Expr::sym("b")), mul2(a, Expr::sym("c"))]);
+        let e = add(vec![
+            mul2(a.clone(), Expr::sym("b")),
+            mul2(a, Expr::sym("c")),
+        ]);
         assert_eq!(show(&factor(&e)), "a*(b+c)");
     }
 }

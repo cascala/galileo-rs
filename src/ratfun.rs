@@ -174,19 +174,34 @@ fn normalize(p: &Poly) -> (Number, Poly) {
             }
         }
         match (ok, Number::rat(g, l)) {
-            (true, Some(c)) if !c.is_zero() => if lc.is_negative() { c.neg() } else { c },
+            (true, Some(c)) if !c.is_zero() => {
+                if lc.is_negative() {
+                    c.neg()
+                } else {
+                    c
+                }
+            }
             _ => lc,
         }
     } else {
         lc
     };
     let inv = c.recip().unwrap_or(Number::one());
-    (c, clean(p.iter().map(|(m, v)| (m.clone(), v.mul(&inv))).collect()))
+    (
+        c,
+        clean(p.iter().map(|(m, v)| (m.clone(), v.mul(&inv))).collect()),
+    )
 }
 
 impl Ctx {
     fn new(trig: Trig) -> Ctx {
-        Ctx { trig, trig_args: vec![], kernels: vec![], candidates: vec![], budget: 50_000_000 }
+        Ctx {
+            trig,
+            trig_args: vec![],
+            kernels: vec![],
+            candidates: vec![],
+            budget: 50_000_000,
+        }
     }
 
     fn spend(&mut self, n: usize) -> R<()> {
@@ -245,9 +260,11 @@ impl Ctx {
     /// the kernel that sin^2 (or cos^2) is rewritten into
     fn partner(&mut self, k: usize) -> Option<usize> {
         let dir = match &self.kernels[k] {
-            Expr::Func(Func::Sin | Func::Cos, a) => {
-                self.trig_args.iter().find(|(x, _)| *x == **a).map_or(self.trig, |(_, t)| *t)
-            }
+            Expr::Func(Func::Sin | Func::Cos, a) => self
+                .trig_args
+                .iter()
+                .find(|(x, _)| *x == **a)
+                .map_or(self.trig, |(_, t)| *t),
             _ => return None,
         };
         let (from, to) = match dir {
@@ -334,7 +351,11 @@ impl Ctx {
             }
         }
         let out = clean(out);
-        if changed { self.reduce_poly(out) } else { Ok(out) }
+        if changed {
+            self.reduce_poly(out)
+        } else {
+            Ok(out)
+        }
     }
 
     /// p / d if d divides p exactly
@@ -350,8 +371,12 @@ impl Ctx {
         while !rem.is_empty() {
             self.spend(d.len())?;
             let (lr, cr) = leading(&rem);
-            let Some(mo) = mono_div(lr, &ld) else { return Ok(None) };
-            let Some(c) = cr.div(&cd) else { return Ok(None) };
+            let Some(mo) = mono_div(lr, &ld) else {
+                return Ok(None);
+            };
+            let Some(c) = cr.div(&cd) else {
+                return Ok(None);
+            };
             let e = q.entry(mo.clone()).or_insert(Number::zero());
             *e = e.add(&c);
             for (md, cdd) in d {
@@ -379,7 +404,10 @@ impl Ctx {
                 .filter_map(|(k, e)| mo.iter().find(|x| x.0 == k).map(|x| (k, e.min(x.1))))
                 .collect();
         }
-        let rest: Poly = p.iter().map(|(m, c)| (mono_div(m, &content).unwrap(), c.clone())).collect();
+        let rest: Poly = p
+            .iter()
+            .map(|(m, c)| (mono_div(m, &content).unwrap(), c.clone()))
+            .collect();
         let (c, rest) = normalize(&rest);
         let mut fs: Vec<(Poly, u32)> = content
             .iter()
@@ -396,7 +424,10 @@ impl Ctx {
     }
 
     fn rat_mul(&mut self, a: &Rat, b: &Rat) -> R<Rat> {
-        Ok(Rat { num: self.mul(&a.num, &b.num)?, den: merge(&a.den, &b.den) })
+        Ok(Rat {
+            num: self.mul(&a.num, &b.num)?,
+            den: merge(&a.den, &b.den),
+        })
     }
 
     fn rat_add(&mut self, a: &Rat, b: &Rat) -> R<Rat> {
@@ -418,7 +449,10 @@ impl Ctx {
         };
         let la = lift(a, self)?;
         let lb = lift(b, self)?;
-        Ok(Rat { num: self.add(&la, &lb, Number::one())?, den: common })
+        Ok(Rat {
+            num: self.add(&la, &lb, Number::one())?,
+            den: common,
+        })
     }
 
     fn rat_inv(&mut self, a: &Rat) -> R<Rat> {
@@ -432,7 +466,10 @@ impl Ctx {
     }
 
     fn rat_pow(&mut self, a: &Rat, k: i128) -> R<Rat> {
-        let mut acc = Rat { num: constant(Number::one()), den: vec![] };
+        let mut acc = Rat {
+            num: constant(Number::one()),
+            den: vec![],
+        };
         for _ in 0..k.abs() {
             acc = self.rat_mul(&acc, a)?;
         }
@@ -440,7 +477,10 @@ impl Ctx {
     }
 
     fn atom(&mut self, e: Expr) -> Rat {
-        Rat { num: self.kpoly(e), den: vec![] }
+        Rat {
+            num: self.kpoly(e),
+            den: vec![],
+        }
     }
 
     fn remember(&mut self, r: Rat) -> R<Rat> {
@@ -459,9 +499,15 @@ impl Ctx {
         use Expr::*;
         self.spend(1)?;
         Ok(match e {
-            Num(n) => Rat { num: constant(n.clone()), den: vec![] },
+            Num(n) => Rat {
+                num: constant(n.clone()),
+                den: vec![],
+            },
             Add(ts) => {
-                let mut acc = Rat { num: Poly::new(), den: vec![] };
+                let mut acc = Rat {
+                    num: Poly::new(),
+                    den: vec![],
+                };
                 for t in ts {
                     let r = self.rat_of(t)?;
                     acc = self.rat_add(&acc, &r)?;
@@ -469,7 +515,10 @@ impl Ctx {
                 self.remember(acc)?
             }
             Mul(fs) => {
-                let mut acc = Rat { num: constant(Number::one()), den: vec![] };
+                let mut acc = Rat {
+                    num: constant(Number::one()),
+                    den: vec![],
+                };
                 for f in fs {
                     let r = self.rat_of(f)?;
                     acc = self.rat_mul(&acc, &r)?;
@@ -482,7 +531,10 @@ impl Ctx {
                     Add(ts) => ts.clone(),
                     other => vec![other.clone()],
                 };
-                let mut acc = Rat { num: constant(Number::one()), den: vec![] };
+                let mut acc = Rat {
+                    num: constant(Number::one()),
+                    den: vec![],
+                };
                 for t in terms {
                     let (c, rest) = t.coeff_and_rest();
                     let r = match c.as_int() {
@@ -545,7 +597,11 @@ impl Ctx {
                     Some(c) => (c, vec![]),
                     None => self.factor_den(&rest)?,
                 };
-                let ck = c.recip().ok_or(GiveUp)?.pow(Number::int(*k as i128)).ok_or(GiveUp)?;
+                let ck = c
+                    .recip()
+                    .ok_or(GiveUp)?
+                    .pow(Number::int(*k as i128))
+                    .ok_or(GiveUp)?;
                 num = self.mul(&num, &constant(ck))?;
                 split.extend(found);
                 split.extend(fs.into_iter().map(|(q, e)| (q, e * k)));
@@ -572,16 +628,20 @@ impl Ctx {
     }
 
     fn mono_expr(&self, mo: &Mono) -> Vec<Expr> {
-        mo.iter().map(|&(k, e)| pow(self.kernels[k].clone(), Expr::int(e as i128))).collect()
+        mo.iter()
+            .map(|&(k, e)| pow(self.kernels[k].clone(), Expr::int(e as i128)))
+            .collect()
     }
 
     fn poly_expr(&self, p: &Poly) -> Expr {
-        add(p.iter().map(|(mo, c)| {
-            let mut f = self.mono_expr(mo);
-            f.push(Expr::Num(c.clone()));
-            mul(f)
-        })
-        .collect())
+        add(p
+            .iter()
+            .map(|(mo, c)| {
+                let mut f = self.mono_expr(mo);
+                f.push(Expr::Num(c.clone()));
+                mul(f)
+            })
+            .collect())
     }
 
     /// a polynomial as an expression, with the sign chosen so that it reads
@@ -614,7 +674,11 @@ impl Ctx {
                 .filter_map(|(k, e)| mo.iter().find(|x| x.0 == k).map(|x| (k, e.min(x.1))))
                 .collect();
         }
-        let rest: Poly = r.num.iter().map(|(m, c)| (mono_div(m, &content).unwrap(), c.clone())).collect();
+        let rest: Poly = r
+            .num
+            .iter()
+            .map(|(m, c)| (mono_div(m, &content).unwrap(), c.clone()))
+            .collect();
         let (mut c, mut prim) = normalize(&rest);
         let mut factors = self.mono_expr(&content);
         // pull out factors seen in the input, such as (R + a*cos(u))^2
@@ -723,7 +787,9 @@ pub fn size(e: &Expr) -> usize {
     let b = s.as_bytes();
     let mut signs = 0;
     for i in 1..b.len() {
-        if (b[i] == b'+' || b[i] == b'-') && !matches!(b[i - 1], b'(' | b'e' | b'E' | b'^' | b'*' | b'/') {
+        if (b[i] == b'+' || b[i] == b'-')
+            && !matches!(b[i - 1], b'(' | b'e' | b'E' | b'^' | b'*' | b'/')
+        {
             signs += 1;
         }
     }
@@ -737,8 +803,15 @@ pub fn size(e: &Expr) -> usize {
 /// keeping the smallest result (and the input if nothing is smaller).
 pub fn tidy(e: &Expr) -> Expr {
     match e {
-        Expr::Matrix(rows) => return Expr::Matrix(rows.iter().map(|r| r.iter().map(tidy).collect()).collect()),
-        Expr::Num(_) | Expr::Sym(_) | Expr::Const(_) | Expr::Bool(_) | Expr::Str(_) | Expr::Obj(_) => return e.clone(),
+        Expr::Matrix(rows) => {
+            return Expr::Matrix(rows.iter().map(|r| r.iter().map(tidy).collect()).collect());
+        }
+        Expr::Num(_)
+        | Expr::Sym(_)
+        | Expr::Const(_)
+        | Expr::Bool(_)
+        | Expr::Str(_)
+        | Expr::Obj(_) => return e.clone(),
         _ => {}
     }
     let mut best = e.clone();
@@ -761,7 +834,9 @@ pub fn tidy(e: &Expr) -> Expr {
             }
         }
         match e {
-            Expr::Add(v) | Expr::Mul(v) | Expr::Apply(_, v) => v.iter().for_each(|x| trig_args(x, out)),
+            Expr::Add(v) | Expr::Mul(v) | Expr::Apply(_, v) => {
+                v.iter().for_each(|x| trig_args(x, out))
+            }
             Expr::Pow(a, b) => {
                 trig_args(a, out);
                 trig_args(b, out)
@@ -800,10 +875,19 @@ fn check_same(a: &Expr, b: &Expr, mode: u8) {
     let ca = crate::numeric::compile(a, &names);
     let cb = crate::numeric::compile(b, &names);
     for k in 0..3 {
-        let x: Vec<f64> = (0..names.len()).map(|i| 0.3 + 0.17 * ((i * 7 + k * 3) % 11) as f64).collect();
+        let x: Vec<f64> = (0..names.len())
+            .map(|i| 0.3 + 0.17 * ((i * 7 + k * 3) % 11) as f64)
+            .collect();
         let (va, vb) = (crate::numeric::run(&ca, &x), crate::numeric::run(&cb, &x));
         if va.is_finite() && (va - vb).abs() > 1e-6 * va.abs().max(1.0) {
-            eprintln!("TIDY MISMATCH mode {}: {} => {} ({} vs {})", mode, show(a), show(b), va, vb);
+            eprintln!(
+                "TIDY MISMATCH mode {}: {} => {} ({} vs {})",
+                mode,
+                show(a),
+                show(b),
+                va,
+                vb
+            );
             return;
         }
     }
@@ -811,14 +895,17 @@ fn check_same(a: &Expr, b: &Expr, mode: u8) {
 
 /// True when the expression is identically zero (as far as the normal form can tell)
 pub fn is_zero(e: &Expr) -> bool {
-    e.is_zero() || [Trig::None, Trig::SinToCos].iter().any(|t| one(e, *t).is_some_and(|x| x.is_zero()))
+    e.is_zero()
+        || [Trig::None, Trig::SinToCos]
+            .iter()
+            .any(|t| one(e, *t).is_some_and(|x| x.is_zero()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::parse;
     use crate::eval::Session;
+    use crate::parser::parse;
 
     fn t(src: &str) -> String {
         let mut s = Session::new();

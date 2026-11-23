@@ -9,7 +9,7 @@
 //!
 //! `galileo_reset()` starts a fresh session; `galileo_seed(n)` seeds `rand`.
 
-use crate::eval::{seed_random, Session};
+use crate::eval::{Session, seed_random};
 use crate::kernel;
 use std::cell::RefCell;
 

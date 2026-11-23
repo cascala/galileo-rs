@@ -32,7 +32,13 @@ pub fn start_budget(units: f64, seconds: f64) {
     OUT.with(|c| c.set(false));
     ACTIVE.with(|c| c.set(true));
     #[cfg(not(target_arch = "wasm32"))]
-    DEADLINE.with(|c| c.set(if seconds.is_finite() { Some(std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds.max(0.0))) } else { None }));
+    DEADLINE.with(|c| {
+        c.set(if seconds.is_finite() {
+            Some(std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds.max(0.0)))
+        } else {
+            None
+        })
+    });
     #[cfg(target_arch = "wasm32")]
     let _ = seconds;
 }
@@ -226,11 +232,18 @@ pub fn semiprime(digits: u32, seed: u64) -> (BigInt, BigInt, BigInt) {
 // ---------- small helpers ----------
 
 pub fn small_primes(limit: usize) -> Vec<u64> {
-    crate::numtheory::primes_upto(limit).into_iter().map(|p| p as u64).collect()
+    crate::numtheory::primes_upto(limit)
+        .into_iter()
+        .map(|p| p as u64)
+        .collect()
 }
 
 fn nontrivial(g: BigInt, n: &BigInt) -> Option<BigInt> {
-    if g > BigInt::one() && &g < n { Some(g) } else { None }
+    if g > BigInt::one() && &g < n {
+        Some(g)
+    } else {
+        None
+    }
 }
 
 pub fn powmod_u64(mut a: u64, mut e: u64, m: u64) -> u64 {
@@ -321,15 +334,46 @@ pub fn inv_mod_u64(a: u64, m: u64) -> Option<u64> {
 
 /// The built-in methods the scoreboard knows, with a one-line description.
 pub const METHODS: &[(&str, &str)] = &[
-    ("trial", "trial division by 2, 3 and 6k +- 1 up to sqrt(N): about N^(1/2) work"),
-    ("fermat", "Fermat's method from sqrt(N) up: fast only when p and q are close"),
-    ("hart", "Hart's one-line method: s = ceil(sqrt(i N)), s^2 mod N a square: about N^(1/3)"),
-    ("rho", "Pollard rho (Brent's cycle finding, batched gcds): about N^(1/4)"),
-    ("pm1", "Pollard p - 1 with a growing smoothness bound: fast when p - 1 has only small primes"),
-    ("squfof", "Shanks' square forms factorization (continued fraction of sqrt(kN)): about N^(1/4), N below 10^36"),
-    ("ecm", "Lenstra's elliptic curve method (Montgomery curves, stage 1): L(1/2) in the size of p"),
-    ("qs", "multiple-polynomial quadratic sieve with large primes: L(1/2, 1) in N"),
-    ("classgroup", "class group of discriminant -4kN (Schnorr-Lenstra): works when the class number is smooth"),
+    (
+        "trial",
+        "trial division by 2, 3 and 6k +- 1 up to sqrt(N): about N^(1/2) work",
+    ),
+    (
+        "fermat",
+        "Fermat's method from sqrt(N) up: fast only when p and q are close",
+    ),
+    (
+        "hart",
+        "Hart's one-line method: s = ceil(sqrt(i N)), s^2 mod N a square: about N^(1/3)",
+    ),
+    (
+        "rho",
+        "Pollard rho (Brent's cycle finding, batched gcds): about N^(1/4)",
+    ),
+    (
+        "pm1",
+        "Pollard p - 1 with a growing smoothness bound: fast when p - 1 has only small primes",
+    ),
+    (
+        "squfof",
+        "Shanks' square forms factorization (continued fraction of sqrt(kN)): about N^(1/4), N below 10^36",
+    ),
+    (
+        "ecm",
+        "Lenstra's elliptic curve method (Montgomery curves, stage 1): L(1/2) in the size of p",
+    ),
+    (
+        "qs",
+        "multiple-polynomial quadratic sieve with large primes: L(1/2, 1) in N",
+    ),
+    (
+        "nfs",
+        "number field sieve (base-m polynomial, or a special form b^k +- 1 when N divides one): L(1/3) in N, but slow at these sizes",
+    ),
+    (
+        "classgroup",
+        "class group of discriminant -4kN (Schnorr-Lenstra): works when the class number is smooth",
+    ),
 ];
 
 /// Runs a built-in method on n within the current budget.
@@ -347,6 +391,7 @@ pub fn run_method(name: &str, n: &BigInt, seed: u64) -> Option<BigInt> {
         "ecm" => ecm(n, seed),
         "qs" => qs(n),
         "classgroup" => classgroup(n),
+        "nfs" | "gnfs" | "snfs" => crate::gnfs::nfs_method(n),
         _ => None,
     }
 }
@@ -530,7 +575,9 @@ pub fn squfof(n: &BigInt) -> Option<BigInt> {
     if s * s == nn {
         return Some(BigInt::from(s));
     }
-    const MULT: [u128; 16] = [1, 3, 5, 7, 11, 15, 21, 33, 35, 55, 77, 105, 165, 231, 385, 1155];
+    const MULT: [u128; 16] = [
+        1, 3, 5, 7, 11, 15, 21, 33, 35, 55, 77, 105, 165, 231, 385, 1155,
+    ];
     let mut round = 1u128;
     loop {
         for &k in MULT.iter() {
@@ -644,7 +691,12 @@ impl Mont<'_> {
         let z2 = self.m(&t3, &((&t2 + self.m(&self.a24, &t3)) % self.n));
         (x2, z2)
     }
-    fn add(&self, p: &(BigInt, BigInt), q: &(BigInt, BigInt), d: &(BigInt, BigInt)) -> (BigInt, BigInt) {
+    fn add(
+        &self,
+        p: &(BigInt, BigInt),
+        q: &(BigInt, BigInt),
+        d: &(BigInt, BigInt),
+    ) -> (BigInt, BigInt) {
         let u = self.m(&(&p.0 - &p.1).mod_floor(self.n), &((&q.0 + &q.1) % self.n));
         let v = self.m(&((&p.0 + &p.1) % self.n), &(&q.0 - &q.1).mod_floor(self.n));
         let s = (&u + &v) % self.n;
@@ -693,7 +745,10 @@ pub fn ecm(n: &BigInt, seed: u64) -> Option<BigInt> {
             continue;
         }
         let inv = crate::numtheory::modinv(&den, n)?;
-        let curve = Mont { n, a24: num * inv % n };
+        let curve = Mont {
+            n,
+            a24: num * inv % n,
+        };
         let mut pt = (x0, z0);
         for &p in primes.iter().take_while(|&&p| p <= b1) {
             let mut pk = p;
@@ -747,7 +802,9 @@ fn qs_params(digits: usize) -> (usize, i64) {
 }
 
 fn knuth_schroeppel(n: &BigInt) -> u64 {
-    let ks = [1u64, 3, 5, 7, 11, 13, 15, 17, 19, 21, 23, 29, 31, 33, 35, 37, 39, 41, 43, 47];
+    let ks = [
+        1u64, 3, 5, 7, 11, 13, 15, 17, 19, 21, 23, 29, 31, 33, 35, 37, 39, 41, 43, 47,
+    ];
     let ps = small_primes(300);
     let mut best = (f64::NEG_INFINITY, 1);
     for &k in &ks {
@@ -808,12 +865,16 @@ pub fn qs(n: &BigInt) -> Option<BigInt> {
             return None;
         }
     }
-    let logs: Vec<u8> = fb.iter().map(|&p| ((p as f64).log2().round() as u8).max(1)).collect();
+    let logs: Vec<u8> = fb
+        .iter()
+        .map(|&p| ((p as f64).log2().round() as u8).max(1))
+        .collect();
     let pmax = *fb.last().unwrap();
     let ncols = fb.len() + 1; // column 0 is the sign
     let width = (2 * m) as usize;
     let mut rels: Vec<Relation> = vec![];
-    let mut partials: std::collections::HashMap<u64, (BigInt, Vec<u32>)> = std::collections::HashMap::new();
+    let mut partials: std::collections::HashMap<u64, (BigInt, Vec<u32>)> =
+        std::collections::HashMap::new();
     let target = (((&kn * 2u32).sqrt()) / m as u64).sqrt(); // q with q^2 about sqrt(2kn)/M
     let mut q = target.max(BigInt::from(pmax + 1));
     let large_bound = (pmax as u128) * (pmax as u128).min(1 << 20) / 4;
@@ -840,7 +901,9 @@ pub fn qs(n: &BigInt) -> Option<BigInt> {
             let b0 = knq.modpow(&((&q + 1u32) / 4u32), &q);
             // Hensel: b = b0 + q t with b^2 = kn (mod q^2)
             let a = &q * &q;
-            let t = ((&kn - &b0 * &b0) / &q).mod_floor(&q) * crate::numtheory::modinv(&(&b0 * 2u32), &q)? % &q;
+            let t = ((&kn - &b0 * &b0) / &q).mod_floor(&q)
+                * crate::numtheory::modinv(&(&b0 * 2u32), &q)?
+                % &q;
             let mut b = (&b0 + &q * t).mod_floor(&a);
             if (&b * &b - &kn).mod_floor(&a) != BigInt::zero() {
                 continue;
@@ -861,7 +924,9 @@ pub fn qs(n: &BigInt) -> Option<BigInt> {
                 continue;
             }
             let am = (&a % p).to_u64().unwrap();
-            let Some(ai) = inv_mod_u64(am, p) else { continue };
+            let Some(ai) = inv_mod_u64(am, p) else {
+                continue;
+            };
             let bm = (&b % p).to_u64().unwrap();
             let t = roots[ix];
             let lp = logs[ix];
@@ -909,8 +974,15 @@ pub fn qs(n: &BigInt) -> Option<BigInt> {
             spend(fb.len() as f64 * 0.3);
             let u = ((&a * &xb + &b) * &qinv).mod_floor(n);
             if val.is_one() {
-                rels.push(Relation { u, exps, extra: BigInt::one() });
-            } else if let Some(l) = val.to_u128().filter(|&l| l < large_bound && l < u64::MAX as u128) {
+                rels.push(Relation {
+                    u,
+                    exps,
+                    extra: BigInt::one(),
+                });
+            } else if let Some(l) = val
+                .to_u128()
+                .filter(|&l| l < large_bound && l < u64::MAX as u128)
+            {
                 let l = l as u64;
                 if let Some((u2, e2)) = partials.get(&l) {
                     let Some(li) = crate::numtheory::modinv(&BigInt::from(l), n) else {
@@ -918,7 +990,11 @@ pub fn qs(n: &BigInt) -> Option<BigInt> {
                     };
                     let _ = li;
                     let exps: Vec<u32> = exps.iter().zip(e2).map(|(a, b)| a + b).collect();
-                    rels.push(Relation { u: (&u * u2) % n, exps, extra: BigInt::from(l) });
+                    rels.push(Relation {
+                        u: (&u * u2) % n,
+                        exps,
+                        extra: BigInt::from(l),
+                    });
                 } else {
                     partials.insert(l, (u, exps));
                 }
@@ -960,7 +1036,9 @@ fn qs_solve(n: &BigInt, fb: &[u64], rels: &[Relation]) -> Option<BigInt> {
     spend((r * r * (cw + hw)) as f64 / 64.0);
     let mut pivot_row = 0;
     for c in 0..cols {
-        let Some(pr) = (pivot_row..r).find(|&i| rows[i].0[c / 64] >> (c % 64) & 1 == 1) else { continue };
+        let Some(pr) = (pivot_row..r).find(|&i| rows[i].0[c / 64] >> (c % 64) & 1 == 1) else {
+            continue;
+        };
         rows.swap(pivot_row, pr);
         let (pv, ph) = rows[pivot_row].clone();
         for i in 0..r {
@@ -1037,7 +1115,13 @@ pub fn fit(model: usize, pts: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
     let sxy: f64 = xs.iter().zip(&ys).map(|(x, y)| (x - mx) * (y - my)).sum();
     let c1 = sxy / sxx;
     let c0 = my - c1 * mx;
-    let rms = (xs.iter().zip(&ys).map(|(x, y)| (y - c0 - c1 * x).powi(2)).sum::<f64>() / n).sqrt();
+    let rms = (xs
+        .iter()
+        .zip(&ys)
+        .map(|(x, y)| (y - c0 - c1 * x).powi(2))
+        .sum::<f64>()
+        / n)
+        .sqrt();
     Some((c0, c1, rms))
 }
 

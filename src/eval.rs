@@ -5,7 +5,7 @@ use crate::calc;
 use crate::expr::{Const, Expr, Func};
 use crate::linalg::{self, Mat};
 use crate::num::Number;
-use crate::parser::{parse, Node, Op, Stmt};
+use crate::parser::{Node, Op, Stmt, parse};
 use crate::print::show;
 use std::collections::BTreeMap;
 
@@ -26,9 +26,11 @@ impl Output {
     pub fn render(&self) -> String {
         match self {
             Output::Value(e) => show(e),
-            Output::Assigned(v) => {
-                v.iter().map(|(n, e)| format!("{} =\n{}", n, show(e))).collect::<Vec<_>>().join("\n")
-            }
+            Output::Assigned(v) => v
+                .iter()
+                .map(|(n, e)| format!("{} =\n{}", n, show(e)))
+                .collect::<Vec<_>>()
+                .join("\n"),
             Output::Text(s) => s.clone(),
             Output::Nothing | Output::Exit => String::new(),
         }
@@ -62,16 +64,24 @@ fn builtins() -> BTreeMap<String, Expr> {
     v
 }
 
-
 impl Session {
     pub fn new() -> Session {
-        Session { vars: builtins(), hidden: vec![], funcs: BTreeMap::new(), depth: 0 }
+        Session {
+            vars: builtins(),
+            hidden: vec![],
+            funcs: BTreeMap::new(),
+            depth: 0,
+        }
     }
 
     /// names the user defined
     pub fn variable_names(&self) -> Vec<String> {
         let b = builtins();
-        self.vars.iter().filter(|(k, v)| b.get(*k) != Some(v)).map(|(k, _)| k.clone()).collect()
+        self.vars
+            .iter()
+            .filter(|(k, v)| b.get(*k) != Some(v))
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 
     pub fn get(&self, name: &str) -> Option<&Expr> {
@@ -152,7 +162,10 @@ impl Session {
                         let (l, u, p) = linalg::lu(&m)?;
                         match names.len() {
                             // two outputs: A = L*U with L = P^T * L
-                            2 => vec![Expr::Matrix(linalg::matmul(&linalg::transpose(&p), &l)?), Expr::Matrix(u)],
+                            2 => vec![
+                                Expr::Matrix(linalg::matmul(&linalg::transpose(&p), &l)?),
+                                Expr::Matrix(u),
+                            ],
                             3 => vec![Expr::Matrix(l), Expr::Matrix(u), Expr::Matrix(p)],
                             _ => return Err("lu returns 2 or 3 values".into()),
                         }
@@ -161,7 +174,19 @@ impl Session {
                         let m = self.matrix_arg(&args[0], "eig")?;
                         let (v, vals) = crate::cas_cmd::eigvec(&m)?;
                         let n = vals.len();
-                        let d: Vec<Vec<Expr>> = (0..n).map(|i| (0..n).map(|j| if i == j { vals[i].clone() } else { Expr::zero() }).collect()).collect();
+                        let d: Vec<Vec<Expr>> = (0..n)
+                            .map(|i| {
+                                (0..n)
+                                    .map(|j| {
+                                        if i == j {
+                                            vals[i].clone()
+                                        } else {
+                                            Expr::zero()
+                                        }
+                                    })
+                                    .collect()
+                            })
+                            .collect();
                         vec![Expr::Matrix(v), Expr::Matrix(d)]
                     }
                     _ => return Err("only lu(...) and eig(...) return several values".into()),
@@ -175,15 +200,25 @@ impl Session {
             Stmt::Command(c, arg) => self.command(c, arg.as_deref()),
             Stmt::Define(name, params, body) => {
                 if Func::from_name(name).is_some() || ["exp", "sqrt"].contains(&name.as_str()) {
-                    return Err(format!("{} is a built-in function; pick another name", name));
+                    return Err(format!(
+                        "{} is a built-in function; pick another name",
+                        name
+                    ));
                 }
                 // `ans` means the last result at the time of the definition, not when
                 // the function is called: d(x) := ans after deriv(f(x), x) is the derivative
                 let body = match self.vars.get("ans").cloned() {
-                    Some(v) if !params.iter().any(|p| p == "ans") && uses_ident(body, "ans") => replace_ident(body, "ans", &expr_node(&v)?),
+                    Some(v) if !params.iter().any(|p| p == "ans") && uses_ident(body, "ans") => {
+                        replace_ident(body, "ans", &expr_node(&v)?)
+                    }
                     _ => body.clone(),
                 };
-                let text = format!("{}({}) := {}", name, params.join(", "), crate::parser::source(&body));
+                let text = format!(
+                    "{}({}) := {}",
+                    name,
+                    params.join(", "),
+                    crate::parser::source(&body)
+                );
                 self.funcs.insert(name.clone(), (params.clone(), body));
                 Ok(Output::Text(text))
             }
@@ -205,7 +240,9 @@ impl Session {
                     let fs: Vec<String> = self
                         .funcs
                         .iter()
-                        .map(|(k, (p, b))| format!("{}({}) := {}", k, p.join(", "), crate::parser::source(b)))
+                        .map(|(k, (p, b))| {
+                            format!("{}({}) := {}", k, p.join(", "), crate::parser::source(b))
+                        })
                         .collect();
                     text = format!("{}\nDefined functions:\n{}", text, fs.join("\n"));
                 }
@@ -217,7 +254,12 @@ impl Session {
                 Ok(Output::Nothing)
             }
             "exit" | "quit" => Ok(Output::Exit),
-            "pwd" => Ok(Output::Text(std::env::current_dir().map_err(|e| e.to_string())?.display().to_string())),
+            "pwd" => Ok(Output::Text(
+                std::env::current_dir()
+                    .map_err(|e| e.to_string())?
+                    .display()
+                    .to_string(),
+            )),
             "ls" => {
                 let mut names: Vec<String> = std::fs::read_dir(".")
                     .map_err(|e| e.to_string())?
@@ -237,9 +279,13 @@ impl Session {
                     return Ok(self.load_rsa());
                 }
                 if cfg!(target_arch = "wasm32") {
-                    return Err(format!("load({}): the browser version has no files to load; load(RSA) loads the RSA challenge numbers", file));
+                    return Err(format!(
+                        "load({}): the browser version has no files to load; load(RSA) loads the RSA challenge numbers",
+                        file
+                    ));
                 }
-                let src = std::fs::read_to_string(file).map_err(|e| format!("load {}: {}", file, e))?;
+                let src =
+                    std::fs::read_to_string(file).map_err(|e| format!("load {}: {}", file, e))?;
                 let mut last = Output::Nothing;
                 for r in self.run(&src) {
                     last = r?;
@@ -254,7 +300,11 @@ impl Session {
     /// load(RSA): defines RSA100 .. RSA2048, and RSA100p, RSA100q etc. for the factored ones
     fn load_rsa(&mut self) -> Output {
         use crate::rsa_data::{FACTORED_2026, RSA_NUMBERS};
-        let int = |s: &str| Expr::Num(Number::from_bigint(num_bigint::BigInt::parse_bytes(s.as_bytes(), 10).expect("RSA digits")));
+        let int = |s: &str| {
+            Expr::Num(Number::from_bigint(
+                num_bigint::BigInt::parse_bytes(s.as_bytes(), 10).expect("RSA digits"),
+            ))
+        };
         let (mut done, mut open) = (vec![], vec![]);
         for (name, n, f) in RSA_NUMBERS {
             self.vars.insert(name.to_string(), int(n));
@@ -270,7 +320,9 @@ impl Session {
         }
         Output::Text(format!(
             "Loaded {} RSA challenge numbers (named by decimal digits, or by bits for RSA576 .. RSA2048).\nFactored, with factors as RSA...p and RSA...q: {}\nNot factored here: {}",
-            RSA_NUMBERS.len(), done.join(", "), open.join(", ")
+            RSA_NUMBERS.len(),
+            done.join(", "),
+            open.join(", ")
         ))
     }
 
@@ -325,13 +377,17 @@ impl Session {
                     for x in r {
                         match self.eval(x)? {
                             Expr::Matrix(m) => parts.push(m),
-                            v if v.is_scalar() || matches!(v, Expr::Bool(_) | Expr::Str(_)) => parts.push(vec![vec![v]]),
+                            v if v.is_scalar() || matches!(v, Expr::Bool(_) | Expr::Str(_)) => {
+                                parts.push(vec![vec![v]])
+                            }
                             v => return Err(format!("{} can't be a matrix element", show(&v))),
                         }
                     }
                     // empty blocks ([]) vanish, so [a, rest] works when rest is []
                     parts.retain(|p| !p.is_empty() && !p[0].is_empty());
-                    let Some(h) = parts.first().map(|p| p.len()) else { continue };
+                    let Some(h) = parts.first().map(|p| p.len()) else {
+                        continue;
+                    };
                     if parts.iter().any(|p| p.len() != h) {
                         return Err("matrix blocks in a row must have the same height".into());
                     }
@@ -358,14 +414,26 @@ impl Session {
                 let mut ix = vec![];
                 for i in idx {
                     let v = self.eval(i)?;
-                    let v = if v.num().is_some_and(|n| !n.is_exact() && n.is_integer()) { Expr::int(v.num().unwrap().to_f64() as i128) } else { v };
-                    ix.push(v.num().and_then(|n| n.as_int()).filter(|&k| k >= 0).ok_or("indices must be non-negative integers")? as usize);
+                    let v = if v.num().is_some_and(|n| !n.is_exact() && n.is_integer()) {
+                        Expr::int(v.num().unwrap().to_f64() as i128)
+                    } else {
+                        v
+                    };
+                    ix.push(
+                        v.num()
+                            .and_then(|n| n.as_int())
+                            .filter(|&k| k >= 0)
+                            .ok_or("indices must be non-negative integers")?
+                            as usize,
+                    );
                 }
                 let m = match target {
                     Expr::Matrix(m) => m,
                     Expr::Obj(o) => return crate::commands::index_obj(&o, &ix),
                     // a scalar is a 1x1 matrix: x[0] and x[0,0] are x
-                    v if v.is_scalar() && ix.iter().all(|&k| k == 0) && ix.len() <= 2 => return Ok(v),
+                    v if v.is_scalar() && ix.iter().all(|&k| k == 0) && ix.len() <= 2 => {
+                        return Ok(v);
+                    }
                     v => return Err(format!("{} can't be indexed", show(&v))),
                 };
                 let (r, c) = linalg::dims(&m);
@@ -374,7 +442,11 @@ impl Session {
                     [i] if r == 1 => m[0].get(*i).cloned().ok_or_else(oob)?,
                     [i] if c == 1 => m.get(*i).map(|row| row[0].clone()).ok_or_else(oob)?,
                     [i] => Expr::Matrix(vec![m.get(*i).cloned().ok_or_else(oob)?]),
-                    [i, j] => m.get(*i).and_then(|row| row.get(*j)).cloned().ok_or_else(oob)?,
+                    [i, j] => m
+                        .get(*i)
+                        .and_then(|row| row.get(*j))
+                        .cloned()
+                        .ok_or_else(oob)?,
                     _ => return Err("use one or two indices".into()),
                 }
             }
@@ -386,12 +458,26 @@ impl Session {
 
     fn call(&mut self, f: &str, args: &[Node]) -> R<Expr> {
         let arity = |n: usize| -> R<()> {
-            if args.len() == n { Ok(()) } else { Err(format!("{} takes {} argument{}", f, n, if n == 1 { "" } else { "s" })) }
+            if args.len() == n {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{} takes {} argument{}",
+                    f,
+                    n,
+                    if n == 1 { "" } else { "s" }
+                ))
+            }
         };
         if self.funcs.contains_key(f) {
             return self.call_user(f, args);
         }
-        if let Some(Expr::Matrix(m)) = self.vars.get(f).filter(|_| !self.hidden.iter().any(|h| h == f)).cloned() {
+        if let Some(Expr::Matrix(m)) = self
+            .vars
+            .get(f)
+            .filter(|_| !self.hidden.iter().any(|h| h == f))
+            .cloned()
+        {
             return self.index(f, &m, args);
         }
         if f.ends_with('\'') {
@@ -405,7 +491,10 @@ impl Session {
             return match c {
                 Expr::Bool(b) => self.eval(&args[if b { 1 } else { 2 }]),
                 Expr::Num(n) => self.eval(&args[if n.is_zero() { 2 } else { 1 }]),
-                other => Err(format!("if: can't tell whether {} is true or false", show(&other))),
+                other => Err(format!(
+                    "if: can't tell whether {} is true or false",
+                    show(&other)
+                )),
             };
         }
         if let Some(func) = Func::from_name(f) {
@@ -443,8 +532,13 @@ impl Session {
                     "expand" => calc::expand(&a),
                     "factor" => match a.num().and_then(|n| n.as_bigint()) {
                         // factor(360) = 2^3 * 3^2 * 5; a^n ± b^n splits algebraically first
-                        Some(n) if n.bits() > 1 => Expr::Str(self.factor_integer(&args[0], &n).map_err(|e| format!("factor: {}", e))?),
-                        _ if crate::extra_cmd::is_huge(&a) => return Err(crate::extra_cmd::not_whole(&a, "factor")),
+                        Some(n) if n.bits() > 1 => Expr::Str(
+                            self.factor_integer(&args[0], &n)
+                                .map_err(|e| format!("factor: {}", e))?,
+                        ),
+                        _ if crate::extra_cmd::is_huge(&a) => {
+                            return Err(crate::extra_cmd::not_whole(&a, "factor"));
+                        }
                         _ => crate::factor_cmd::factor_poly(&a)
                             .or_else(|| crate::cas::factor_poly(&a))
                             .unwrap_or_else(|| calc::factor(&a)),
@@ -483,7 +577,11 @@ impl Session {
                 match self.eval(&args[0])? {
                     Expr::Matrix(m) => {
                         let inv = linalg::inverse(&m)?;
-                        Ok(Expr::Matrix(inv.iter().map(|r| r.iter().map(crate::ratfun::tidy).collect()).collect()))
+                        Ok(Expr::Matrix(
+                            inv.iter()
+                                .map(|r| r.iter().map(crate::ratfun::tidy).collect())
+                                .collect(),
+                        ))
                     }
                     v if v.is_scalar() => arith(Op::Pow, v, Expr::int(-1)),
                     _ => Err("inv needs a matrix".into()),
@@ -511,8 +609,14 @@ impl Session {
                 // a vector's length, exact: norm([1 1]) = sqrt(2)
                 let (r, c) = linalg::dims(&m);
                 if (r == 1 || c == 1) && p == "2" {
-                    let sq = m.iter().flatten().map(|x| build::pow(x.clone(), Expr::int(2))).collect();
-                    return Ok(calc::simplify(&build::sqrt(calc::simplify(&build::add(sq)))));
+                    let sq = m
+                        .iter()
+                        .flatten()
+                        .map(|x| build::pow(x.clone(), Expr::int(2)))
+                        .collect();
+                    return Ok(calc::simplify(&build::sqrt(calc::simplify(&build::add(
+                        sq,
+                    )))));
                 }
                 linalg::norm(&m, &p)
             }
@@ -533,7 +637,9 @@ impl Session {
                     "eye" => linalg::identity(n, m),
                     "ones" => linalg::filled(n, m, Expr::one()),
                     "zeros" => linalg::filled(n, m, Expr::zero()),
-                    _ => (0..n).map(|_| (0..m).map(|_| Expr::float(rand_f64())).collect()).collect(),
+                    _ => (0..n)
+                        .map(|_| (0..m).map(|_| Expr::float(rand_f64())).collect())
+                        .collect(),
                 }))
             }
             "linspace" | "logspace" => {
@@ -544,14 +650,26 @@ impl Session {
                 let b = self.eval(&args[1])?;
                 let n = match args.get(2) {
                     Some(x) => self.size_arg(x)?,
-                    None => if f == "linspace" { 100 } else { 50 },
+                    None => {
+                        if f == "linspace" {
+                            100
+                        } else {
+                            50
+                        }
+                    }
                 };
                 let (a, b) = (calc::evalf(&a), calc::evalf(&b));
-                let (Some(a), Some(b)) = (a.num(), b.num()) else { return Err(format!("{} needs numbers", f)) };
+                let (Some(a), Some(b)) = (a.num(), b.num()) else {
+                    return Err(format!("{} needs numbers", f));
+                };
                 let (a, b) = (a.to_f64(), b.to_f64());
                 let row: Vec<Expr> = (0..n)
                     .map(|k| {
-                        let t = if n > 1 { a + (b - a) * k as f64 / (n - 1) as f64 } else { a };
+                        let t = if n > 1 {
+                            a + (b - a) * k as f64 / (n - 1) as f64
+                        } else {
+                            a
+                        };
                         Expr::float(if f == "linspace" { t } else { 10f64.powf(t) })
                     })
                     .collect();
@@ -567,12 +685,19 @@ impl Session {
                 }
                 let mut best: Option<(f64, Expr)> = None;
                 for v in vals {
-                    let x = calc::evalf(&v).num().ok_or_else(|| format!("{} needs numbers", f))?.to_f64();
-                    if best.as_ref().is_none_or(|(b, _)| if f == "max" { x > *b } else { x < *b }) {
+                    let x = calc::evalf(&v)
+                        .num()
+                        .ok_or_else(|| format!("{} needs numbers", f))?
+                        .to_f64();
+                    if best
+                        .as_ref()
+                        .is_none_or(|(b, _)| if f == "max" { x > *b } else { x < *b })
+                    {
                         best = Some((x, v));
                     }
                 }
-                best.map(|b| b.1).ok_or_else(|| format!("{} needs arguments", f))
+                best.map(|b| b.1)
+                    .ok_or_else(|| format!("{} needs arguments", f))
             }
             _ => self.command_call(f, args),
         }
@@ -585,7 +710,10 @@ impl Session {
             vals.push(self.eval(a)?);
         }
         if self.depth >= 2000 {
-            return Err(format!("{}: too many nested calls (does the recursion stop?)", f));
+            return Err(format!(
+                "{}: too many nested calls (does the recursion stop?)",
+                f
+            ));
         }
         self.depth += 1;
         let r = self.run_user(f.to_string(), vals);
@@ -598,12 +726,22 @@ impl Session {
         let mut ks = vec![];
         for a in args {
             let v = self.eval(a)?;
-            let k = v.num().filter(|n| n.is_exact()).and_then(|n| n.as_int()).ok_or_else(|| format!("{}(...): positions are whole numbers, got {}", f, show(&v)))?;
+            let k = v
+                .num()
+                .filter(|n| n.is_exact())
+                .and_then(|n| n.as_int())
+                .ok_or_else(|| {
+                    format!("{}(...): positions are whole numbers, got {}", f, show(&v))
+                })?;
             ks.push(k);
         }
         let (rows, cols) = (m.len() as i128, m.first().map_or(0, |r| r.len()) as i128);
         let bad = |k: i128, n: i128| -> R<usize> {
-            if k < 1 || k > n { Err(format!("{}: position {} is outside 1..{}", f, k, n)) } else { Ok(k as usize - 1) }
+            if k < 1 || k > n {
+                Err(format!("{}: position {} is outside 1..{}", f, k, n))
+            } else {
+                Ok(k as usize - 1)
+            }
         };
         match ks[..] {
             [k] if rows == 1 => Ok(m[0][bad(k, cols)?].clone()),
@@ -623,9 +761,15 @@ impl Session {
         loop {
             let (params, body) = self.funcs.get(&f).cloned().unwrap();
             if params.len() != vals.len() {
-                return Err(format!("{} takes {} argument{}", f, params.len(), if params.len() == 1 { "" } else { "s" }));
+                return Err(format!(
+                    "{} takes {} argument{}",
+                    f,
+                    params.len(),
+                    if params.len() == 1 { "" } else { "s" }
+                ));
             }
-            let saved: Vec<Option<Expr>> = params.iter().map(|p| self.vars.get(p).cloned()).collect();
+            let saved: Vec<Option<Expr>> =
+                params.iter().map(|p| self.vars.get(p).cloned()).collect();
             let hidden = self.hidden.clone();
             self.hidden.retain(|h| !params.contains(h));
             for (p, v) in params.iter().zip(vals) {
@@ -644,7 +788,10 @@ impl Session {
                 Tail::Call(g, v) => {
                     steps += 1;
                     if steps > 10_000_000 {
-                        return Err(format!("{}: still running after 10 million steps (does the recursion stop?)", g));
+                        return Err(format!(
+                            "{}: still running after 10 million steps (does the recursion stop?)",
+                            g
+                        ));
                     }
                     f = g;
                     vals = v;
@@ -667,7 +814,12 @@ impl Session {
                 let pick = match c {
                     Expr::Bool(b) => b,
                     Expr::Num(n) => !n.is_zero(),
-                    other => return Err(format!("if: can't tell whether {} is true or false", show(&other))),
+                    other => {
+                        return Err(format!(
+                            "if: can't tell whether {} is true or false",
+                            show(&other)
+                        ));
+                    }
                 };
                 return self.tail(&args[if pick { 1 } else { 2 }]);
             }
@@ -733,9 +885,13 @@ impl Session {
                     _ => e.clone(),
                 }
             }
-            Expr::Num(_) | Expr::Const(_) | Expr::Bool(_) | Expr::Str(_) | Expr::Obj(_) => e.clone(),
+            Expr::Num(_) | Expr::Const(_) | Expr::Bool(_) | Expr::Str(_) | Expr::Obj(_) => {
+                e.clone()
+            }
             _ => {
-                if e.symbols().iter().all(|s| !self.vars.contains_key(s) || self.hidden.contains(s) || stack.contains(s)) {
+                if e.symbols().iter().all(|s| {
+                    !self.vars.contains_key(s) || self.hidden.contains(s) || stack.contains(s)
+                }) {
                     return e.clone();
                 }
                 e.map_children(&mut |c| self.resolve(c, stack))
@@ -765,7 +921,11 @@ fn type_name(v: &Expr) -> String {
     match v {
         Expr::Num(_) => "Scalar".into(),
         Expr::Bool(_) => "Boolean".into(),
-        Expr::Matrix(m) => format!("Matrix:{}(r),{}(c)", m.len(), m.first().map_or(0, |r| r.len())),
+        Expr::Matrix(m) => format!(
+            "Matrix:{}(r),{}(c)",
+            m.len(),
+            m.first().map_or(0, |r| r.len())
+        ),
         Expr::Sym(_) => "Variable".into(),
         Expr::Str(_) => "String".into(),
         Expr::Obj(o) => o.kind().into(),
@@ -787,7 +947,10 @@ fn clock_seed() -> u64 {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(1, |d| d.as_nanos() as u64)
+            | 1
     }
 }
 
@@ -835,9 +998,15 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
         }
     }
     Ok(match (op, a, b) {
-        (Op::Add, M(x), M(y)) => M(linalg::zip(&x, &y, "sum", |p, q| add2(p.clone(), q.clone()))?),
-        (Op::Sub, M(x), M(y)) => M(linalg::zip(&x, &y, "difference", |p, q| sub(p.clone(), q.clone()))?),
-        (Op::Add, M(x), s) | (Op::Add, s, M(x)) => M(linalg::map(&x, |p| add2(p.clone(), s.clone()))),
+        (Op::Add, M(x), M(y)) => M(linalg::zip(&x, &y, "sum", |p, q| {
+            add2(p.clone(), q.clone())
+        })?),
+        (Op::Sub, M(x), M(y)) => M(linalg::zip(&x, &y, "difference", |p, q| {
+            sub(p.clone(), q.clone())
+        })?),
+        (Op::Add, M(x), s) | (Op::Add, s, M(x)) => {
+            M(linalg::map(&x, |p| add2(p.clone(), s.clone())))
+        }
         (Op::Sub, M(x), s) => M(linalg::map(&x, |p| sub(p.clone(), s.clone()))),
         (Op::Sub, s, M(x)) => M(linalg::map(&x, |p| sub(s.clone(), p.clone()))),
         (Op::Mul, M(x), M(y)) => M(linalg::matmul(&x, &y)?),
@@ -849,8 +1018,15 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
         (Op::Solve, M(x), M(y)) => M(linalg::solve(&x, &y)?),
         (Op::Solve, ..) => return Err("A\\b needs two matrices".into()),
         (Op::Pow, M(x), s) => {
-            let n = s.num().and_then(|n| n.as_int()).ok_or("matrix powers must be integers")?;
-            let base = if n < 0 { linalg::inverse(&x)? } else { x.clone() };
+            let n = s
+                .num()
+                .and_then(|n| n.as_int())
+                .ok_or("matrix powers must be integers")?;
+            let base = if n < 0 {
+                linalg::inverse(&x)?
+            } else {
+                x.clone()
+            };
             let (r, c) = linalg::dims(&x);
             if r != c {
                 return Err("only square matrices have powers".into());
@@ -876,7 +1052,9 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
 /// a == b, a < b, ...: true or false when that can be decided; a symbolic
 /// a == b stays an equation (for solve, dsolve and implicitplot)
 pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
-    if let (Expr::Bool(_), _) | (_, Expr::Bool(_)) | (Expr::Str(_), _) | (_, Expr::Str(_)) = (&a, &b) {
+    if let (Expr::Bool(_), _) | (_, Expr::Bool(_)) | (Expr::Str(_), _) | (_, Expr::Str(_)) =
+        (&a, &b)
+    {
         return match op {
             Op::Eq => Ok(Expr::Bool(a == b)),
             Op::Ne => Ok(Expr::Bool(a != b)),
@@ -910,7 +1088,11 @@ pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
         }
         _ => {
             let (Some(x), Some(y)) = (num(&a), num(&b)) else {
-                return Err(format!("can't compare {} and {}: they must be numbers", show(&a), show(&b)));
+                return Err(format!(
+                    "can't compare {} and {}: they must be numbers",
+                    show(&a),
+                    show(&b)
+                ));
             };
             Ok(Expr::Bool(match op {
                 Op::Lt => x < y,
@@ -933,7 +1115,11 @@ pub fn equation_lhs(e: &Expr) -> Expr {
 /// Reject division by an exact zero anywhere in the result
 fn check(e: &Expr) -> R<()> {
     match e {
-        Expr::Pow(b, p) if b.is_zero() && b.num().unwrap().is_exact() && p.num().is_some_and(|n| n.is_negative()) => {
+        Expr::Pow(b, p)
+            if b.is_zero()
+                && b.num().unwrap().is_exact()
+                && p.num().is_some_and(|n| n.is_negative()) =>
+        {
             Err("division by zero".into())
         }
         Expr::Add(v) | Expr::Mul(v) => v.iter().try_for_each(check),
@@ -947,7 +1133,11 @@ fn check(e: &Expr) -> R<()> {
 /// an expression as source code again, so it can go into a function body
 fn expr_node(v: &Expr) -> R<Node> {
     match v {
-        Expr::Matrix(m) => Ok(Node::Matrix(m.iter().map(|r| r.iter().map(expr_node).collect::<R<_>>()).collect::<R<_>>()?)),
+        Expr::Matrix(m) => Ok(Node::Matrix(
+            m.iter()
+                .map(|r| r.iter().map(expr_node).collect::<R<_>>())
+                .collect::<R<_>>()?,
+        )),
         Expr::Str(s) => Ok(Node::Str(s.clone())),
         e => match crate::parser::parse(&show(e)) {
             Ok(mut st) if st.len() == 1 => match st.pop() {
@@ -1008,7 +1198,11 @@ fn range(a: &Expr, s: &Expr, b: &Expr) -> R<Expr> {
     // decimal steps like 0:0.1:0.5 give 0.3, not 0.30000000000000004
     let decimals = |n: &Number| -> Option<u32> {
         let s = format!("{}", n.to_f64());
-        if s.contains('e') { None } else { Some(s.split('.').nth(1).map_or(0, |f| f.len()) as u32) }
+        if s.contains('e') {
+            None
+        } else {
+            Some(s.split('.').nth(1).map_or(0, |f| f.len()) as u32)
+        }
     };
     let scale = match (an.is_exact() && sn.is_exact(), decimals(&an), decimals(&sn)) {
         (false, Some(x), Some(y)) if x.max(y) <= 12 => Some(10f64.powi(x.max(y) as i32)),
@@ -1063,7 +1257,13 @@ mod tests {
         assert_eq!(run("log(e^5*e^4)"), "9");
         assert_eq!(run("1/0"), "Error: division by zero");
         assert_eq!(run("(1&&0)||true"), "true");
-        assert_eq!(run("A=[4 5 6;6 5 4;7 8 7];norm(inv(A)*A-eye(3),1)").lines().last().unwrap(), "0");
+        assert_eq!(
+            run("A=[4 5 6;6 5 4;7 8 7];norm(inv(A)*A-eye(3),1)")
+                .lines()
+                .last()
+                .unwrap(),
+            "0"
+        );
         assert_eq!(run("deriv(x^3,x)"), "3*x^2");
         assert_eq!(run("0.1:0.1:0.3").split('\t').count(), 3);
         assert_eq!(run("1:3"), "1\t2\t3");
@@ -1072,10 +1272,22 @@ mod tests {
     fn tail_calls_and_big_integers() {
         let out = run("count(n, k) := if(k == n, k, count(n, k + 1)); count(100000, 0)");
         assert_eq!(out.lines().last().unwrap(), "100000");
-        assert_eq!(run("fact(n) := if(n == 0, 1, n*fact(n-1)); fact(20)").lines().last().unwrap(), "2432902008176640000");
+        assert_eq!(
+            run("fact(n) := if(n == 0, 1, n*fact(n-1)); fact(20)")
+                .lines()
+                .last()
+                .unwrap(),
+            "2432902008176640000"
+        );
         assert_eq!(run("gcd(2^60-1, 2^40-1)"), "1048575");
         assert_eq!(run("mod([3 6 9], 7)"), "3\t6\t2");
-        assert_eq!(run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)").lines().last().unwrap(), "2\t2\t2");
+        assert_eq!(
+            run("tf(n) := if(n == 1, [], [2, tf(n/2)]); tf(8)")
+                .lines()
+                .last()
+                .unwrap(),
+            "2\t2\t2"
+        );
         assert_eq!(run("[1 true]"), "1\ttrue");
         assert_eq!(run("rows([1 2; 3 4; 5 6])"), "3");
         assert!(run("factor(10^300 + 1)").starts_with("73 * 137 * 401 * "));
@@ -1086,10 +1298,18 @@ mod tests {
         assert_eq!(run("factor(x^2 + y^2, i)"), "(x-i*y)*(x+i*y)");
         assert!(run("N = (2^1062 + 1)/5; algfactor(N)").contains("divides 2^1062 + 1"));
         assert!(run("N = 7^50 + 3^50; algfactor(N)").contains("All 7 prime factors found"));
-        assert!(run("N = 31415926^5 + 31415926 + 1; algfactor(N)").contains("x^5 + x + 1 with x = 31415926"));
+        assert!(
+            run("N = 31415926^5 + 31415926 + 1; algfactor(N)")
+                .contains("x^5 + x + 1 with x = 31415926")
+        );
         assert!(run("N = 98765^4 + 4*7^4; algfactor(N)").contains("x^4 + 9604 with x = 98765"));
-        assert!(run("isprime(2^(2^2281 - 1) - 1)").contains("too large to compute: it would have about 10^686 digits"));
-        assert!(run("isprime(eval(2^(2^2281 - 1) - 1))").contains("decimal too large to represent"));
+        assert!(
+            run("isprime(2^(2^2281 - 1) - 1)")
+                .contains("too large to compute: it would have about 10^686 digits")
+        );
+        assert!(
+            run("isprime(eval(2^(2^2281 - 1) - 1))").contains("decimal too large to represent")
+        );
         assert!(run("factor(2^(10^9) + 1)").contains("about 301029996 digits"));
         assert!(run("mod(2^(10^7), 7)").contains("too large to compute"));
         let out = run("f(x) := 8 + 3*x^2 + 9*x; deriv(f(x), x); d(x) := ans; deriv(d(x), x); d(3)");
@@ -1097,15 +1317,36 @@ mod tests {
         assert!(out.contains("d(x) := 6*x+9"));
         assert!(run("m = [1 2; 3 4]; m*2; g(k) := k*ans; g(2)").ends_with("4\t8\n12\t16"));
         assert_eq!(run("h(ans) := ans + 1; h(1)").lines().last().unwrap(), "2");
-        assert_eq!(run("p = plot(x, x, 0, 1); q(x) := x + 1; q(1)").lines().last().unwrap(), "2");
-        assert_eq!(run("2^200"), "1606938044258990275541962092341162602522202993782792835301376");
+        assert_eq!(
+            run("p = plot(x, x, 0, 1); q(x) := x + 1; q(1)")
+                .lines()
+                .last()
+                .unwrap(),
+            "2"
+        );
+        assert_eq!(
+            run("2^200"),
+            "1606938044258990275541962092341162602522202993782792835301376"
+        );
         assert_eq!(run("mod(3^100, 7)"), "4");
         assert_eq!(run("isprime(2^521 - 1)"), "true");
-        assert_eq!(run("factor(2^127 - 3)"), "5^2 * 213156431 * 31927947500766558008599290859");
-        assert_eq!(run("decode(encode(\"a message longer than fifteen characters\"))"), "a message longer than fifteen characters");
-        assert_eq!(run("floor(10^40/7)"), "1428571428571428571428571428571428571428");
+        assert_eq!(
+            run("factor(2^127 - 3)"),
+            "5^2 * 213156431 * 31927947500766558008599290859"
+        );
+        assert_eq!(
+            run("decode(encode(\"a message longer than fifteen characters\"))"),
+            "a message longer than fifteen characters"
+        );
+        assert_eq!(
+            run("floor(10^40/7)"),
+            "1428571428571428571428571428571428571428"
+        );
         assert_eq!(run("1/(2^200) * 2^201"), "2");
-        assert_eq!(run("170141183460469231731687303715884105728 - 1"), "170141183460469231731687303715884105727");
+        assert_eq!(
+            run("170141183460469231731687303715884105728 - 1"),
+            "170141183460469231731687303715884105727"
+        );
         assert_eq!(run("rank([1 2 3; 4 5 6; 7 8 9])"), "2");
         assert_eq!(run("null([1 2 3; 4 5 6; 7 8 9])"), "1\n-2\n1");
         assert_eq!(run("eigvec([2 1; 1 2])"), "-1\t1\n1\t1");

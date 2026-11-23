@@ -19,16 +19,29 @@ pub fn index_obj(o: &Obj, ix: &[usize]) -> R<Expr> {
     match o {
         Obj::Components(c) => c.get(ix),
         Obj::Metric(m) => match ix {
-            [i, j] => m.g.get(*i).and_then(|r| r.get(*j)).cloned().ok_or_else(|| "index out of bounds".into()),
+            [i, j] => {
+                m.g.get(*i)
+                    .and_then(|r| r.get(*j))
+                    .cloned()
+                    .ok_or_else(|| "index out of bounds".into())
+            }
             _ => Err("a metric needs two indices, e.g. g[0,0]".into()),
         },
         Obj::Equations(e) => match ix {
-            [i] => e.eqs.get(*i).map(|x| x.1.clone()).ok_or_else(|| "index out of bounds".into()),
+            [i] => e
+                .eqs
+                .get(*i)
+                .map(|x| x.1.clone())
+                .ok_or_else(|| "index out of bounds".into()),
             _ => Err("use one index to pick an equation".into()),
         },
         Obj::Report(r) => match ix {
             [i] => r.formulas.get(*i).cloned().ok_or_else(|| {
-                if r.formulas.is_empty() { "this result has no formulas".to_string() } else { format!("pick a formula from 0 to {}", r.formulas.len() - 1) }
+                if r.formulas.is_empty() {
+                    "this result has no formulas".to_string()
+                } else {
+                    format!("pick a formula from 0 to {}", r.formulas.len() - 1)
+                }
             }),
             _ => Err("use one index to pick a formula, e.g. d[0]".into()),
         },
@@ -73,7 +86,11 @@ fn label(n: &Node, _v: &Expr) -> String {
 }
 
 fn give_values(free: &[String]) -> String {
-    format!("give values to {} first, e.g. {} = 1", free.join(", "), free[0])
+    format!(
+        "give values to {} first, e.g. {} = 1",
+        free.join(", "),
+        free[0]
+    )
 }
 
 /// A labelled solution: (label, [(t, state)])
@@ -109,9 +126,15 @@ impl Session {
                     [Node::Str(s)] | [Node::Ident(s)] => s.clone(),
                     _ => return Err("usage: metric.generate(name)".into()),
                 };
-                geometry::template(&name).map(|m| obj(Obj::Metric(m))).ok_or_else(|| {
-                    format!("unknown metric {}; known: {}", name, geometry::TEMPLATES.join(", "))
-                })
+                geometry::template(&name)
+                    .map(|m| obj(Obj::Metric(m)))
+                    .ok_or_else(|| {
+                        format!(
+                            "unknown metric {}; known: {}",
+                            name,
+                            geometry::TEMPLATES.join(", ")
+                        )
+                    })
             }
             "inducedmetric" => {
                 if args.len() != 2 {
@@ -179,13 +202,21 @@ impl Session {
     fn number(&mut self, n: &Node, what: &str) -> R<f64> {
         let v = self.eval(n)?;
         let x = numeric::value(&v);
-        if x.is_finite() { Ok(x) } else { Err(format!("{} must be a number, got {}", what, show(&v))) }
+        if x.is_finite() {
+            Ok(x)
+        } else {
+            Err(format!("{} must be a number, got {}", what, show(&v)))
+        }
     }
 
     fn numbers(&mut self, n: &Node, what: &str) -> R<Vec<f64>> {
         let v = self.eval(n)?;
         let xs: Vec<f64> = flat(v.clone()).iter().map(numeric::value).collect();
-        if xs.iter().all(|x| x.is_finite()) { Ok(xs) } else { Err(format!("{} must be numbers, got {}", what, show(&v))) }
+        if xs.iter().all(|x| x.is_finite()) {
+            Ok(xs)
+        } else {
+            Err(format!("{} must be numbers, got {}", what, show(&v)))
+        }
     }
 
     fn range(&mut self, cmd: &str, a: &Node, b: &Node) -> R<(f64, f64)> {
@@ -219,9 +250,19 @@ impl Session {
         };
         let (fs, var, a, b) = if explicit {
             let (a, b) = self.range("plot", &args[k - 2], &args[k - 1])?;
-            (&args[..k - 3], ident(&args[k - 3], "the plot variable")?, a, b)
+            (
+                &args[..k - 3],
+                ident(&args[k - 3], "the plot variable")?,
+                a,
+                b,
+            )
         } else if k >= 2 && matches!(args[k - 1], Node::Ident(_)) {
-            (&args[..k - 1], ident(&args[k - 1], "the plot variable")?, -10.0, 10.0)
+            (
+                &args[..k - 1],
+                ident(&args[k - 1], "the plot variable")?,
+                -10.0,
+                10.0,
+            )
         } else {
             return Err(usage.into());
         };
@@ -229,29 +270,56 @@ impl Session {
         let mut series = vec![];
         for n in fs {
             let (code, v) = self.function(n, std::slice::from_ref(&var))?;
-            series.push(Series { label: label(n, &v), points: xs.iter().map(|&x| (x, run(&code, &[x]))).collect(), ..Default::default() });
+            series.push(Series {
+                label: label(n, &v),
+                points: xs.iter().map(|&x| (x, run(&code, &[x]))).collect(),
+                ..Default::default()
+            });
         }
         Ok(obj(Obj::Figure(Figure::new(series, &var, "", false))))
     }
 
     fn parametric(&mut self, args: &[Node]) -> R<Expr> {
-        let [fx, fy, t, a, b] = args else { return Err("usage: parametric(fx, fy, t, from, to)".into()) };
+        let [fx, fy, t, a, b] = args else {
+            return Err("usage: parametric(fx, fy, t, from, to)".into());
+        };
         let t = ident(t, "the parameter")?;
         let (a, b) = self.range("parametric", a, b)?;
         let (gx, vx) = self.function(fx, std::slice::from_ref(&t))?;
         let (gy, vy) = self.function(fy, std::slice::from_ref(&t))?;
-        let pts = plot::steps(a, b, plot::SAMPLES).iter().map(|&s| (run(&gx, &[s]), run(&gy, &[s]))).collect();
-        let s = Series { label: format!("({}, {})", label(fx, &vx), label(fy, &vy)), points: pts, ..Default::default() };
+        let pts = plot::steps(a, b, plot::SAMPLES)
+            .iter()
+            .map(|&s| (run(&gx, &[s]), run(&gy, &[s])))
+            .collect();
+        let s = Series {
+            label: format!("({}, {})", label(fx, &vx), label(fy, &vy)),
+            points: pts,
+            ..Default::default()
+        };
         Ok(obj(Obj::Figure(Figure::new(vec![s], "", "", true))))
     }
 
-    fn grid(&mut self, f: &Node, u: &str, v: &str, us: &[f64], vs: &[f64]) -> R<(Vec<Vec<f64>>, Expr)> {
+    fn grid(
+        &mut self,
+        f: &Node,
+        u: &str,
+        v: &str,
+        us: &[f64],
+        vs: &[f64],
+    ) -> R<(Vec<Vec<f64>>, Expr)> {
         let (g, e) = self.function(f, &[u.to_string(), v.to_string()])?;
-        Ok((us.iter().map(|&a| vs.iter().map(|&b| run(&g, &[a, b])).collect()).collect(), e))
+        Ok((
+            us.iter()
+                .map(|&a| vs.iter().map(|&b| run(&g, &[a, b])).collect())
+                .collect(),
+            e,
+        ))
     }
 
     fn plot3d(&mut self, args: &[Node]) -> R<Expr> {
-        let [f, x, a, b, y, c, d] = args else { return Err("usage: plot3d(f, x, from, to, y, from, to)".into()) };
+        let [f, x, a, b, y, c, d] = args else {
+            return Err("usage: plot3d(f, x, from, to, y, from, to)".into());
+        };
         let (x, y) = (ident(x, "x")?, ident(y, "y")?);
         let (x0, x1) = self.range("plot3d", a, b)?;
         let (y0, y1) = self.range("plot3d", c, d)?;
@@ -260,8 +328,18 @@ impl Session {
         let (gz, e) = self.grid(f, &x, &y, &xs, &ys)?;
         let gx = xs.iter().map(|&a| ys.iter().map(|_| a).collect()).collect();
         let gy = xs.iter().map(|_| ys.clone()).collect();
-        let s = Surface { label: label(f, &e), x: gx, y: gy, z: gz };
-        Ok(obj(Obj::Figure3D(Figure3D::new(vec![s], vec![], [&x, &y, "z"], false))))
+        let s = Surface {
+            label: label(f, &e),
+            x: gx,
+            y: gy,
+            z: gz,
+        };
+        Ok(obj(Obj::Figure3D(Figure3D::new(
+            vec![s],
+            vec![],
+            [&x, &y, "z"],
+            false,
+        ))))
     }
 
     fn surface(&mut self, args: &[Node]) -> R<Expr> {
@@ -276,21 +354,54 @@ impl Session {
         let (x, ex) = self.grid(fx, &u, &v, &us, &vs)?;
         let (y, ey) = self.grid(fy, &u, &v, &us, &vs)?;
         let (z, ez) = self.grid(fz, &u, &v, &us, &vs)?;
-        let s = Surface { label: format!("({}, {}, {})", label(fx, &ex), label(fy, &ey), label(fz, &ez)), x, y, z };
-        Ok(obj(Obj::Figure3D(Figure3D::new(vec![s], vec![], ["x", "y", "z"], true))))
+        let s = Surface {
+            label: format!(
+                "({}, {}, {})",
+                label(fx, &ex),
+                label(fy, &ey),
+                label(fz, &ez)
+            ),
+            x,
+            y,
+            z,
+        };
+        Ok(obj(Obj::Figure3D(Figure3D::new(
+            vec![s],
+            vec![],
+            ["x", "y", "z"],
+            true,
+        ))))
     }
 
     fn parametric3d(&mut self, args: &[Node]) -> R<Expr> {
-        let [fx, fy, fz, t, a, b] = args else { return Err("usage: parametric3d(fx, fy, fz, t, from, to)".into()) };
+        let [fx, fy, fz, t, a, b] = args else {
+            return Err("usage: parametric3d(fx, fy, fz, t, from, to)".into());
+        };
         let t = ident(t, "the parameter")?;
         let (a, b) = self.range("parametric3d", a, b)?;
         let ts = std::slice::from_ref(&t);
         let (gx, ex) = self.function(fx, ts)?;
         let (gy, ey) = self.function(fy, ts)?;
         let (gz, ez) = self.function(fz, ts)?;
-        let pts = plot::steps(a, b, plot::CURVE3D_SAMPLES).iter().map(|&s| (run(&gx, &[s]), run(&gy, &[s]), run(&gz, &[s]))).collect();
-        let c = Curve { label: format!("({}, {}, {})", label(fx, &ex), label(fy, &ey), label(fz, &ez)), points: pts };
-        Ok(obj(Obj::Figure3D(Figure3D::new(vec![], vec![c], ["x", "y", "z"], true))))
+        let pts = plot::steps(a, b, plot::CURVE3D_SAMPLES)
+            .iter()
+            .map(|&s| (run(&gx, &[s]), run(&gy, &[s]), run(&gz, &[s])))
+            .collect();
+        let c = Curve {
+            label: format!(
+                "({}, {}, {})",
+                label(fx, &ex),
+                label(fy, &ey),
+                label(fz, &ez)
+            ),
+            points: pts,
+        };
+        Ok(obj(Obj::Figure3D(Figure3D::new(
+            vec![],
+            vec![c],
+            ["x", "y", "z"],
+            true,
+        ))))
     }
 
     fn show(&mut self, args: &[Node]) -> R<Expr> {
@@ -301,14 +412,20 @@ impl Session {
                 other => return Err(format!("show: {} is not a plot", show(&other))),
             }
         }
-        let Some(first) = figs.first().cloned() else { return Err("usage: show(figure1, figure2, ...)".into()) };
+        let Some(first) = figs.first().cloned() else {
+            return Err("usage: show(figure1, figure2, ...)".into());
+        };
         match &*first {
             Obj::Figure(f) => {
                 let mut acc = f.clone();
                 for g in &figs[1..] {
                     match &**g {
                         Obj::Figure(g) => acc = acc.overlay(g),
-                        _ => return Err("show: all arguments must be 2D plots, or all 3D plots".into()),
+                        _ => {
+                            return Err(
+                                "show: all arguments must be 2D plots, or all 3D plots".into()
+                            );
+                        }
                     }
                 }
                 Ok(obj(Obj::Figure(acc)))
@@ -318,7 +435,11 @@ impl Session {
                 for g in &figs[1..] {
                     match &**g {
                         Obj::Figure3D(g) => acc = acc.overlay(g),
-                        _ => return Err("show: all arguments must be 2D plots, or all 3D plots".into()),
+                        _ => {
+                            return Err(
+                                "show: all arguments must be 2D plots, or all 3D plots".into()
+                            );
+                        }
                     }
                 }
                 Ok(obj(Obj::Figure3D(acc)))
@@ -330,12 +451,17 @@ impl Session {
     // ---------- geometry ----------
 
     fn metric(&mut self, args: &[Node]) -> R<Expr> {
-        let [c, m] = args else { return Err("usage: metric([x1 x2 ...], [g11 g12 ...; g21 g22 ...])".into()) };
+        let [c, m] = args else {
+            return Err("usage: metric([x1 x2 ...], [g11 g12 ...; g21 g22 ...])".into());
+        };
         let coords = names(c, "metric: the first argument")?;
         let g = match self.eval_hidden(m, &coords)? {
             Expr::Matrix(g) => g,
             v if coords.len() == 1 && v.is_scalar() => vec![vec![v]],
-            _ => return Err("metric: the second argument must be a square matrix with one row per coordinate".into()),
+            _ => return Err(
+                "metric: the second argument must be a square matrix with one row per coordinate"
+                    .into(),
+            ),
         };
         Ok(obj(Obj::Metric(Metric::new(coords, g)?)))
     }
@@ -383,7 +509,9 @@ impl Session {
                         ..Default::default()
                     })
                     .collect();
-                Ok(obj(Obj::Figure(Figure::new(series, &labels[0], &labels[1], equal))))
+                Ok(obj(Obj::Figure(Figure::new(
+                    series, &labels[0], &labels[1], equal,
+                ))))
             }
             3 => {
                 let curves = trajs
@@ -399,9 +527,17 @@ impl Session {
                             .collect(),
                     })
                     .collect();
-                Ok(obj(Obj::Figure3D(Figure3D::new(vec![], curves, [&labels[0], &labels[1], &labels[2]], equal))))
+                Ok(obj(Obj::Figure3D(Figure3D::new(
+                    vec![],
+                    curves,
+                    [&labels[0], &labels[1], &labels[2]],
+                    equal,
+                ))))
             }
-            _ => Err("the plot map must have 2 entries (2D) or 3 entries (3D), e.g. [x y] or [x y z]".into()),
+            _ => Err(
+                "the plot map must have 2 entries (2D) or 3 entries (3D), e.g. [x y] or [x y z]"
+                    .into(),
+            ),
         }
     }
 
@@ -427,11 +563,19 @@ impl Session {
         let rhs = flat(self.eval_hidden(&args[0], &all)?);
         let y0 = self.numbers(&args[3], "the start values")?;
         // odeplot: several rows of start values draw several solutions
-        let several = plot && !vars.is_empty() && y0.len() > vars.len() && y0.len() % vars.len() == 0;
-        let starts: Vec<Vec<f64>> = if several { y0.chunks(vars.len()).map(|c| c.to_vec()).collect() } else { vec![y0.clone()] };
+        let several =
+            plot && !vars.is_empty() && y0.len() > vars.len() && y0.len() % vars.len() == 0;
+        let starts: Vec<Vec<f64>> = if several {
+            y0.chunks(vars.len()).map(|c| c.to_vec()).collect()
+        } else {
+            vec![y0.clone()]
+        };
         let y0 = starts[0].clone();
         if rhs.len() != vars.len() || y0.len() != vars.len() {
-            return Err(format!("{}: give one equation and one start value per unknown", if plot { "odeplot" } else { "odesolve" }));
+            return Err(format!(
+                "{}: give one equation and one start value per unknown",
+                if plot { "odeplot" } else { "odesolve" }
+            ));
         }
         let t0 = self.number(&args[4], "t0")?;
         let t1 = self.number(&args[5], "t1")?;
@@ -462,12 +606,28 @@ impl Session {
         if several {
             let m = map.unwrap();
             let ms = flat(self.eval_hidden(m, &all)?);
-            let polar = ms.len() == 2 && show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
-            let what = if ms.len() == 2 { show(&ms[1]) } else { "solution".into() };
+            let polar =
+                ms.len() == 2 && show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
+            let what = if ms.len() == 2 {
+                show(&ms[1])
+            } else {
+                "solution".into()
+            };
             let trajs: Vec<Trajectory> = starts
                 .iter()
                 .map(|s0| {
-                    let label = format!("{} from [{}]", what, s0.iter().map(|v| if v.fract() == 0.0 && v.abs() < 1e15 { format!("{}", *v as i64) } else { crate::num::fmt_float(*v) }).collect::<Vec<_>>().join(", "));
+                    let label = format!(
+                        "{} from [{}]",
+                        what,
+                        s0.iter()
+                            .map(|v| if v.fract() == 0.0 && v.abs() < 1e15 {
+                                format!("{}", *v as i64)
+                            } else {
+                                crate::num::fmt_float(*v)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                     (label, ode::rk4(&f, s0, t0, t1, steps))
                 })
                 .collect();
@@ -477,14 +637,22 @@ impl Session {
             None => {
                 let last = &traj[traj.len() - 1];
                 if (last.0 - t1).abs() > 1e-9 * t1.abs().max(1.0) {
-                    return Err(format!("odesolve: the solution breaks down at t = {}", last.0));
+                    return Err(format!(
+                        "odesolve: the solution breaks down at t = {}",
+                        last.0
+                    ));
                 }
                 let row: Vec<Expr> = last.1.iter().map(|v| Expr::float(*v)).collect();
-                Ok(if n == 1 { row[0].clone() } else { Expr::Matrix(vec![row]) })
+                Ok(if n == 1 {
+                    row[0].clone()
+                } else {
+                    Expr::Matrix(vec![row])
+                })
             }
             Some(m) => {
                 let ms = flat(self.eval_hidden(m, &all)?);
-                let polar = ms.len() == 2 && show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
+                let polar =
+                    ms.len() == 2 && show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
                 // name the curve after what is drawn vertically (or the whole map in 3D)
                 let name = match ms.len() {
                     2 => show(&ms[1]),
@@ -509,8 +677,16 @@ impl Session {
             return Err(format!("geodesic: the start point needs {} numbers", n));
         }
         let v0s: Vec<Vec<f64>> = match self.eval(&args[2])? {
-            Expr::Matrix(rows) if rows[0].len() == n => rows.iter().map(|r| r.iter().map(numeric::value).collect()).collect(),
-            _ => return Err(format!("geodesic: the start velocity needs {} numbers (or one row of {} per geodesic)", n, n)),
+            Expr::Matrix(rows) if rows[0].len() == n => rows
+                .iter()
+                .map(|r| r.iter().map(numeric::value).collect())
+                .collect(),
+            _ => {
+                return Err(format!(
+                    "geodesic: the start velocity needs {} numbers (or one row of {} per geodesic)",
+                    n, n
+                ));
+            }
         };
         if v0s.iter().flatten().any(|v| !v.is_finite()) {
             return Err("geodesic: the start velocity must be numbers".into());
@@ -559,7 +735,10 @@ impl Session {
             .map(|(i, v0)| {
                 let mut y0 = x0.clone();
                 y0.extend(v0);
-                (format!("geodesic {}", i + 1), ode::rk4(&f, &y0, 0.0, s1, steps))
+                (
+                    format!("geodesic {}", i + 1),
+                    ode::rk4(&f, &y0, 0.0, s1, steps),
+                )
             })
             .collect();
         let mut all: Vec<String> = xs.clone();

@@ -166,7 +166,11 @@ impl Expr {
     }
 
     pub fn num(&self) -> Option<Number> {
-        if let Num(n) = self { Some(n.clone()) } else { None }
+        if let Num(n) = self {
+            Some(n.clone())
+        } else {
+            None
+        }
     }
     pub fn is_zero(&self) -> bool {
         matches!(self, Num(n) if n.is_zero())
@@ -191,7 +195,11 @@ impl Expr {
             Mul(f) => match &f[0] {
                 Num(n) => {
                     let rest: Vec<Expr> = f[1..].to_vec();
-                    let rest = if rest.len() == 1 { rest.into_iter().next().unwrap() } else { Mul(rest) };
+                    let rest = if rest.len() == 1 {
+                        rest.into_iter().next().unwrap()
+                    } else {
+                        Mul(rest)
+                    };
                     (n.clone(), rest)
                 }
                 _ => (Number::one(), self.clone()),
@@ -273,7 +281,11 @@ impl Expr {
             Pow(a, b) => pow(f(a), f(b)),
             Func(g, a) => func(*g, f(a)),
             Apply(g, v) => Apply(g.clone(), v.iter().map(&mut *f).collect()),
-            Matrix(rows) => Matrix(rows.iter().map(|r| r.iter().map(&mut *f).collect()).collect()),
+            Matrix(rows) => Matrix(
+                rows.iter()
+                    .map(|r| r.iter().map(&mut *f).collect())
+                    .collect(),
+            ),
             _ => self.clone(),
         }
     }

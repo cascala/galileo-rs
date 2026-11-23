@@ -6,8 +6,9 @@ use crate::eval::{R, Session};
 use crate::expr::{Expr, Obj};
 use crate::extra_cmd::{big_of, bnum};
 use crate::factorlab::{self as lab, Clock};
-use crate::labsearch::{self as ls, Prog};
+use crate::gnfs;
 use crate::lableak;
+use crate::labsearch::{self as ls, Prog};
 use crate::parser::Node;
 use crate::plot::{Figure, Series};
 use crate::print::show;
@@ -15,8 +16,23 @@ use num_bigint::BigInt;
 use num_traits::{One, Signed, Zero};
 use std::rc::Rc;
 
-fn report(kind: &'static str, text: String, markdown: String, formulas: Vec<Expr>, vars: Vec<String>) -> Expr {
-    Expr::Obj(Rc::new(Obj::Report(Report { kind, text, markdown, formulas, best: 0, vars, order: 0, target: 0 })))
+fn report(
+    kind: &'static str,
+    text: String,
+    markdown: String,
+    formulas: Vec<Expr>,
+    vars: Vec<String>,
+) -> Expr {
+    Expr::Obj(Rc::new(Obj::Report(Report {
+        kind,
+        text,
+        markdown,
+        formulas,
+        best: 0,
+        vars,
+        order: 0,
+        target: 0,
+    })))
 }
 
 /// how much work a second of budget buys (also in the browser, which has no clock)
@@ -53,7 +69,11 @@ fn pval(p: f64) -> String {
 fn median(v: &mut [f64]) -> f64 {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let n = v.len();
-    if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2.0 }
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    }
 }
 
 /// A method: a built-in name, a lab program, or the name of a user function f(n)
@@ -90,6 +110,8 @@ impl Session {
             "algosearch" => self.algosearch(args),
             "leaderboard" => self.leaderboard(args),
             "leakhunt" => self.leakhunt(args),
+            "gnfs" | "nfs" => self.gnfs_cmd(args),
+            "nfspoly" => self.nfspoly(args),
             _ => return None,
         };
         Some(r)
@@ -97,7 +119,10 @@ impl Session {
 
     fn small_arg(&mut self, n: &Node, f: &str, lo: f64, hi: f64) -> R<f64> {
         let v = self.eval(n)?;
-        let x = v.num().map(|n| n.to_f64()).ok_or_else(|| format!("{}: expected a number, got {}", f, show(&v)))?;
+        let x = v
+            .num()
+            .map(|n| n.to_f64())
+            .ok_or_else(|| format!("{}: expected a number, got {}", f, show(&v)))?;
         if !(lo..=hi).contains(&x) {
             return Err(format!("{}: {} is outside {} to {}", f, x, lo, hi));
         }
@@ -109,14 +134,25 @@ impl Session {
             return Err(format!("usage: {}(digits) or {}(digits, seed)", f, f));
         }
         let d = self.small_arg(&args[0], f, 4.0, 2000.0)? as u32;
-        let seed = if args.len() == 2 { self.small_arg(&args[1], f, 0.0, 1e15)? as u64 } else { 0 };
+        let seed = if args.len() == 2 {
+            self.small_arg(&args[1], f, 0.0, 1e15)? as u64
+        } else {
+            0
+        };
         let (n, p, q) = lab::semiprime(d, seed);
-        Ok(if f == "semiprime" { bnum(n) } else { Expr::Matrix(vec![vec![bnum(p), bnum(q)]]) })
+        Ok(if f == "semiprime" {
+            bnum(n)
+        } else {
+            Expr::Matrix(vec![vec![bnum(p), bnum(q)]])
+        })
     }
 
     fn method_of(&mut self, v: &Expr) -> R<Method> {
         let Expr::Str(s) = v else {
-            return Err(format!("a method is a name in quotes like \"rho\", a program like \"iter(x^2 + 1, x - y, 2)\", or the name of your function f(n) in quotes; got {}", show(v)));
+            return Err(format!(
+                "a method is a name in quotes like \"rho\", a program like \"iter(x^2 + 1, x - y, 2)\", or the name of your function f(n) in quotes; got {}",
+                show(v)
+            ));
         };
         let s = s.trim();
         if ls::is_prog_text(s) {
@@ -127,32 +163,166 @@ impl Session {
         }
         match self.funcs.get(s) {
             Some((params, _)) if params.len() == 1 => Ok(Method::User(s.to_string())),
-            Some(_) => Err(format!("{} must take one argument, the number to factor", s)),
+            Some(_) => Err(format!(
+                "{} must take one argument, the number to factor",
+                s
+            )),
             None => Err(format!(
                 "unknown method {}: use one of {}, a program iter(f, h, x0) or rel(s, fb), or define f(n) := ... and pass \"f\"",
                 s,
-                lab::METHODS.iter().map(|m| m.0).collect::<Vec<_>>().join(", ")
+                lab::METHODS
+                    .iter()
+                    .map(|m| m.0)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )),
         }
     }
 
     /// runs a method on n with a budget; (factor if found, work, seconds)
-    fn run_one(&mut self, m: &Method, n: &BigInt, seconds: f64, seed: u64) -> (Option<BigInt>, f64, Option<f64>) {
+    fn run_one(
+        &mut self,
+        m: &Method,
+        n: &BigInt,
+        seconds: f64,
+        seed: u64,
+    ) -> (Option<BigInt>, f64, Option<f64>) {
         let clock = Clock::start();
         // with a clock the limit is time; in the browser it is work
-        let units = if lab::has_clock() { f64::INFINITY } else { seconds * UNITS_PER_SECOND };
+        let units = if lab::has_clock() {
+            f64::INFINITY
+        } else {
+            seconds * UNITS_PER_SECOND
+        };
         lab::start_budget(units, seconds);
         let f = match m {
             Method::Builtin(name) => lab::run_method(name, n, seed),
             Method::Program(p) => ls::run_prog(p, n),
-            Method::User(name) => match self.eval(&Node::Call(name.clone(), vec![Node::Num(n.to_string())])) {
-                Ok(v) => v.num().and_then(|x| x.as_bigint()),
-                Err(_) => None,
-            },
+            Method::User(name) => {
+                match self.eval(&Node::Call(name.clone(), vec![Node::Num(n.to_string())])) {
+                    Ok(v) => v.num().and_then(|x| x.as_bigint()),
+                    Err(_) => None,
+                }
+            }
         };
         let w = lab::end_budget();
-        let f = f.map(|f| f.abs()).filter(|f| f > &BigInt::one() && f < n && (n % f).is_zero());
+        let f = f
+            .map(|f| f.abs())
+            .filter(|f| f > &BigInt::one() && f < n && (n % f).is_zero());
         (f, w, clock.seconds())
+    }
+
+    fn gnfs_cmd(&mut self, args: &[Node]) -> R<Expr> {
+        let usage = "usage: gnfs(N), gnfs(N, seconds) or gnfs(N, f, m) or gnfs(N, f, m, seconds) with f a polynomial in x and f(m) divisible by N";
+        if args.is_empty() || args.len() > 4 {
+            return Err(usage.into());
+        }
+        let n = big_of(&self.eval(&args[0])?, "gnfs")?;
+        if n < BigInt::from(4) {
+            return Err("gnfs: N must be 4 or more".into());
+        }
+        let (choice, secs) = match args.len() {
+            1 => (None, 60.0),
+            2 => (None, self.small_arg(&args[1], "gnfs", 0.001, 36000.0)?),
+            _ => {
+                let fe = self.eval(&args[1])?;
+                let f = crate::factor_cmd::int_poly(&fe).ok_or_else(|| format!("gnfs: f must be a polynomial in one variable with integer coefficients, got {}", show(&fe)))?;
+                let m = big_of(&self.eval(&args[2])?, "gnfs")?;
+                let secs = if args.len() == 4 {
+                    self.small_arg(&args[3], "gnfs", 0.001, 36000.0)?
+                } else {
+                    60.0
+                };
+                (Some(gnfs::user_choice(&n, &f, &m)?), secs)
+            }
+        };
+        let clock = Clock::start();
+        let units = if lab::has_clock() {
+            f64::INFINITY
+        } else {
+            secs * UNITS_PER_SECOND
+        };
+        lab::start_budget(units, secs);
+        let run = gnfs::nfs(&n, choice, None);
+        let w = lab::end_budget();
+        let head = match &run.factor {
+            Some(f) => format!(
+                "The number field sieve split {} = {} * {} in {} work units ({}).",
+                n,
+                f,
+                &n / f,
+                fmt_units(w),
+                fmt_secs(clock.seconds())
+            ),
+            None => format!(
+                "The number field sieve found no factor of {} in {} work units ({}).",
+                n,
+                fmt_units(w),
+                fmt_secs(clock.seconds())
+            ),
+        };
+        let text = format!("{}\n{}", head, run.log.join("\n"));
+        let md = format!("{}\n\n```\n{}\n```", head, run.log.join("\n"));
+        let formulas = run.factor.iter().map(|f| bnum(f.clone())).collect();
+        Ok(report("NFS", text, md, formulas, vec![]))
+    }
+
+    fn nfspoly(&mut self, args: &[Node]) -> R<Expr> {
+        if args.is_empty() || args.len() > 2 {
+            return Err("usage: nfspoly(N) or nfspoly(N, degree)".into());
+        }
+        let n = big_of(&self.eval(&args[0])?, "nfspoly")?;
+        if n < BigInt::from(1000) {
+            return Err("nfspoly: N must be 1000 or more".into());
+        }
+        let list = if args.len() == 2 {
+            let d = self.small_arg(&args[1], "nfspoly", 2.0, 8.0)? as usize;
+            gnfs::base_m_search(&n, d, 40)
+                .into_iter()
+                .take(5)
+                .collect::<Vec<_>>()
+        } else {
+            gnfs::choices(&n, 40)
+        };
+        let mut md = vec![
+            "| score | norm bits | alpha | f(x) | m | how |".to_string(),
+            "|---|---|---|---|---|---|".into(),
+        ];
+        let mut tx = vec![];
+        let mut formulas = vec![];
+        for c in &list {
+            let fs = crate::algfactor::show_zpoly(&c.f, "x");
+            md.push(format!(
+                "| {:.1} | {:.1} | {:.2} | ${}$ | {} | {} |",
+                c.score(),
+                c.norm_bits,
+                c.alpha,
+                fs,
+                c.m,
+                c.how
+            ));
+            tx.push(format!(
+                "{:>6.1}  f(x) = {}, m = {}  [{}]",
+                c.score(),
+                fs,
+                c.m,
+                c.how
+            ));
+            formulas.push(Expr::Matrix(vec![
+                c.f.iter().map(|x| bnum(x.clone())).collect(),
+            ]));
+        }
+        let note = "score = estimated bits of the rational plus algebraic norm over a typical sieve region, plus Murphy's alpha (in bits); lower sieves faster".to_string();
+        md.push(String::new());
+        md.push(note.clone());
+        tx.push(note);
+        Ok(report(
+            "NFS polynomials",
+            tx.join("\n"),
+            md.join("\n"),
+            formulas,
+            vec![],
+        ))
     }
 
     fn labrun(&mut self, args: &[Node]) -> R<Expr> {
@@ -165,16 +335,32 @@ impl Session {
         if n < BigInt::from(4) {
             return Err("labrun: N must be 4 or more".into());
         }
-        let secs = if args.len() == 3 { self.small_arg(&args[2], "labrun", 0.001, 36000.0)? } else { 5.0 };
+        let secs = if args.len() == 3 {
+            self.small_arg(&args[2], "labrun", 0.001, 36000.0)?
+        } else {
+            5.0
+        };
         let (f, w, t) = self.run_one(&m, &n, secs, 1);
         let label = m.label();
         match f {
             Some(f) => {
-                let text = format!("{} found {} in {} work units ({})", label, f, fmt_units(w), fmt_secs(t));
+                let text = format!(
+                    "{} found {} in {} work units ({})",
+                    label,
+                    f,
+                    fmt_units(w),
+                    fmt_secs(t)
+                );
                 Ok(report("LabRun", text.clone(), text, vec![bnum(f)], vec![]))
             }
             None => {
-                let text = format!("{} found no factor of {} in {} work units ({})", label, n, fmt_units(w), fmt_secs(t));
+                let text = format!(
+                    "{} found no factor of {} in {} work units ({})",
+                    label,
+                    n,
+                    fmt_units(w),
+                    fmt_secs(t)
+                );
                 Ok(report("LabRun", text.clone(), text, vec![], vec![]))
             }
         }
@@ -198,14 +384,28 @@ impl Session {
             };
             xs.iter()
                 .map(|x| {
-                    x.num().and_then(|n| n.as_int()).filter(|d| (6..=300).contains(d)).map(|d| d as u32).ok_or_else(|| "scoreboard: digits are whole numbers from 6 to 300".to_string())
+                    x.num()
+                        .and_then(|n| n.as_int())
+                        .filter(|d| (6..=300).contains(d))
+                        .map(|d| d as u32)
+                        .ok_or_else(|| {
+                            "scoreboard: digits are whole numbers from 6 to 300".to_string()
+                        })
                 })
                 .collect::<R<_>>()?
         } else {
             (12..=40).step_by(4).collect()
         };
-        let trials = if args.len() >= 3 { self.small_arg(&args[2], "scoreboard", 1.0, 100.0)? as usize } else { 3 };
-        let secs = if args.len() >= 4 { self.small_arg(&args[3], "scoreboard", 0.001, 3600.0)? } else { 1.0 };
+        let trials = if args.len() >= 3 {
+            self.small_arg(&args[2], "scoreboard", 1.0, 100.0)? as usize
+        } else {
+            3
+        };
+        let secs = if args.len() >= 4 {
+            self.small_arg(&args[3], "scoreboard", 0.001, 3600.0)?
+        } else {
+            1.0
+        };
         let timed = lab::has_clock();
         let mut text = String::new();
         let mut md = String::new();
@@ -216,13 +416,21 @@ impl Session {
             trials - 1,
             if timed { fmt_secs(Some(secs)) } else { format!("{} work units", fmt_units(secs * UNITS_PER_SECOND)) }
         ));
-        md.push_str("| method | digits | solved | median work | median time |\n|---|---|---|---|---|\n");
+        md.push_str(
+            "| method | digits | solved | median work | median time |\n|---|---|---|---|---|\n",
+        );
         let mut fits_md = String::new();
         for m in &methods {
             let label = m.label();
             let mut runs: Vec<Run> = vec![];
             for &d in &digits {
-                let mut run = Run { digits: d, solved: 0, trials, work: vec![], secs: vec![] };
+                let mut run = Run {
+                    digits: d,
+                    solved: 0,
+                    trials,
+                    work: vec![],
+                    secs: vec![],
+                };
                 for seed in 0..trials as u64 {
                     let (n, _, _) = lab::semiprime(d, seed);
                     let (f, w, t) = self.run_one(m, &n, secs, seed);
@@ -243,8 +451,16 @@ impl Session {
             let mut rows = vec![];
             let mut pts = vec![];
             for r in &mut runs {
-                let mw = if r.work.is_empty() { None } else { Some(median(&mut r.work)) };
-                let ms = if r.secs.is_empty() { None } else { Some(median(&mut r.secs)) };
+                let mw = if r.work.is_empty() {
+                    None
+                } else {
+                    Some(median(&mut r.work))
+                };
+                let ms = if r.secs.is_empty() {
+                    None
+                } else {
+                    Some(median(&mut r.secs))
+                };
                 md.push_str(&format!(
                     "| `{}` | {} | {}/{} | {} | {} |\n",
                     label,
@@ -252,26 +468,47 @@ impl Session {
                     r.solved,
                     r.trials,
                     mw.map_or("-".into(), fmt_units),
-                    if mw.is_some() { fmt_secs(ms) } else { "-".into() }
+                    if mw.is_some() {
+                        fmt_secs(ms)
+                    } else {
+                        "-".into()
+                    }
                 ));
-                text.push_str(&format!("{:>24} {:>4} digits  {}/{}  work {:>8}  time {}\n", label, r.digits, r.solved, r.trials, mw.map_or("-".into(), fmt_units), fmt_secs(ms)));
+                text.push_str(&format!(
+                    "{:>24} {:>4} digits  {}/{}  work {:>8}  time {}\n",
+                    label,
+                    r.digits,
+                    r.solved,
+                    r.trials,
+                    mw.map_or("-".into(), fmt_units),
+                    fmt_secs(ms)
+                ));
                 let cost = if timed { ms } else { mw };
                 if 2 * r.solved >= r.trials {
                     if let Some(c) = cost {
                         pts.push((r.digits as f64, c));
                     }
                 }
-                rows.push(vec![Expr::int(r.digits as i128), Expr::int(r.solved as i128), cost.map_or(Expr::int(0), Expr::float)]);
+                rows.push(vec![
+                    Expr::int(r.digits as i128),
+                    Expr::int(r.solved as i128),
+                    cost.map_or(Expr::int(0), Expr::float),
+                ]);
             }
             formulas.push(Expr::Matrix(rows));
             names.push(label.clone());
             // fits: sizes that cost under 1/1000 of the largest measure fixed overhead, not growth
             let top = pts.iter().map(|p| p.1).fold(0.0, f64::max);
             pts.retain(|p| p.1 >= top / 1000.0);
-            let fits: Vec<(usize, (f64, f64, f64))> = (0..3).filter_map(|k| lab::fit(k, &pts).map(|f| (k, f))).collect();
+            let fits: Vec<(usize, (f64, f64, f64))> = (0..3)
+                .filter_map(|k| lab::fit(k, &pts).map(|f| (k, f)))
+                .collect();
             if pts.len() >= 3 {
-                let best = fits.iter().min_by(|a, b| a.1 .2.partial_cmp(&b.1 .2).unwrap()).unwrap();
-                let a = fits[0].1 .1;
+                let best = fits
+                    .iter()
+                    .min_by(|a, b| a.1.2.partial_cmp(&b.1.2).unwrap())
+                    .unwrap();
+                let a = fits[0].1.1;
                 fits_md.push_str(&format!(
                     "- `{}`: cost grows like N^{:.3} (fit on {} sizes); L(1/2) constant {:.2}, L(1/3) constant {:.2}; best fit: {}{}\n",
                     label,
@@ -283,7 +520,10 @@ impl Session {
                     if pts.len() < 5 { " (few sizes: the models are hard to tell apart)" } else { "" }
                 ));
             } else {
-                fits_md.push_str(&format!("- `{}`: solved too few sizes to fit a curve\n", label));
+                fits_md.push_str(&format!(
+                    "- `{}`: solved too few sizes to fit a curve\n",
+                    label
+                ));
             }
         }
         md.push_str("\n**How the cost grows** (");
@@ -297,17 +537,27 @@ impl Session {
 
     fn scoreplot(&mut self, args: &[Node]) -> R<Expr> {
         if args.is_empty() {
-            return Err("usage: scoreplot(s) or scoreplot(s1, s2, ...) with results of scoreboard".into());
+            return Err(
+                "usage: scoreplot(s) or scoreplot(s1, s2, ...) with results of scoreboard".into(),
+            );
         }
         let mut series: Vec<Series> = vec![];
         let mut first: Option<(f64, f64)> = None;
         let mut dmax: f64 = 0.0;
         let (mut ymin, mut ymax) = (f64::INFINITY, f64::NEG_INFINITY);
-        let unit = if lab::has_clock() { "seconds" } else { "work units" };
+        let unit = if lab::has_clock() {
+            "seconds"
+        } else {
+            "work units"
+        };
         for a in args {
             let v = self.eval(a)?;
-            let Expr::Obj(o) = &v else { return Err("scoreplot takes results of scoreboard".into()) };
-            let Obj::Report(r) = &**o else { return Err("scoreplot takes results of scoreboard".into()) };
+            let Expr::Obj(o) = &v else {
+                return Err("scoreplot takes results of scoreboard".into());
+            };
+            let Obj::Report(r) = &**o else {
+                return Err("scoreplot takes results of scoreboard".into());
+            };
             if r.kind != "Scoreboard" {
                 return Err("scoreplot takes results of scoreboard".into());
             }
@@ -330,7 +580,12 @@ impl Session {
                 }
                 ymin = ymin.min(pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min));
                 ymax = ymax.max(pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max));
-                series.push(Series { label: name.clone(), points: pts, markers: true, errors: vec![] });
+                series.push(Series {
+                    label: name.clone(),
+                    points: pts,
+                    markers: true,
+                    errors: vec![],
+                });
             }
         }
         // reference curves through the first point (the fitted laws are in the scoreboard table)
@@ -339,16 +594,31 @@ impl Session {
             let refs: [(&str, Box<dyn Fn(f64) -> f64>); 4] = [
                 ("N^(1/2) (trial division)", Box::new(|d: f64| 0.5 * d)),
                 ("N^(1/4) (rho)", Box::new(|d: f64| 0.25 * d)),
-                ("L(1/2, 1) (quadratic sieve)", Box::new(|d: f64| lab::model_x(1, d) / std::f64::consts::LN_10)),
-                ("L(1/3, 1.92) (number field sieve)", Box::new(|d: f64| 1.923 * lab::model_x(2, d) / std::f64::consts::LN_10)),
+                (
+                    "L(1/2, 1) (quadratic sieve)",
+                    Box::new(|d: f64| lab::model_x(1, d) / std::f64::consts::LN_10),
+                ),
+                (
+                    "L(1/3, 1.92) (number field sieve)",
+                    Box::new(|d: f64| 1.923 * lab::model_x(2, d) / std::f64::consts::LN_10),
+                ),
             ];
             for (name, g) in refs.iter() {
                 // only the part inside the range of the data, so the data stays readable
-                let pts: Vec<(f64, f64)> = crate::plot::steps(d0, d1, 80).into_iter().map(|d| (d, l0 + g(d) - g(d0))).filter(|p| p.1 <= ymax + 1.0 && p.1 >= ymin - 1.0).collect();
+                let pts: Vec<(f64, f64)> = crate::plot::steps(d0, d1, 80)
+                    .into_iter()
+                    .map(|d| (d, l0 + g(d) - g(d0)))
+                    .filter(|p| p.1 <= ymax + 1.0 && p.1 >= ymin - 1.0)
+                    .collect();
                 if pts.len() < 2 {
                     continue;
                 }
-                series.push(Series { label: format!("reference {}", name), points: pts, markers: false, errors: vec![] });
+                series.push(Series {
+                    label: format!("reference {}", name),
+                    points: pts,
+                    markers: false,
+                    errors: vec![],
+                });
             }
         }
         if series.is_empty() {
@@ -363,16 +633,29 @@ impl Session {
         if args.len() > 4 {
             return Err("usage: algosearch(seconds, mode, seed, digits) with mode \"evolve\", \"random\" or \"exhaustive\" and digits the training sizes, e.g. [24 28 32]".into());
         }
-        let secs = if !args.is_empty() { self.small_arg(&args[0], "algosearch", 0.1, 36000.0)? } else { 5.0 };
+        let secs = if !args.is_empty() {
+            self.small_arg(&args[0], "algosearch", 0.1, 36000.0)?
+        } else {
+            5.0
+        };
         let mode = if args.len() >= 2 {
             match self.eval(&args[1])? {
                 Expr::Str(s) if ["evolve", "random", "exhaustive"].contains(&s.as_str()) => s,
-                o => return Err(format!("algosearch: mode is \"evolve\", \"random\" or \"exhaustive\", got {}", show(&o))),
+                o => {
+                    return Err(format!(
+                        "algosearch: mode is \"evolve\", \"random\" or \"exhaustive\", got {}",
+                        show(&o)
+                    ));
+                }
             }
         } else {
             "evolve".to_string()
         };
-        let seed = if args.len() >= 3 { self.small_arg(&args[2], "algosearch", 0.0, 1e15)? as u64 } else { 1 };
+        let seed = if args.len() >= 3 {
+            self.small_arg(&args[2], "algosearch", 0.0, 1e15)? as u64
+        } else {
+            1
+        };
         let sizes: Vec<u32> = if args.len() == 4 {
             let v = self.eval(&args[3])?;
             let xs: Vec<Expr> = match v {
@@ -380,7 +663,16 @@ impl Session {
                 o => vec![o],
             };
             xs.iter()
-                .map(|x| x.num().and_then(|n| n.as_int()).filter(|d| (10..=60).contains(d)).map(|d| d as u32).ok_or_else(|| "algosearch: training digits are whole numbers from 10 to 60".to_string()))
+                .map(|x| {
+                    x.num()
+                        .and_then(|n| n.as_int())
+                        .filter(|d| (10..=60).contains(d))
+                        .map(|d| d as u32)
+                        .ok_or_else(|| {
+                            "algosearch: training digits are whole numbers from 10 to 60"
+                                .to_string()
+                        })
+                })
                 .collect::<R<_>>()?
         } else {
             ls::TRAIN.to_vec()
@@ -400,9 +692,17 @@ impl Session {
                 None => format!("{} work units", fmt_units(r.units)),
             },
             r.train_count,
-            r.train_sizes.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
+            r.train_sizes
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
             r.test_count,
-            r.test_sizes.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
+            r.test_sizes
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
         );
         if r.seeded {
             md.push_str("On numbers this big random programs almost never solve anything, so the first population also holds the classics.\n\n");
@@ -413,11 +713,27 @@ impl Session {
         let row = |name: &str, e: &ls::Entry, md: &mut String, text: &mut String| {
             let train = ls::speedup(&e.score, &rho.score);
             let (held, held_solved, p) = match &e.test {
-                Some(t) => (format!("{:.2}x less", ls::speedup(t, &r.rho_test)), format!("{}/{}", t.solved, t.total), pval(ls::paired(t, &r.rho_test).1)),
+                Some(t) => (
+                    format!("{:.2}x less", ls::speedup(t, &r.rho_test)),
+                    format!("{}/{}", t.solved, t.total),
+                    pval(ls::paired(t, &r.rho_test).1),
+                ),
                 None => ("-".into(), "-".into(), "-".into()),
             };
-            md.push_str(&format!("| {}`{}` | {}/{} | {:.2}x less | {} | {} | {} |\n", name, e.prog, e.score.solved, e.score.total, train, held_solved, held, p));
-            text.push_str(&format!("{:<60} train {}/{} {:.2}x  held out {} {} p={}\n", e.prog.to_string(), e.score.solved, e.score.total, train, held_solved, held, p));
+            md.push_str(&format!(
+                "| {}`{}` | {}/{} | {:.2}x less | {} | {} | {} |\n",
+                name, e.prog, e.score.solved, e.score.total, train, held_solved, held, p
+            ));
+            text.push_str(&format!(
+                "{:<60} train {}/{} {:.2}x  held out {} {} p={}\n",
+                e.prog.to_string(),
+                e.score.solved,
+                e.score.total,
+                train,
+                held_solved,
+                held,
+                p
+            ));
         };
         for e in r.best.iter().take(8) {
             row("", e, &mut md, &mut text);
@@ -425,9 +741,24 @@ impl Session {
         }
         md.push_str("\nFor comparison, the classics on the same training set:\n\n| classic | program | solved | work vs rho |\n|---|---|---|---|\n");
         for (name, e) in &r.classics {
-            md.push_str(&format!("| {} | `{}` | {}/{} | {:.2}x less |\n", name, e.prog, e.score.solved, e.score.total, ls::speedup(&e.score, &rho.score)));
+            md.push_str(&format!(
+                "| {} | `{}` | {}/{} | {:.2}x less |\n",
+                name,
+                e.prog,
+                e.score.solved,
+                e.score.total,
+                ls::speedup(&e.score, &rho.score)
+            ));
         }
-        let best_held = r.best.iter().filter_map(|e| e.test.as_ref().map(|t| (e, ls::speedup(t, &r.rho_test), ls::paired(t, &r.rho_test).1))).max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let best_held = r
+            .best
+            .iter()
+            .filter_map(|e| {
+                e.test
+                    .as_ref()
+                    .map(|t| (e, ls::speedup(t, &r.rho_test), ls::paired(t, &r.rho_test).1))
+            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         md.push_str("\n**Verdict**: ");
         md.push_str(&match best_held {
             Some((e, s, p)) if s > 1.0 && p * 5.0 < 0.05 => format!("`{}` needs {:.2}x less work than rho on held-out numbers (p = {}, still significant after testing 5 programs). Check it at larger sizes with scoreboard before believing it.", e.prog, s, pval(p)),
@@ -460,8 +791,18 @@ impl Session {
                 Some((x, p)) => (format!("{:.2}x less work", x), pval(p)),
                 None => ("-".into(), "-".into()),
             };
-            md.push_str(&format!("| {} | `{}` | {} | {:.1} | {} | {} | {} |\n", k, e.prog, e.sizes, e.score.score, held, p, e.found_by));
-            text.push_str(&format!("{:>2} {:<60} {:.1} {} p={}\n", k, e.prog.to_string(), e.score.score, held, p));
+            md.push_str(&format!(
+                "| {} | `{}` | {} | {:.1} | {} | {} | {} |\n",
+                k, e.prog, e.sizes, e.score.score, held, p, e.found_by
+            ));
+            text.push_str(&format!(
+                "{:>2} {:<60} {:.1} {} p={}\n",
+                k,
+                e.prog.to_string(),
+                e.score.score,
+                held,
+                p
+            ));
             formulas.push(Expr::Str(e.prog.to_string()));
         }
         Ok(report("Leaderboard", text, md, formulas, vec![]))
@@ -471,9 +812,21 @@ impl Session {
         if args.len() > 3 {
             return Err("usage: leakhunt(digits, samples, seed)".into());
         }
-        let digits = if !args.is_empty() { self.small_arg(&args[0], "leakhunt", 5.0, 36.0)? as u32 } else { 16 };
-        let samples = if args.len() >= 2 { self.small_arg(&args[1], "leakhunt", 100.0, 1e6)? as usize } else { 4000 };
-        let seed = if args.len() == 3 { self.small_arg(&args[2], "leakhunt", 0.0, 1e15)? as u64 } else { 1 };
+        let digits = if !args.is_empty() {
+            self.small_arg(&args[0], "leakhunt", 5.0, 36.0)? as u32
+        } else {
+            16
+        };
+        let samples = if args.len() >= 2 {
+            self.small_arg(&args[1], "leakhunt", 100.0, 1e6)? as usize
+        } else {
+            4000
+        };
+        let seed = if args.len() == 3 {
+            self.small_arg(&args[2], "leakhunt", 0.0, 1e15)? as u64
+        } else {
+            1
+        };
         lab::start_budget(1e12, f64::INFINITY);
         let h = lableak::hunt(digits, samples, seed);
         lab::end_budget();
@@ -523,10 +876,18 @@ impl Session {
                 h.digits
             ));
         }
-        let extra: Vec<&lableak::Hit> = h.hits.iter().filter(|x| x.q_bh < 0.05 && !lableak::TARGETS[x.target].1).collect();
+        let extra: Vec<&lableak::Hit> = h
+            .hits
+            .iter()
+            .filter(|x| x.q_bh < 0.05 && !lableak::TARGETS[x.target].1)
+            .collect();
         md.push_str("\n**Verdict**: ");
         let real: Vec<&&lableak::Hit> = extra.iter().filter(|x| x.p_test < 0.01).collect();
-        let nb: Vec<usize> = (0..lableak::TARGETS.len()).filter(|&t| !lableak::TARGETS[t].1 && h.predict[t].p < 0.05 / lableak::TARGETS.len() as f64).collect();
+        let nb: Vec<usize> = (0..lableak::TARGETS.len())
+            .filter(|&t| {
+                !lableak::TARGETS[t].1 && h.predict[t].p < 0.05 / lableak::TARGETS.len() as f64
+            })
+            .collect();
         if real.is_empty() && nb.is_empty() {
             md.push_str(&format!(
                 "no feature predicts any property of p alone better than chance after correcting for {} tests, and combining all features does not either. The controls do show up, so the test would have seen a leak of that strength.",
@@ -565,11 +926,27 @@ mod tests {
         let out = s.run_to_string("labrun(\"rho\", semiprime(20, 3))");
         assert!(out.contains("found"), "{}", out);
         let out = s.run_to_string("myf(n) := pollard(n); sb = scoreboard([\"rho\" \"myf\" \"iter(x^2 + 3, x - y, 2)\"], 10:2:14, 2, 1)");
-        assert!(out.contains("rho") && out.contains("myf") && !out.contains("rror:"), "{}", out);
+        assert!(
+            out.contains("rho") && out.contains("myf") && !out.contains("rror:"),
+            "{}",
+            out
+        );
         let out = s.run_to_string("scoreplot(sb)");
         assert!(!out.contains("rror:"), "{}", out);
+        let out = s.run_to_string("gnfs(semiprime(22, 5))");
+        assert!(out.contains("gcd(X - Y, N)"), "{}", out);
+        let out = s.run_to_string("nfspoly(2^128 + 1)");
+        assert!(out.contains("special form"), "{}", out);
+        let out = s.run_to_string("gnfs(2^128 + 1, x^3 + 2, 2^43)");
+        assert!(out.contains("gcd(X - Y, N)"), "{}", out);
+        let out = s.run_to_string("gnfs(2^78 + 1, x^4 + 4, 2^20)");
+        assert!(out.contains("factors over the integers"), "{}", out);
         let out = s.run_to_string("r = algosearch(3); leaderboard()");
-        assert!(out.contains("iter(") || out.contains("rel(") || out.contains("grp("), "{}", out);
+        assert!(
+            out.contains("iter(") || out.contains("rel(") || out.contains("grp("),
+            "{}",
+            out
+        );
         let out = s.run_to_string("leakhunt(10, 400)");
         assert!(out.contains("control"), "{}", out);
     }

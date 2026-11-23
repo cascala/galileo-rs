@@ -6,9 +6,10 @@ use crate::num::Number;
 use Expr::*;
 
 const GREEK: [&str; 34] = [
-    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu", "nu", "xi",
-    "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi",
-    "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
+    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+    "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi",
+    "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi",
+    "Omega",
 ];
 
 fn base_name(b: &str) -> String {
@@ -31,7 +32,11 @@ pub fn name(n: &str) -> String {
     };
     let mut s = base_name(base);
     if !sub.is_empty() {
-        let sb = if GREEK.contains(&sub) { format!("\\{}", sub) } else { sub.to_string() };
+        let sb = if GREEK.contains(&sub) {
+            format!("\\{}", sub)
+        } else {
+            sub.to_string()
+        };
         s = format!("{}_{{{}}}", s, sb);
     }
     match primes {
@@ -102,14 +107,21 @@ const P_POW: u8 = 3;
 const P_ATOM: u8 = 4;
 
 fn wrap(s: (String, u8), min: u8) -> String {
-    if s.1 < min { format!("\\left({}\\right)", s.0) } else { s.0 }
+    if s.1 < min {
+        format!("\\left({}\\right)", s.0)
+    } else {
+        s.0
+    }
 }
 
 pub fn latex(e: &Expr) -> String {
     match e {
         Matrix(rows) => format!(
             "\\begin{{pmatrix}} {} \\end{{pmatrix}}",
-            rows.iter().map(|r| r.iter().map(latex).collect::<Vec<_>>().join(" & ")).collect::<Vec<_>>().join(" \\\\ ")
+            rows.iter()
+                .map(|r| r.iter().map(latex).collect::<Vec<_>>().join(" & "))
+                .collect::<Vec<_>>()
+                .join(" \\\\ ")
         ),
         _ => fmt(e).0,
     }
@@ -136,7 +148,16 @@ fn func_name(f: Func) -> &'static str {
 
 fn fmt(e: &Expr) -> (String, u8) {
     match e {
-        Num(n) => (number(n.clone()), if n.is_negative() { P_ADD } else if n.is_integer() { P_ATOM } else { P_MUL }),
+        Num(n) => (
+            number(n.clone()),
+            if n.is_negative() {
+                P_ADD
+            } else if n.is_integer() {
+                P_ATOM
+            } else {
+                P_MUL
+            },
+        ),
         Sym(s) => (name(s), P_ATOM),
         Const(Const::Pi) => ("\\pi".into(), P_ATOM),
         Const(Const::E) => ("e".into(), P_ATOM),
@@ -145,11 +166,20 @@ fn fmt(e: &Expr) -> (String, u8) {
         Str(s) => (format!("\\text{{{}}}", s), P_ATOM),
         Obj(_) | Matrix(_) => (latex(e), P_ATOM),
         Func(Func::Abs, a) => (format!("\\left|{}\\right|", fmt(a).0), P_ATOM),
-        Func(f, a) => (format!("{}\\left({}\\right)", func_name(*f), fmt(a).0), P_ATOM),
-        Apply(f, v) if f == "==" && v.len() == 2 => (format!("{} = {}", fmt(&v[0]).0, fmt(&v[1]).0), 0),
+        Func(f, a) => (
+            format!("{}\\left({}\\right)", func_name(*f), fmt(a).0),
+            P_ATOM,
+        ),
+        Apply(f, v) if f == "==" && v.len() == 2 => {
+            (format!("{} = {}", fmt(&v[0]).0, fmt(&v[1]).0), 0)
+        }
         Apply(f, v) => {
             let args = v.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", ");
-            let f = if f == "atan2" { "\\operatorname{atan2}".to_string() } else { apply_name(f) };
+            let f = if f == "atan2" {
+                "\\operatorname{atan2}".to_string()
+            } else {
+                apply_name(f)
+            };
             (format!("{}\\left({}\\right)", f, args), P_ATOM)
         }
         Add(terms) => {
@@ -161,12 +191,17 @@ fn fmt(e: &Expr) -> (String, u8) {
             } else {
                 // polynomials in one variable keep descending powers: -x^3/6 + x
                 let poly = terms.len() >= 3 && crate::extra_cmd::univariate_poly(e);
-                if let Some(k) = terms.iter().position(|t| !t.is_negative_term()).filter(|_| !poly) {
+                if let Some(k) = terms
+                    .iter()
+                    .position(|t| !t.is_negative_term())
+                    .filter(|_| !poly)
+                {
                     let t = terms.remove(k);
                     terms.insert(0, t);
                 }
                 // a + b*i: the imaginary part last
-                let (re, im): (Vec<Expr>, Vec<Expr>) = terms.into_iter().partition(|t| !crate::extra_cmd::has_i(t));
+                let (re, im): (Vec<Expr>, Vec<Expr>) =
+                    terms.into_iter().partition(|t| !crate::extra_cmd::has_i(t));
                 terms = re.into_iter().chain(im).collect();
             }
             let mut s = String::new();
@@ -202,7 +237,15 @@ fn fmt(e: &Expr) -> (String, u8) {
             // sin^2(x) rather than (sin(x))^2
             if let Func(f, a) = &**b {
                 if *f != Func::Abs {
-                    return (format!("{}^{{{}}}\\left({}\\right)", func_name(*f), fmt(x).0, fmt(a).0), P_ATOM);
+                    return (
+                        format!(
+                            "{}^{{{}}}\\left({}\\right)",
+                            func_name(*f),
+                            fmt(x).0,
+                            fmt(a).0
+                        ),
+                        P_ATOM,
+                    );
                 }
             }
             (format!("{}^{{{}}}", wrap(fmt(b), P_ATOM), fmt(x).0), P_POW)
@@ -221,14 +264,19 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
     for f in factors {
         match &f {
             Num(n) => coeff = coeff.mul(n),
-            Pow(b, x) if x.num().is_some_and(|n| n.is_negative()) => denom.push(pow((**b).clone(), Num(x.num().unwrap().neg()))),
+            Pow(b, x) if x.num().is_some_and(|n| n.is_negative()) => {
+                denom.push(pow((**b).clone(), Num(x.num().unwrap().neg())))
+            }
             _ => numer.push(f),
         }
     }
     let negative = coeff.is_negative();
     let coeff = coeff.abs();
     let (cn, cd) = match coeff {
-        Number::Rat(n, d) => (n.to_string(), if d == 1 { None } else { Some(d.to_string()) }),
+        Number::Rat(n, d) => (
+            n.to_string(),
+            if d == 1 { None } else { Some(d.to_string()) },
+        ),
         Number::Big(ref r) if r.is_integer() => (r.numer().to_string(), None),
         Number::Big(ref r) => (r.numer().to_string(), Some(r.denom().to_string())),
         Number::Float(_) => (number(coeff), None),
@@ -238,17 +286,29 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
         let n = fs.len();
         for f in fs {
             // a lone sum needs no parentheses in a numerator or denominator
-            parts.push(if n == 1 && parts.is_empty() { fmt(f).0 } else { wrap(fmt(f), P_POW) });
+            parts.push(if n == 1 && parts.is_empty() {
+                fmt(f).0
+            } else {
+                wrap(fmt(f), P_POW)
+            });
         }
         parts.join(" \\, ")
     };
-    let lead = if cn == "1" && !numer.is_empty() { None } else { Some(cn) };
+    let lead = if cn == "1" && !numer.is_empty() {
+        None
+    } else {
+        Some(cn)
+    };
     let mut s = if denom.is_empty() && cd.is_none() {
         let mut parts: Vec<String> = lead.into_iter().collect();
         parts.extend(numer.iter().map(|f| wrap(fmt(f), P_POW)));
         parts.join(" \\, ")
     } else {
-        let top = if numer.is_empty() { lead.unwrap_or("1".into()) } else { join(&numer, lead) };
+        let top = if numer.is_empty() {
+            lead.unwrap_or("1".into())
+        } else {
+            join(&numer, lead)
+        };
         let bottom = join(&denom, cd);
         format!("\\frac{{{}}}{{{}}}", top, bottom)
     };

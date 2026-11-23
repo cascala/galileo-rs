@@ -9,6 +9,14 @@ fn main() {
         start_budget(1e12, 120.0);
         let f = run_method(m, &n, seed);
         let u = end_budget();
-        println!("{} {} d={} ok={} units={:.0} t={:.3}", m, n, d, f.as_ref().map_or(false, |f| f == &p || f * &p == n), u, c.seconds().unwrap());
+        println!(
+            "{} {} d={} ok={} units={:.0} t={:.3}",
+            m,
+            n,
+            d,
+            f.as_ref().map_or(false, |f| f == &p || f * &p == n),
+            u,
+            c.seconds().unwrap()
+        );
     }
 }

@@ -5,14 +5,29 @@ use num_bigint::BigInt;
 #[test]
 fn class_numbers_and_composition() {
     // h(D) for some fundamental discriminants
-    for (d, h) in [(-3i64, 1usize), (-4, 1), (-23, 3), (-47, 5), (-71, 7), (-84, 4), (-163, 1), (-1564, 14)] {
+    for (d, h) in [
+        (-3i64, 1usize),
+        (-4, 1),
+        (-23, 3),
+        (-47, 5),
+        (-71, 7),
+        (-84, 4),
+        (-163, 1),
+        (-1564, 14),
+    ] {
         let fs = reduced_forms(d);
         assert_eq!(fs.len(), h, "h({})", d);
         for f in &fs {
             for g in &fs {
                 let c = f.compose(g);
                 assert_eq!(c.disc(), BigInt::from(d));
-                assert!(fs.contains(&c), "{} * {} = {} not reduced", f.text(), g.text(), c.text());
+                assert!(
+                    fs.contains(&c),
+                    "{} * {} = {} not reduced",
+                    f.text(),
+                    g.text(),
+                    c.text()
+                );
             }
             assert!(f.pow(&BigInt::from(h as u64)).is_identity());
         }

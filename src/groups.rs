@@ -14,7 +14,10 @@ use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 fn primes_upto(n: usize) -> Vec<u64> {
-    crate::numtheory::small::primes_upto(n).into_iter().map(|p| p as u64).collect()
+    crate::numtheory::small::primes_upto(n)
+        .into_iter()
+        .map(|p| p as u64)
+        .collect()
 }
 
 /// a small xorshift generator, so runs are repeatable
@@ -193,7 +196,9 @@ pub fn squfof(n: &BigInt) -> Option<(BigInt, u64, u64)> {
     if &(&r * &r) == n {
         return Some((r, 1, 0));
     }
-    const KS: [u64; 16] = [1, 3, 5, 7, 11, 15, 21, 33, 35, 55, 77, 105, 165, 231, 385, 1155];
+    const KS: [u64; 16] = [
+        1, 3, 5, 7, 11, 15, 21, 33, 35, 55, 77, 105, 165, 231, 385, 1155,
+    ];
     for &k in &KS {
         let kn = n * k;
         let s = kn.sqrt();
@@ -298,9 +303,17 @@ impl Form {
         }
     }
     pub fn identity(d: &BigInt) -> Form {
-        let b = if d.is_odd() { BigInt::one() } else { BigInt::zero() };
+        let b = if d.is_odd() {
+            BigInt::one()
+        } else {
+            BigInt::zero()
+        };
         let c = (&b * &b - d) / 4u32;
-        Form { a: BigInt::one(), b, c }
+        Form {
+            a: BigInt::one(),
+            b,
+            c,
+        }
     }
     pub fn is_identity(&self) -> bool {
         self.a.is_one()
@@ -312,7 +325,11 @@ impl Form {
     /// Gauss composition (Shanks / Cohen, Algorithm 5.4.7), then reduction
     pub fn compose(&self, other: &Form) -> Form {
         let d = self.disc();
-        let (f1, f2) = if self.a > other.a { (other, self) } else { (self, other) };
+        let (f1, f2) = if self.a > other.a {
+            (other, self)
+        } else {
+            (self, other)
+        };
         let (a1, b1) = (&f1.a, &f1.b);
         let (a2, b2, c2) = (&f2.a, &f2.b, &f2.c);
         let s: BigInt = (b1 + b2) / 2;
@@ -335,7 +352,12 @@ impl Form {
         let b3 = b2 + &v2 * &r * 2u32;
         let a3 = &v1 * &v2;
         let c3 = (&b3 * &b3 - &d) / (&a3 * 4u32);
-        Form { a: a3, b: b3, c: c3 }.reduce()
+        Form {
+            a: a3,
+            b: b3,
+            c: c3,
+        }
+        .reduce()
     }
     pub fn square(&self) -> Form {
         self.compose(self)
@@ -414,7 +436,10 @@ pub fn ambiguous_factor(f: &Form, n: &BigInt) -> Option<BigInt> {
 /// a prime form (p, b, c) of discriminant d: the smallest prime p with
 /// (d/p) = 1, b^2 = d mod 4p
 fn prime_form(d: &BigInt, start: u64) -> Option<Form> {
-    for p in primes_upto(100_000).into_iter().filter(|&p| p >= start && p > 2) {
+    for p in primes_upto(100_000)
+        .into_iter()
+        .filter(|&p| p >= start && p > 2)
+    {
         let pb = BigInt::from(p);
         let dm = d.mod_floor(&pb);
         if dm.is_zero() {
@@ -422,7 +447,9 @@ fn prime_form(d: &BigInt, start: u64) -> Option<Form> {
         }
         // brute force the square root mod p (p small)
         let dmu = dm.to_u64().unwrap();
-        let Some(r) = (1..p).find(|&x| x * x % p == dmu) else { continue };
+        let Some(r) = (1..p).find(|&x| x * x % p == dmu) else {
+            continue;
+        };
         let mut b = BigInt::from(r);
         // b must have the parity of d
         if (&b - d).is_odd() {
@@ -455,7 +482,9 @@ pub fn class_factor(n: &BigInt, b: u64, tries: u64) -> Option<(BigInt, u64, Form
     for k in [1u64, 3, 5, 7, 11, 13, 15, 17, 19, 21, 23] {
         let d = -(n * k * 4u32);
         for t in 0..tries {
-            let Some(f) = prime_form(&d, 3 + 10 * t) else { break };
+            let Some(f) = prime_form(&d, 3 + 10 * t) else {
+                break;
+            };
             let mut g = f.pow(&e);
             for _ in 0..steps {
                 if g.is_identity() {

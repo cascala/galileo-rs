@@ -24,7 +24,10 @@ fn report(s: &mut Session, src: &str) -> bool {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // deep expressions recurse deeply: give the engine a large stack
-    let worker = std::thread::Builder::new().stack_size(512 << 20).spawn(move || run(args)).expect("thread");
+    let worker = std::thread::Builder::new()
+        .stack_size(512 << 20)
+        .spawn(move || run(args))
+        .expect("thread");
     let code = worker.join().unwrap_or(1);
     std::process::exit(code);
 }
@@ -58,7 +61,10 @@ fn run(args: Vec<String>) -> i32 {
             let mut s = Session::new();
             let interactive = io::stdin().is_terminal();
             if interactive {
-                println!("Galileo {} (type help for commands, exit to quit)", env!("CARGO_PKG_VERSION"));
+                println!(
+                    "Galileo {} (type help for commands, exit to quit)",
+                    env!("CARGO_PKG_VERSION")
+                );
             }
             let stdin = io::stdin();
             loop {

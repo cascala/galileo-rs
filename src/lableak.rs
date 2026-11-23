@@ -145,7 +145,11 @@ fn beta_i(a: f64, b: f64, x: f64) -> f64 {
         }
         h
     };
-    if x < (a + 1.0) / (a + b + 2.0) { bt * cf(a, b, x) / a } else { 1.0 - bt * cf(b, a, 1.0 - x) / b }
+    if x < (a + 1.0) / (a + b + 2.0) {
+        bt * cf(a, b, x) / a
+    } else {
+        1.0 - bt * cf(b, a, 1.0 - x) / b
+    }
 }
 
 /// two-sided p-value of Student's t with dof degrees of freedom
@@ -169,7 +173,10 @@ pub fn chi2_table(xs: &[(usize, bool)], k: usize) -> (f64, f64) {
         t[c][b as usize] += 1.0;
     }
     let n = xs.len() as f64;
-    let col = [t.iter().map(|r| r[0]).sum::<f64>(), t.iter().map(|r| r[1]).sum::<f64>()];
+    let col = [
+        t.iter().map(|r| r[0]).sum::<f64>(),
+        t.iter().map(|r| r[1]).sum::<f64>(),
+    ];
     // merge sparse categories into one
     let mut rows: Vec<[f64; 2]> = vec![];
     let mut other = [0f64; 2];
@@ -296,7 +303,9 @@ impl Feature {
 pub fn feature_list(digits: u32) -> Vec<Feature> {
     let mut f = vec![];
     let mut add = |name: String, cats: usize| f.push(Feature { name, cats });
-    for m in [3u32, 4, 5, 7, 8, 9, 11, 12, 13, 16, 17, 19, 23, 24, 29, 30, 31, 32, 37, 64] {
+    for m in [
+        3u32, 4, 5, 7, 8, 9, 11, 12, 13, 16, 17, 19, 23, 24, 29, 30, 31, 32, 37, 64,
+    ] {
         add(format!("N mod {}", m), m as usize);
     }
     for a in [3, 5, 7, 11, 13, 17, 19, 23] {
@@ -319,7 +328,10 @@ pub fn feature_list(digits: u32) -> Vec<Feature> {
     add("CF of sqrt N: a2 mod 4".into(), 4);
     add("CF of sqrt N: a3 mod 4".into(), 4);
     add("CF of sqrt N: log2(largest of first 40 terms)".into(), 8);
-    add("CF of sqrt N: period length mod 4 (3 = longer than 4000)".into(), 5);
+    add(
+        "CF of sqrt N: period length mod 4 (3 = longer than 4000)".into(),
+        5,
+    );
     if digits <= 6 {
         add("class number h(-4N) mod 4".into(), 4);
         add("class number h(-4N) mod 8".into(), 8);
@@ -330,13 +342,20 @@ pub fn feature_list(digits: u32) -> Vec<Feature> {
 
 pub fn features(n: u128, digits: u32) -> Vec<usize> {
     let mut v = vec![];
-    for m in [3u128, 4, 5, 7, 8, 9, 11, 12, 13, 16, 17, 19, 23, 24, 29, 30, 31, 32, 37, 64] {
+    for m in [
+        3u128, 4, 5, 7, 8, 9, 11, 12, 13, 16, 17, 19, 23, 24, 29, 30, 31, 32, 37, 64,
+    ] {
         v.push((n % m) as usize);
     }
     for a in [3, 5, 7, 11, 13, 17, 19, 23] {
         v.push((jacobi(a, n) == 1) as usize);
     }
-    v.push((2..13).find(|&a| jacobi(a as i128, n) == -1).map_or(11, |a| a as usize - 2).min(11));
+    v.push(
+        (2..13)
+            .find(|&a| jacobi(a as i128, n) == -1)
+            .map_or(11, |a| a as usize - 2)
+            .min(11),
+    );
     let s = n.to_string();
     let dg: Vec<usize> = s.bytes().map(|b| (b - b'0') as usize).collect();
     v.push(dg[0]);
@@ -447,8 +466,15 @@ pub fn hunt(digits: u32, samples: usize, seed: u64) -> Result<Hunt, String> {
     let feats = feature_list(digits);
     let mut rows: Vec<(Vec<usize>, Vec<bool>)> = vec![];
     for k in 0..samples {
-        let (n, p, q) = lab::semiprime(digits, seed.wrapping_mul(1_000_033).wrapping_add(k as u64 + 17));
-        let (n, p, q) = (n.to_u128().unwrap(), p.to_u128().unwrap(), q.to_u128().unwrap());
+        let (n, p, q) = lab::semiprime(
+            digits,
+            seed.wrapping_mul(1_000_033).wrapping_add(k as u64 + 17),
+        );
+        let (n, p, q) = (
+            n.to_u128().unwrap(),
+            p.to_u128().unwrap(),
+            q.to_u128().unwrap(),
+        );
         rows.push((features(n, digits), targets(p, q)));
         if lab::spend(50.0) {
             return Err("leakhunt: out of time; use fewer samples".into());
@@ -491,7 +517,13 @@ pub fn hunt(digits: u32, samples: usize, seed: u64) -> Result<Hunt, String> {
         .map(|ix| {
             let (t, f, p) = all[ix];
             let xs: Vec<(usize, bool)> = test.iter().map(|r| (r.0[f], r.1[t])).collect();
-            Hit { target: t, feature: f, p_train: p, q_bh: q[ix], p_test: chi2_table(&xs, feats[f].cats).1 }
+            Hit {
+                target: t,
+                feature: f,
+                p_train: p,
+                q_bh: q[ix],
+                p_test: chi2_table(&xs, feats[f].cats).1,
+            }
         })
         .collect();
     // naive Bayes on all features
@@ -499,7 +531,8 @@ pub fn hunt(digits: u32, samples: usize, seed: u64) -> Result<Hunt, String> {
     for t in 0..TARGETS.len() {
         let pos = train.iter().filter(|r| r.1[t]).count() as f64;
         let neg = train.len() as f64 - pos;
-        let mut counts: Vec<Vec<[f64; 2]>> = feats.iter().map(|f| vec![[1.0, 1.0]; f.cats]).collect();
+        let mut counts: Vec<Vec<[f64; 2]>> =
+            feats.iter().map(|f| vec![[1.0, 1.0]; f.cats]).collect();
         for r in train {
             for (f, &c) in r.0.iter().enumerate() {
                 counts[f][c][r.1[t] as usize] += 1.0;
@@ -510,7 +543,8 @@ pub fn hunt(digits: u32, samples: usize, seed: u64) -> Result<Hunt, String> {
             let mut score = (pos / neg.max(1.0)).ln();
             for (f, &c) in r.0.iter().enumerate() {
                 let k = feats[f].cats as f64;
-                score += ((counts[f][c][1]) / (pos + k)).ln() - ((counts[f][c][0]) / (neg + k)).ln();
+                score +=
+                    ((counts[f][c][1]) / (pos + k)).ln() - ((counts[f][c][0]) / (neg + k)).ln();
             }
             if (score > 0.0) == r.1[t] {
                 right += 1;
@@ -521,9 +555,21 @@ pub fn hunt(digits: u32, samples: usize, seed: u64) -> Result<Hunt, String> {
         let acc = right as f64 / test.len() as f64;
         let k = right;
         let p = binom_tail(k, test.len(), baseline);
-        predict.push(Predict { target: t, accuracy: acc, baseline, p });
+        predict.push(Predict {
+            target: t,
+            accuracy: acc,
+            baseline,
+            p,
+        });
     }
-    Ok(Hunt { digits, samples, features: feats, tests: m, hits, predict })
+    Ok(Hunt {
+        digits,
+        samples,
+        features: feats,
+        tests: m,
+        hits,
+        predict,
+    })
 }
 
 #[cfg(test)]

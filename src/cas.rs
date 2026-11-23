@@ -103,7 +103,11 @@ pub fn poly_coeffs(e: &Expr, x: &str) -> Option<Vec<Expr>> {
 }
 
 fn from_coeffs(c: &[Expr], x: &Expr) -> Expr {
-    add(c.iter().enumerate().map(|(k, a)| mul2(a.clone(), pow(x.clone(), int(k as i128)))).collect())
+    add(c
+        .iter()
+        .enumerate()
+        .map(|(k, a)| mul2(a.clone(), pow(x.clone(), int(k as i128))))
+        .collect())
 }
 
 type Poly = Vec<Number>;
@@ -113,7 +117,9 @@ fn exact_poly(c: &[Expr]) -> Option<Poly> {
 }
 
 fn peval(p: &[Number], x: Number) -> Number {
-    p.iter().rev().fold(Number::zero(), |acc, c| acc.mul(&x).add(c))
+    p.iter()
+        .rev()
+        .fold(Number::zero(), |acc, c| acc.mul(&x).add(c))
 }
 
 fn ptrim(mut p: Poly) -> Poly {
@@ -215,7 +221,10 @@ fn rational_roots(p: &[Number]) -> (Vec<(Number, usize)>, Poly) {
             return (roots, p);
         }
     }
-    let ints: Vec<i128> = p.iter().map(|c| c.mul(Number::int(l)).as_int().unwrap_or(0)).collect();
+    let ints: Vec<i128> = p
+        .iter()
+        .map(|c| c.mul(Number::int(l)).as_int().unwrap_or(0))
+        .collect();
     let (a0, an) = (ints[0], *ints.last().unwrap());
     let mut cands: Vec<Number> = vec![];
     for q in divisors(an) {
@@ -251,11 +260,13 @@ fn numeric_roots(c: &[f64]) -> Vec<(f64, f64)> {
     let n = c.len() - 1;
     let lead = c[n];
     let a: Vec<f64> = c.iter().map(|v| v / lead).collect();
-    let mut z: Vec<(f64, f64)> = (0..n).map(|k| {
-        let t = 0.4 + 0.9 * k as f64;
-        let r = 1.0 + a.iter().map(|v| v.abs()).fold(0.0, f64::max);
-        (r * t.cos() * 0.5, r * t.sin() * 0.5)
-    }).collect();
+    let mut z: Vec<(f64, f64)> = (0..n)
+        .map(|k| {
+            let t = 0.4 + 0.9 * k as f64;
+            let r = 1.0 + a.iter().map(|v| v.abs()).fold(0.0, f64::max);
+            (r * t.cos() * 0.5, r * t.sin() * 0.5)
+        })
+        .collect();
     let cm = |a: (f64, f64), b: (f64, f64)| (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0);
     let cd = |a: (f64, f64), b: (f64, f64)| {
         let d = b.0 * b.0 + b.1 * b.1;
@@ -288,7 +299,12 @@ fn numeric_roots(c: &[f64]) -> Vec<(f64, f64)> {
             r.1 = 0.0;
         }
     }
-    z.sort_by(|a, b| (a.1 != 0.0).cmp(&(b.1 != 0.0)).then(a.0.partial_cmp(&b.0).unwrap()).then(a.1.partial_cmp(&b.1).unwrap()));
+    z.sort_by(|a, b| {
+        (a.1 != 0.0)
+            .cmp(&(b.1 != 0.0))
+            .then(a.0.partial_cmp(&b.0).unwrap())
+            .then(a.1.partial_cmp(&b.1).unwrap())
+    });
     z
 }
 
@@ -298,13 +314,18 @@ fn exact_gaussian_root(p: &[Number], r: (f64, f64)) -> Option<Expr> {
     let snap = |v: f64| -> Option<Number> {
         (1..=60i128).find_map(|d| {
             let n = (v * d as f64).round();
-            ((n / d as f64 - v).abs() < 1e-9 && n.abs() < 1e12).then(|| Number::rat(n as i128, d).unwrap())
+            ((n / d as f64 - v).abs() < 1e-9 && n.abs() < 1e12)
+                .then(|| Number::rat(n as i128, d).unwrap())
         })
     };
     let (a, b) = (snap(r.0)?, snap(r.1)?);
     let z = add2(Num(a), mul2(Num(b), Const(Const::I)));
     let x = Expr::sym("z__");
-    let poly = add(p.iter().enumerate().map(|(k, c)| mul2(Num(c.clone()), pow(x.clone(), int(k as i128)))).collect());
+    let poly = add(p
+        .iter()
+        .enumerate()
+        .map(|(k, c)| mul2(Num(c.clone()), pow(x.clone(), int(k as i128))))
+        .collect());
     let v = crate::calc::subst(&poly, "z__", &z);
     if v.is_zero() { Some(z) } else { None }
 }
@@ -318,7 +339,10 @@ fn complex_expr(r: (f64, f64)) -> Expr {
 }
 
 fn quadratic(a: &Expr, b: &Expr, c: &Expr) -> Vec<Expr> {
-    let disc = simplify(&sub(pow(b.clone(), int(2)), mul(vec![int(4), a.clone(), c.clone()])));
+    let disc = simplify(&sub(
+        pow(b.clone(), int(2)),
+        mul(vec![int(4), a.clone(), c.clone()]),
+    ));
     let two_a = mul2(int(2), a.clone());
     if is_zero(&disc) {
         return vec![tidy(&div(neg(b.clone()), two_a))];
@@ -335,7 +359,11 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
     let c: Vec<Expr> = c.iter().map(simplify).collect();
     let n = c.len() - 1;
     if n == 0 {
-        return Err(if is_zero(&c[0]) { "every value is a solution".into() } else { "no solution".into() });
+        return Err(if is_zero(&c[0]) {
+            "every value is a solution".into()
+        } else {
+            "no solution".into()
+        });
     }
     if let Some(p) = exact_poly(&c) {
         let (roots, rest) = rational_roots(&p);
@@ -343,7 +371,11 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
         match rest.len() {
             0 | 1 => {}
             2 => out.push(Num(rest[0].neg().div(&rest[1]).unwrap())),
-            3 => out.extend(quadratic(&Num(rest[2].clone()), &Num(rest[1].clone()), &Num(rest[0].clone()))),
+            3 => out.extend(quadratic(
+                &Num(rest[2].clone()),
+                &Num(rest[1].clone()),
+                &Num(rest[0].clone()),
+            )),
             _ => out.extend(
                 numeric_roots(&rest.iter().map(|v| v.to_f64()).collect::<Vec<_>>())
                     .into_iter()
@@ -360,7 +392,10 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
             if f.iter().all(|v| v.is_finite()) {
                 Ok(numeric_roots(&f).into_iter().map(complex_expr).collect())
             } else {
-                Err(format!("solve: can't solve a degree {} polynomial with symbolic coefficients", n))
+                Err(format!(
+                    "solve: can't solve a degree {} polynomial with symbolic coefficients",
+                    n
+                ))
             }
         }
     }
@@ -389,7 +424,9 @@ pub fn factor_poly(e: &Expr) -> Option<Expr> {
     for (r, m) in &roots {
         // (q x - p) for r = p/q
         let (pn, qd) = (r.numer().unwrap(), r.denom().unwrap());
-        lead = lead.div(Number::int(qd).pow(Number::int(*m as i128)).unwrap()).unwrap();
+        lead = lead
+            .div(Number::int(qd).pow(Number::int(*m as i128)).unwrap())
+            .unwrap();
         let lin = sub(mul2(int(qd), xv.clone()), int(pn));
         factors.push(pow(lin, int(*m as i128)));
     }
@@ -410,7 +447,12 @@ pub fn solve(f: &Expr, x: &str) -> R<Vec<Expr>> {
     let t = calc::together(f);
     let (n, d) = calc::num_den(&t);
     let c = poly_coeffs(&n, x).ok_or_else(|| {
-        format!("solve: {} is not a polynomial in {}; try fsolve(f, {}, guess) for a numeric root", crate::print::show(&n), x, x)
+        format!(
+            "solve: {} is not a polynomial in {}; try fsolve(f, {}, guess) for a numeric root",
+            crate::print::show(&n),
+            x,
+            x
+        )
     })?;
     let roots = poly_roots(&c)?;
     let mut out = vec![];
@@ -418,7 +460,10 @@ pub fn solve(f: &Expr, x: &str) -> R<Vec<Expr>> {
         if d.contains_sym(x) && is_zero(&subst(&d, x, &r)) {
             continue;
         }
-        if !out.iter().any(|o: &Expr| is_zero(&sub(o.clone(), r.clone()))) {
+        if !out
+            .iter()
+            .any(|o: &Expr| is_zero(&sub(o.clone(), r.clone())))
+        {
             out.push(r);
         }
     }
@@ -483,7 +528,11 @@ pub fn fsolve(f: &Expr, x: &str, x0: f64) -> R<f64> {
         }
     }
     let fv = numeric::run(&fc, &[xv]);
-    if fv.abs() < 1e-9 { Ok(xv) } else { Err("fsolve: no convergence; try another starting guess".into()) }
+    if fv.abs() < 1e-9 {
+        Ok(xv)
+    } else {
+        Err("fsolve: no convergence; try another starting guess".into())
+    }
 }
 
 // ---------- limits ----------
@@ -510,7 +559,11 @@ enum L {
 }
 
 pub fn infinity(sign: i32) -> Expr {
-    if sign > 0 { Expr::sym("inf") } else { neg(Expr::sym("inf")) }
+    if sign > 0 {
+        Expr::sym("inf")
+    } else {
+        neg(Expr::sym("inf"))
+    }
 }
 
 /// Values of e just next to the point (for signs), with other symbols absent
@@ -585,7 +638,13 @@ fn quotient(n: &Expr, d: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
             } else {
                 let s = sign_near(b, x, p).or_else(|| {
                     let v = numeric::value(b);
-                    if v > 0.0 { Some(1) } else if v < 0.0 { Some(-1) } else { None }
+                    if v > 0.0 {
+                        Some(1)
+                    } else if v < 0.0 {
+                        Some(-1)
+                    } else {
+                        None
+                    }
                 })?;
                 Some(signed_inf(inf_sign(&ln) * s))
             }
@@ -604,7 +663,9 @@ fn nd(e: &Expr) -> (Expr, Expr) {
     let (mut num, mut den) = (vec![], vec![d]);
     for f in fs {
         match &f {
-            Pow(b, p) if p.num().is_none() && p.is_negative_term() => den.push(pow((**b).clone(), neg((**p).clone()))),
+            Pow(b, p) if p.num().is_none() && p.is_negative_term() => {
+                den.push(pow((**b).clone(), neg((**p).clone())))
+            }
             _ => num.push(f),
         }
     }
@@ -717,8 +778,15 @@ fn lim(e: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
                     let (z, i) = (mul(zeros), mul(infs));
                     let has = |e: &Expr, pred: &dyn Fn(&Expr) -> bool| contains(e, pred);
                     let inf_on_top = has(&i, &|t| matches!(t, Func(Func::Log, _)))
-                        || has(&z, &|t| matches!(t, Pow(b, q) if !q.is_number() && **b == Const(Const::E)));
-                    let (top, bottom) = if inf_on_top { (i.clone(), z.clone()) } else { (z.clone(), i.clone()) };
+                        || has(
+                            &z,
+                            &|t| matches!(t, Pow(b, q) if !q.is_number() && **b == Const(Const::E)),
+                        );
+                    let (top, bottom) = if inf_on_top {
+                        (i.clone(), z.clone())
+                    } else {
+                        (z.clone(), i.clone())
+                    };
                     let q = quotient(&top, &pow(bottom.clone(), int(-1)), x, p, depth + 1)
                         .or_else(|| quotient(&bottom, &pow(top, int(-1)), x, p, depth + 1))?;
                     return Some(match q {
@@ -734,7 +802,11 @@ fn lim(e: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
                 }
                 if !infs.is_empty() {
                     let v = numeric::value(&rest);
-                    let s = if v.is_finite() { if v > 0.0 { 1 } else { -1 } } else { sign_near(&rest, x, p)? };
+                    let s = if v.is_finite() {
+                        if v > 0.0 { 1 } else { -1 }
+                    } else {
+                        sign_near(&rest, x, p)?
+                    };
                     return Some(signed_inf(sign * s));
                 }
                 return Some(L::F(rest));
@@ -744,7 +816,13 @@ fn lim(e: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
         Pow(b, q) if !q.contains_sym(x) => {
             let qn = q.num();
             if qn.as_ref().is_some_and(|v| v.is_negative()) {
-                return quotient(&Expr::one(), &pow((**b).clone(), neg((**q).clone())), x, p, depth);
+                return quotient(
+                    &Expr::one(),
+                    &pow((**b).clone(), neg((**q).clone())),
+                    x,
+                    p,
+                    depth,
+                );
             }
             match lim(b, x, p, depth + 1)? {
                 L::F(v) => Some(L::F(pow(v, (**q).clone()))),
@@ -754,13 +832,21 @@ fn lim(e: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
                     if !n.is_integer() {
                         return None;
                     }
-                    Some(if n.as_int().unwrap_or(0) % 2 == 0 { L::Inf } else { L::NInf })
+                    Some(if n.as_int().unwrap_or(0) % 2 == 0 {
+                        L::Inf
+                    } else {
+                        L::NInf
+                    })
                 }
             }
         }
         Pow(b, q) => {
             // b^q = e^(q log b)
-            let ex = if **b == Const(Const::E) { (**q).clone() } else { mul2((**q).clone(), func(Func::Log, (**b).clone())) };
+            let ex = if **b == Const(Const::E) {
+                (**q).clone()
+            } else {
+                mul2((**q).clone(), func(Func::Log, (**b).clone()))
+            };
             Some(match lim(&ex, x, p, depth + 1)? {
                 L::F(v) => L::F(exp(v)),
                 L::Inf => L::Inf,
@@ -775,12 +861,20 @@ fn lim(e: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
                         return Some(L::NInf);
                     }
                     if *f == Func::Tan && is_zero(&func(Func::Cos, v.clone())) {
-                        return quotient(&func(Func::Sin, (**u).clone()), &func(Func::Cos, (**u).clone()), x, p, depth);
+                        return quotient(
+                            &func(Func::Sin, (**u).clone()),
+                            &func(Func::Cos, (**u).clone()),
+                            x,
+                            p,
+                            depth,
+                        );
                     }
                     Some(L::F(func(*f, v)))
                 }
                 L::Inf => match f {
-                    Func::Log | Func::Sinh | Func::Cosh | Func::Asinh | Func::Acosh | Func::Abs => Some(L::Inf),
+                    Func::Log | Func::Sinh | Func::Cosh | Func::Asinh | Func::Acosh | Func::Abs => {
+                        Some(L::Inf)
+                    }
                     Func::Atan => Some(L::F(div(Const(Const::Pi), int(2)))),
                     Func::Tanh => Some(L::F(Expr::one())),
                     _ => None,
@@ -830,7 +924,11 @@ pub fn limit(e: &Expr, x: &str, p: &Point) -> R<Expr> {
                         L::Inf => "inf".into(),
                         L::NInf => "-inf".into(),
                     };
-                    return Err(format!("limit: the limit does not exist (from the left {}, from the right {}); use limit(f, x, a, left) or right", show(l), show(r)));
+                    return Err(format!(
+                        "limit: the limit does not exist (from the left {}, from the right {}); use limit(f, x, a, left) or right",
+                        show(l),
+                        show(r)
+                    ));
                 }
             }
             Err("limit: can't find the limit".into())
@@ -849,17 +947,32 @@ pub fn taylor(e: &Expr, x: &str, a: &Expr, n: usize) -> R<Expr> {
     for k in 0..=n {
         if k > 0 {
             d = simplify(&deriv(&d, x));
-            fact = fact.checked_mul(k as i128).ok_or("taylor: order too high")?;
+            fact = fact
+                .checked_mul(k as i128)
+                .ok_or("taylor: order too high")?;
         }
         let c = match subst_ok(&d, x, a) {
             Some(v) => v,
-            None => limit(&d, x, &Point::At(a.clone(), Side::Both))
-                .map_err(|_| format!("taylor: the function has no Taylor series at {} = {}", x, crate::print::show(a)))?,
+            None => limit(&d, x, &Point::At(a.clone(), Side::Both)).map_err(|_| {
+                format!(
+                    "taylor: the function has no Taylor series at {} = {}",
+                    x,
+                    crate::print::show(a)
+                )
+            })?,
         };
         if c.symbols().iter().any(|s| s == "inf") {
-            return Err(format!("taylor: the function has no Taylor series at {} = {}", x, crate::print::show(a)));
+            return Err(format!(
+                "taylor: the function has no Taylor series at {} = {}",
+                x,
+                crate::print::show(a)
+            ));
         }
-        terms.push(mul(vec![tidy(&c), pow(int(fact), int(-1)), pow(dx.clone(), int(k as i128))]));
+        terms.push(mul(vec![
+            tidy(&c),
+            pow(int(fact), int(-1)),
+            pow(dx.clone(), int(k as i128)),
+        ]));
     }
     Ok(add(terms))
 }
@@ -934,7 +1047,10 @@ fn table_func(f: Func, u: Expr) -> Option<Expr> {
         Func::Cosh => func(Func::Sinh, u),
         Func::Tanh => func(Func::Log, func(Func::Cosh, u)),
         Func::Log => sub(mul2(u.clone(), func(Func::Log, u.clone())), u),
-        Func::Atan => sub(mul2(u.clone(), func(Func::Atan, u.clone())), div(func(Func::Log, u2p1), int(2))),
+        Func::Atan => sub(
+            mul2(u.clone(), func(Func::Atan, u.clone())),
+            div(func(Func::Log, u2p1), int(2)),
+        ),
         Func::Asin => add2(mul2(u.clone(), func(Func::Asin, u.clone())), sqrt(one_m_u2)),
         Func::Acos => sub(mul2(u.clone(), func(Func::Acos, u.clone())), sqrt(one_m_u2)),
         Func::Asinh => sub(mul2(u.clone(), func(Func::Asinh, u.clone())), sqrt(u2p1)),
@@ -964,20 +1080,34 @@ fn table(e: &Expr, x: &str) -> Option<Expr> {
                 let (a, _) = linear(u, x)?;
                 let u = (**u).clone();
                 let r = match (f, n) {
-                    (Func::Sin, 2) => sub(div(u.clone(), int(2)), div(func(Func::Sin, mul2(int(2), u)), int(4))),
-                    (Func::Cos, 2) => add2(div(u.clone(), int(2)), div(func(Func::Sin, mul2(int(2), u)), int(4))),
+                    (Func::Sin, 2) => sub(
+                        div(u.clone(), int(2)),
+                        div(func(Func::Sin, mul2(int(2), u)), int(4)),
+                    ),
+                    (Func::Cos, 2) => add2(
+                        div(u.clone(), int(2)),
+                        div(func(Func::Sin, mul2(int(2), u)), int(4)),
+                    ),
                     (Func::Cos, -2) => func(Func::Tan, u),
                     (Func::Sin, -2) => neg(div(func(Func::Cos, u.clone()), func(Func::Sin, u))),
                     (Func::Cosh, -2) => func(Func::Tanh, u),
-                    (Func::Sinh, 2) => sub(div(func(Func::Sinh, mul2(int(2), u.clone())), int(4)), div(u, int(2))),
-                    (Func::Cosh, 2) => add2(div(func(Func::Sinh, mul2(int(2), u.clone())), int(4)), div(u, int(2))),
+                    (Func::Sinh, 2) => sub(
+                        div(func(Func::Sinh, mul2(int(2), u.clone())), int(4)),
+                        div(u, int(2)),
+                    ),
+                    (Func::Cosh, 2) => add2(
+                        div(func(Func::Sinh, mul2(int(2), u.clone())), int(4)),
+                        div(u, int(2)),
+                    ),
                     (Func::Tan, 2) => sub(func(Func::Tan, u.clone()), u),
                     _ => return None,
                 };
                 return Some(div(r, a));
             }
             // (c + s x^2)^(-1/2)
-            if p.num().is_some_and(|n| n.cmp_value(Number::rat(-1, 2).unwrap()).is_eq()) {
+            if p.num()
+                .is_some_and(|n| n.cmp_value(Number::rat(-1, 2).unwrap()).is_eq())
+            {
                 let c = poly_coeffs(b, x)?;
                 if c.len() == 3 && is_zero(&c[1]) {
                     let (c0, s) = (numeric::value(&c[0]), numeric::value(&c[2]));
@@ -1019,7 +1149,10 @@ fn rational(e: &Expr, x: &str) -> Option<Expr> {
     let mut out = vec![];
     for (k, c) in q.iter().enumerate() {
         if !c.is_zero() {
-            out.push(mul2(Num(c.div(Number::int(k as i128 + 1)).unwrap()), pow(xv.clone(), int(k as i128 + 1))));
+            out.push(mul2(
+                Num(c.div(Number::int(k as i128 + 1)).unwrap()),
+                pow(xv.clone(), int(k as i128 + 1)),
+            ));
         }
     }
     if r.iter().all(|c| c.is_zero()) {
@@ -1051,8 +1184,17 @@ fn rational(e: &Expr, x: &str) -> Option<Expr> {
     if basis.len() != deg {
         return None;
     }
-    let mat: Vec<Vec<Expr>> = (0..deg).map(|i| basis.iter().map(|b| Num(b.get(i).cloned().unwrap_or(Number::zero()))).collect()).collect();
-    let rhs: Vec<Vec<Expr>> = (0..deg).map(|i| vec![Num(r.get(i).cloned().unwrap_or(Number::zero()))]).collect();
+    let mat: Vec<Vec<Expr>> = (0..deg)
+        .map(|i| {
+            basis
+                .iter()
+                .map(|b| Num(b.get(i).cloned().unwrap_or(Number::zero())))
+                .collect()
+        })
+        .collect();
+    let rhs: Vec<Vec<Expr>> = (0..deg)
+        .map(|i| vec![Num(r.get(i).cloned().unwrap_or(Number::zero()))])
+        .collect();
     let sol = crate::linalg::solve(&mat, &rhs).ok()?;
     let coef: Vec<Expr> = sol.into_iter().map(|r| r[0].clone()).collect();
     let (mut bx, mut cx) = (Expr::zero(), Expr::zero());
@@ -1073,18 +1215,37 @@ fn rational(e: &Expr, x: &str) -> Option<Expr> {
     }
     if rest.len() == 3 {
         // (B x + C) / (a x^2 + b x + c)
-        let (a, b, c) = (Num(rest[2].clone()), Num(rest[1].clone()), Num(rest[0].clone()));
+        let (a, b, c) = (
+            Num(rest[2].clone()),
+            Num(rest[1].clone()),
+            Num(rest[0].clone()),
+        );
         let qx = from_coeffs(&[c.clone(), b.clone(), a.clone()], &xv);
-        out.push(mul2(div(bx.clone(), mul2(int(2), a.clone())), func(Func::Log, qx)));
+        out.push(mul2(
+            div(bx.clone(), mul2(int(2), a.clone())),
+            func(Func::Log, qx),
+        ));
         let k = sub(cx, div(mul2(bx, b.clone()), mul2(int(2), a.clone())));
-        let disc = rest[0].mul(&rest[2]).mul(Number::int(4)).sub(rest[1].mul(&rest[1]));
+        let disc = rest[0]
+            .mul(&rest[2])
+            .mul(Number::int(4))
+            .sub(rest[1].mul(&rest[1]));
         let lin = add2(mul2(mul2(int(2), a), xv.clone()), b);
         if disc.is_negative() {
             let s = sqrt(Num(disc.neg()));
-            out.push(mul(vec![k, pow(s.clone(), int(-1)), func(Func::Log, div(sub(lin.clone(), s.clone()), add2(lin, s)))]));
+            out.push(mul(vec![
+                k,
+                pow(s.clone(), int(-1)),
+                func(Func::Log, div(sub(lin.clone(), s.clone()), add2(lin, s))),
+            ]));
         } else {
             let s = sqrt(Num(disc));
-            out.push(mul(vec![k, int(2), pow(s.clone(), int(-1)), func(Func::Atan, div(lin, s))]));
+            out.push(mul(vec![
+                k,
+                int(2),
+                pow(s.clone(), int(-1)),
+                func(Func::Atan, div(lin, s)),
+            ]));
         }
     }
     Some(add(out))
@@ -1156,7 +1317,11 @@ fn substitution(e: &Expr, x: &str, depth: usize) -> Option<Expr> {
         let ratio = simplify(&div(e.clone(), du));
         let tv = Expr::sym(T);
         let g = replace(&ratio, &u, &tv);
-        let g = if g.contains_sym(x) { replace(&simplify(&calc::expand(&ratio)), &u, &tv) } else { g };
+        let g = if g.contains_sym(x) {
+            replace(&simplify(&calc::expand(&ratio)), &u, &tv)
+        } else {
+            g
+        };
         if g.contains_sym(x) {
             continue;
         }
@@ -1188,7 +1353,13 @@ fn parts(e: &Expr, x: &str, depth: usize) -> Option<Expr> {
     }
     let p = mul(polys);
     let g = &others[0];
-    let log_like = matches!(g, Func(Func::Log | Func::Atan | Func::Asin | Func::Acos | Func::Asinh, _));
+    let log_like = matches!(
+        g,
+        Func(
+            Func::Log | Func::Atan | Func::Asin | Func::Acos | Func::Asinh,
+            _
+        )
+    );
     if log_like {
         let pi = integ(&p, x, depth + 1)?;
         let rest = simplify(&mul2(pi.clone(), deriv(g, x)));
@@ -1197,7 +1368,11 @@ fn parts(e: &Expr, x: &str, depth: usize) -> Option<Expr> {
     } else {
         let gi = integ(g, x, depth + 1)?;
         let rest = calc::expand(&mul2(deriv(&p, x), gi.clone()));
-        let ri = if rest.is_zero() { Expr::zero() } else { integ(&rest, x, depth + 1)? };
+        let ri = if rest.is_zero() {
+            Expr::zero()
+        } else {
+            integ(&rest, x, depth + 1)?
+        };
         Some(sub(mul2(p, gi), ri))
     }
 }
@@ -1209,12 +1384,18 @@ fn exp_trig(ex: &Expr, tr: &Expr, x: &str) -> Option<Expr> {
         return None;
     }
     let (a, _) = linear(p, x)?;
-    let Func(f @ (Func::Sin | Func::Cos), u) = tr else { return None };
+    let Func(f @ (Func::Sin | Func::Cos), u) = tr else {
+        return None;
+    };
     let (b, _) = linear(u, x)?;
     let s = func(Func::Sin, (**u).clone());
     let c = func(Func::Cos, (**u).clone());
     let k = add2(pow(a.clone(), int(2)), pow(b.clone(), int(2)));
-    let inner = if *f == Func::Sin { sub(mul2(a, s), mul2(b, c)) } else { add2(mul2(a, c), mul2(b, s)) };
+    let inner = if *f == Func::Sin {
+        sub(mul2(a, s), mul2(b, c))
+    } else {
+        add2(mul2(a, c), mul2(b, s))
+    };
     Some(div(mul2(ex.clone(), inner), k))
 }
 
@@ -1243,7 +1424,8 @@ fn integ(e: &Expr, x: &str, depth: usize) -> Option<Expr> {
             }
         }
         Mul(fs) => {
-            let (c, v): (Vec<Expr>, Vec<Expr>) = fs.iter().cloned().partition(|f| !f.contains_sym(x));
+            let (c, v): (Vec<Expr>, Vec<Expr>) =
+                fs.iter().cloned().partition(|f| !f.contains_sym(x));
             if !c.is_empty() {
                 return integ(&mul(v), x, depth + 1).map(|r| mul2(mul(c), r));
             }
@@ -1313,14 +1495,31 @@ pub fn antiderivative(f: &Expr, x: &str) -> Option<Expr> {
 #[allow(clippy::excessive_precision)]
 pub fn quad(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> R<f64> {
     const XK: [f64; 8] = [
-        0.991455371120812639, 0.949107912342758525, 0.864864423359769073, 0.741531185599394440,
-        0.586087235467691130, 0.405845151377397167, 0.207784955007898468, 0.0,
+        0.991455371120812639,
+        0.949107912342758525,
+        0.864864423359769073,
+        0.741531185599394440,
+        0.586087235467691130,
+        0.405845151377397167,
+        0.207784955007898468,
+        0.0,
     ];
     const WK: [f64; 8] = [
-        0.022935322010529225, 0.063092092629978553, 0.104790010322250184, 0.140653259715525919,
-        0.169004726639267903, 0.190350578064785410, 0.204432940075298892, 0.209482141084727828,
+        0.022935322010529225,
+        0.063092092629978553,
+        0.104790010322250184,
+        0.140653259715525919,
+        0.169004726639267903,
+        0.190350578064785410,
+        0.204432940075298892,
+        0.209482141084727828,
     ];
-    const WG: [f64; 4] = [0.129484966168869693, 0.279705391489276668, 0.381830050505118945, 0.417959183673469388];
+    const WG: [f64; 4] = [
+        0.129484966168869693,
+        0.279705391489276668,
+        0.381830050505118945,
+        0.417959183673469388,
+    ];
     fn gk(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> (f64, f64) {
         let (c, h) = ((a + b) / 2.0, (b - a) / 2.0);
         let fc = f(c);
@@ -1335,7 +1534,14 @@ pub fn quad(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> R<f64> {
         }
         (k * h, ((k - g) * h).abs())
     }
-    fn rec(f: &dyn Fn(f64) -> f64, a: f64, b: f64, tol: f64, depth: usize, evals: &mut usize) -> R<f64> {
+    fn rec(
+        f: &dyn Fn(f64) -> f64,
+        a: f64,
+        b: f64,
+        tol: f64,
+        depth: usize,
+        evals: &mut usize,
+    ) -> R<f64> {
         let (v, err) = gk(f, a, b);
         *evals += 1;
         if !v.is_finite() {
@@ -1365,9 +1571,30 @@ pub fn nintegrate(f: &Expr, x: &str, a: f64, b: f64) -> R<f64> {
     }
     match (a.is_finite(), b.is_finite()) {
         (true, true) => quad(&g, a, b),
-        (true, false) => quad(&|t: f64| { let s = 1.0 - t; g(a + t / s) / (s * s) }, 0.0, 1.0),
-        (false, true) => quad(&|t: f64| { let s = 1.0 - t; g(b - t / s) / (s * s) }, 0.0, 1.0),
-        (false, false) => quad(&|t: f64| { let s = 1.0 - t * t; g(t / s) * (1.0 + t * t) / (s * s) }, -1.0, 1.0),
+        (true, false) => quad(
+            &|t: f64| {
+                let s = 1.0 - t;
+                g(a + t / s) / (s * s)
+            },
+            0.0,
+            1.0,
+        ),
+        (false, true) => quad(
+            &|t: f64| {
+                let s = 1.0 - t;
+                g(b - t / s) / (s * s)
+            },
+            0.0,
+            1.0,
+        ),
+        (false, false) => quad(
+            &|t: f64| {
+                let s = 1.0 - t * t;
+                g(t / s) * (1.0 + t * t) / (s * s)
+            },
+            -1.0,
+            1.0,
+        ),
     }
 }
 

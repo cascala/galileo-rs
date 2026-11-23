@@ -12,7 +12,9 @@ pub fn dims(m: &Mat) -> (usize, usize) {
 }
 
 pub fn identity(n: usize, m: usize) -> Mat {
-    (0..n).map(|i| (0..m).map(|j| Expr::int((i == j) as i128)).collect()).collect()
+    (0..n)
+        .map(|i| (0..m).map(|j| Expr::int((i == j) as i128)).collect())
+        .collect()
 }
 
 pub fn filled(n: usize, m: usize, v: Expr) -> Mat {
@@ -21,7 +23,9 @@ pub fn filled(n: usize, m: usize, v: Expr) -> Mat {
 
 pub fn transpose(m: &Mat) -> Mat {
     let (r, c) = dims(m);
-    (0..c).map(|j| (0..r).map(|i| m[i][j].clone()).collect()).collect()
+    (0..c)
+        .map(|j| (0..r).map(|i| m[i][j].clone()).collect())
+        .collect()
 }
 
 pub fn map(m: &Mat, f: impl Fn(&Expr) -> Expr) -> Mat {
@@ -39,17 +43,31 @@ pub fn zip(a: &Mat, b: &Mat, op: &str, f: impl Fn(&Expr, &Expr) -> Expr) -> R<Ma
             dims(b).1
         ));
     }
-    Ok(a.iter().zip(b).map(|(ra, rb)| ra.iter().zip(rb).map(|(x, y)| f(x, y)).collect()).collect())
+    Ok(a.iter()
+        .zip(b)
+        .map(|(ra, rb)| ra.iter().zip(rb).map(|(x, y)| f(x, y)).collect())
+        .collect())
 }
 
 pub fn matmul(a: &Mat, b: &Mat) -> R<Mat> {
     let (n, k) = dims(a);
     let (k2, m) = dims(b);
     if k != k2 {
-        return Err(format!("incompatible matrix dimensions for product: {}x{} and {}x{}", n, k, k2, m));
+        return Err(format!(
+            "incompatible matrix dimensions for product: {}x{} and {}x{}",
+            n, k, k2, m
+        ));
     }
     Ok((0..n)
-        .map(|i| (0..m).map(|j| add((0..k).map(|t| mul2(a[i][t].clone(), b[t][j].clone())).collect())).collect())
+        .map(|i| {
+            (0..m)
+                .map(|j| {
+                    add((0..k)
+                        .map(|t| mul2(a[i][t].clone(), b[t][j].clone()))
+                        .collect())
+                })
+                .collect()
+        })
         .collect())
 }
 
@@ -66,18 +84,28 @@ pub fn solve(a: &Mat, b: &Mat) -> R<Mat> {
     if dims(b).0 != n {
         return Err("right-hand side has the wrong number of rows".into());
     }
-    let mut aug: Mat = a.iter().zip(b).map(|(ra, rb)| ra.iter().chain(rb).cloned().collect()).collect();
+    let mut aug: Mat = a
+        .iter()
+        .zip(b)
+        .map(|(ra, rb)| ra.iter().chain(rb).cloned().collect())
+        .collect();
     let w = aug[0].len();
     for col in 0..n {
         let piv = pivot_row(&aug, col, col).ok_or("matrix is singular")?;
         aug.swap(col, piv);
         let p = aug[col][col].clone();
-        aug[col] = aug[col].iter().map(|x| simplify(&div(x.clone(), p.clone()))).collect();
+        aug[col] = aug[col]
+            .iter()
+            .map(|x| simplify(&div(x.clone(), p.clone())))
+            .collect();
         for r in 0..n {
             if r != col && !aug[r][col].is_zero() {
                 let f = aug[r][col].clone();
                 for c in 0..w {
-                    aug[r][c] = simplify(&sub(aug[r][c].clone(), mul2(f.clone(), aug[col][c].clone())));
+                    aug[r][c] = simplify(&sub(
+                        aug[r][c].clone(),
+                        mul2(f.clone(), aug[col][c].clone()),
+                    ));
                 }
             }
         }
@@ -112,10 +140,15 @@ pub fn rref(a: &Mat) -> (Mat, Vec<usize>) {
         if row == n {
             break;
         }
-        let Some(piv) = pivot_row(&m, col, row) else { continue };
+        let Some(piv) = pivot_row(&m, col, row) else {
+            continue;
+        };
         m.swap(row, piv);
         let p = m[row][col].clone();
-        m[row] = m[row].iter().map(|x| simplify(&div(x.clone(), p.clone()))).collect();
+        m[row] = m[row]
+            .iter()
+            .map(|x| simplify(&div(x.clone(), p.clone())))
+            .collect();
         for r in 0..n {
             if r != row && !is_zero(&m[r][col]) {
                 let f = m[r][col].clone();
@@ -163,7 +196,9 @@ pub fn det(a: &Mat) -> R<Expr> {
     let mut a = a.clone();
     let mut d = Expr::one();
     for col in 0..n {
-        let Some(piv) = pivot_row(&a, col, col) else { return Ok(Expr::zero()) };
+        let Some(piv) = pivot_row(&a, col, col) else {
+            return Ok(Expr::zero());
+        };
         if piv != col {
             a.swap(col, piv);
             d = neg(d);
@@ -212,7 +247,9 @@ pub fn lu(a: &Mat) -> R<(Mat, Mat, Mat)> {
             }
         }
     }
-    let p = (0..n).map(|i| (0..n).map(|j| Expr::int((perm[i] == j) as i128)).collect()).collect();
+    let p = (0..n)
+        .map(|i| (0..n).map(|j| Expr::int((perm[i] == j) as i128)).collect())
+        .collect();
     Ok((l, u, p))
 }
 
@@ -220,7 +257,12 @@ fn numeric(m: &Mat) -> R<Vec<Vec<f64>>> {
     m.iter()
         .map(|r| {
             r.iter()
-                .map(|e| evalf(e).num().map(|n| n.to_f64()).ok_or_else(|| "norm needs numeric entries".to_string()))
+                .map(|e| {
+                    evalf(e)
+                        .num()
+                        .map(|n| n.to_f64())
+                        .ok_or_else(|| "norm needs numeric entries".to_string())
+                })
                 .collect()
         })
         .collect()
@@ -242,11 +284,15 @@ pub fn norm(m: &Mat, p: &str) -> R<Expr> {
                 return Ok(best);
             }
             let f = numeric(&lines)?;
-            Ok(Expr::float(f.iter().map(|l| l.iter().sum::<f64>()).fold(0.0, f64::max)))
+            Ok(Expr::float(
+                f.iter().map(|l| l.iter().sum::<f64>()).fold(0.0, f64::max),
+            ))
         }
         "fro" => {
             let f = numeric(m)?;
-            Ok(Expr::float(f.iter().flatten().map(|x| x * x).sum::<f64>().sqrt()))
+            Ok(Expr::float(
+                f.iter().flatten().map(|x| x * x).sum::<f64>().sqrt(),
+            ))
         }
         "2" => {
             let f = numeric(m)?;
@@ -265,8 +311,13 @@ fn spectral_norm(a: &[Vec<f64>]) -> f64 {
     let mut v = vec![1.0; n];
     let mut lambda = 0.0;
     for _ in 0..500 {
-        let av: Vec<f64> = a.iter().map(|r| r.iter().zip(&v).map(|(x, y)| x * y).sum()).collect();
-        let w: Vec<f64> = (0..n).map(|j| a.iter().zip(&av).map(|(r, y)| r[j] * y).sum()).collect();
+        let av: Vec<f64> = a
+            .iter()
+            .map(|r| r.iter().zip(&v).map(|(x, y)| x * y).sum())
+            .collect();
+        let w: Vec<f64> = (0..n)
+            .map(|j| a.iter().zip(&av).map(|(r, y)| r[j] * y).sum())
+            .collect();
         let norm = w.iter().map(|x| x * x).sum::<f64>().sqrt();
         if norm == 0.0 {
             return 0.0;
@@ -286,7 +337,9 @@ mod tests {
     use super::*;
     use crate::print::show;
     fn m(rows: &[&[i128]]) -> Mat {
-        rows.iter().map(|r| r.iter().map(|&x| Expr::int(x)).collect()).collect()
+        rows.iter()
+            .map(|r| r.iter().map(|&x| Expr::int(x)).collect())
+            .collect()
     }
     #[test]
     fn inverse_times_matrix_is_identity() {
