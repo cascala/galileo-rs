@@ -1379,7 +1379,6 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
         .collect();
     let sizes_label = format!("{}-{}", train_sizes[0], train_sizes.last().unwrap());
     let seeded = !default && sizes.iter().copied().max().unwrap_or(0) > 20;
-    let clock = lab::Clock::start();
     let unit_budget = seconds * 3.0e6;
     let mut units = 0.0;
     let mut rng = Rng::new(seed);
@@ -1387,12 +1386,6 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
     let mut seen: HashSet<u64> = HashSet::new();
     let mut evaluated = 0;
     let mut scored: Vec<Entry> = vec![];
-    let done = |units: f64| -> bool {
-        match clock.seconds() {
-            Some(s) => s > seconds,
-            None => units > unit_budget,
-        }
-    };
     let mut prints: HashSet<u64> = HashSet::new();
     let mut eval = |p: Prog,
                     by: &str,
@@ -1454,6 +1447,15 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
             )
         })
         .collect();
+    // the budget is for the search itself: scoring the classics above is set-up
+    // (several seconds in an unoptimized build, which used to eat short budgets whole)
+    let clock = lab::Clock::start();
+    let done = |units: f64| -> bool {
+        match clock.seconds() {
+            Some(s) => s > seconds,
+            None => units > unit_budget,
+        }
+    };
     match mode {
         "exhaustive" => {
             let small_iter: Vec<Vec<E>> = (0..=5).map(|k| trees(k, true)).collect();
