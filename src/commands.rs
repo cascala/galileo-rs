@@ -87,6 +87,9 @@ impl Session {
         if let Some(r) = self.factor_call(f, args) {
             return r;
         }
+        if let Some(r) = self.groups_call(f, args) {
+            return r;
+        }
         if let Some(r) = self.extra_call(f, args) {
             return r;
         }
