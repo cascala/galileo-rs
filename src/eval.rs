@@ -441,8 +441,8 @@ impl Session {
             "load" => {
                 let file = arg.ok_or("load needs a file name")?;
                 if file.trim().eq_ignore_ascii_case("rsa") {
-                    let t = self.load_rsa().render();
-                    self.note(t);
+                    let (plain, md) = self.load_rsa();
+                    self.note2(plain, md);
                     return Ok(Output::Nothing);
                 }
                 if cfg!(target_arch = "wasm32") {
@@ -465,7 +465,7 @@ impl Session {
     }
 
     /// load(RSA): defines RSA100 .. RSA2048, and RSA100p, RSA100q etc. for the factored ones
-    fn load_rsa(&mut self) -> Output {
+    fn load_rsa(&mut self) -> (String, String) {
         use crate::rsa_data::{FACTORED_2026, RSA_NUMBERS};
         let int = |s: &str| {
             Expr::Num(Number::from_bigint(
@@ -485,12 +485,23 @@ impl Session {
                 open.push(name.to_string());
             }
         }
-        Output::Text(format!(
-            "Loaded {} RSA challenge numbers (named by decimal digits, or by bits for RSA576 .. RSA2048).\nFactored, with factors as RSA...p and RSA...q: {}\nNot factored here: {}",
-            RSA_NUMBERS.len(),
+        let head = format!(
+            "Loaded {} RSA challenge numbers, named by decimal digits (RSA100 .. RSA617) or by bits (RSA576 .. RSA2048).",
+            RSA_NUMBERS.len()
+        );
+        let plain = format!(
+            "{}\nFactored, with factors as RSA...p and RSA...q: {}\nNot factored here: {}",
+            head,
             done.join(", "),
             open.join(", ")
-        ))
+        );
+        let md = format!(
+            "{}\n\n* **Factored**, with factors as `RSA...p` and `RSA...q`: {}\n* **Not factored here:** {}",
+            head,
+            done.join(", "),
+            open.join(", ")
+        );
+        (plain, md)
     }
 
     fn matrix_arg(&mut self, n: &Node, f: &str) -> R<Mat> {
@@ -1471,7 +1482,15 @@ mod tests {
         let brief = notes("gnfs(2^128 + 1)");
         assert!(brief.contains("5. Square roots"));
         let teach = notes("explain = \"teach\"; gnfs(2^128 + 1)");
-        for part in ["**Step 1", "2 · N", "**Step 3", "(a, b) = (-100, 1)", "**Step 6", "X² − Y² mod N = 0", "gcd(X − Y, N) = 5704689200685129054721"] {
+        for part in [
+            "**Step 1",
+            "2 · N",
+            "**Step 3",
+            "(a, b) = (-100, 1)",
+            "**Step 6",
+            "X² − Y² mod N = 0",
+            "gcd(X − Y, N) = 5704689200685129054721",
+        ] {
             assert!(teach.contains(part), "missing {}: {}", part, teach);
         }
         let split = notes("explain = \"teach\"; gnfs(2^78 + 1, x^4 + 4, 2^20)");
