@@ -10,6 +10,7 @@ use crate::calc::{self, deriv, simplify, subst};
 use crate::expr::{Const, Expr, Func};
 use crate::num::Number;
 use crate::numeric;
+use crate::radicals;
 use Expr::*;
 
 pub type R<T> = Result<T, String>;
@@ -256,7 +257,7 @@ fn rational_roots(p: &[Number]) -> (Vec<(Number, usize)>, Poly) {
 }
 
 /// Durand-Kerner: all complex roots of a polynomial with float coefficients
-fn numeric_roots(c: &[f64]) -> Vec<(f64, f64)> {
+pub(crate) fn numeric_roots(c: &[f64]) -> Vec<(f64, f64)> {
     let n = c.len() - 1;
     let lead = c[n];
     let a: Vec<f64> = c.iter().map(|v| v / lead).collect();
@@ -368,25 +369,45 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
     if let Some(p) = exact_poly(&c) {
         let (roots, rest) = rational_roots(&p);
         let mut out: Vec<Expr> = roots.into_iter().map(|(r, _)| Num(r)).collect();
-        match rest.len() {
-            0 | 1 => {}
-            2 => out.push(Num(rest[0].neg().div(&rest[1]).unwrap())),
-            3 => out.extend(quadratic(
-                &Num(rest[2].clone()),
-                &Num(rest[1].clone()),
-                &Num(rest[0].clone()),
-            )),
-            _ => out.extend(
-                numeric_roots(&rest.iter().map(|v| v.to_f64()).collect::<Vec<_>>())
-                    .into_iter()
-                    .map(|r| exact_gaussian_root(&rest, r).unwrap_or_else(|| complex_expr(r))),
-            ),
+        let pieces = if rest.len() > 4 {
+            rational_factors(&rest)
+        } else {
+            vec![rest.clone()]
+        };
+        if pieces.len() > 1 && rest.len() == 5 {
+            radicals::record(radicals::Trace::Factored {
+                poly: rest.iter().cloned().map(Num).collect(),
+                factors: pieces
+                    .iter()
+                    .map(|f| f.iter().cloned().map(Num).collect())
+                    .collect(),
+            });
+        }
+        for piece in pieces {
+            let e: Vec<Expr> = piece.iter().cloned().map(Num).collect();
+            match piece.len() {
+                0 | 1 => {}
+                2 => out.push(Num(piece[0].neg().div(&piece[1]).unwrap())),
+                3 => out.extend(quadratic(&e[2], &e[1], &e[0])),
+                4 | 5 => out.extend(by_formula(&e)?),
+                _ => {
+                    radicals::record(radicals::Trace::Numeric { poly: e });
+                    out.extend(
+                        numeric_roots(&piece.iter().map(|v| v.to_f64()).collect::<Vec<_>>())
+                            .into_iter()
+                            .map(|r| {
+                                exact_gaussian_root(&piece, r).unwrap_or_else(|| complex_expr(r))
+                            }),
+                    )
+                }
+            }
         }
         return Ok(out);
     }
     match n {
         1 => Ok(vec![tidy(&div(neg(c[0].clone()), c[1].clone()))]),
         2 => Ok(quadratic(&c[2], &c[1], &c[0])),
+        3 | 4 => by_formula(&c),
         _ => {
             let f: Vec<f64> = c.iter().map(numeric::value).collect();
             if f.iter().all(|v| v.is_finite()) {
@@ -399,6 +420,66 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
             }
         }
     }
+}
+
+/// Roots of a cubic (Cardano) or quartic (Ferrari) in radicals, recording the steps
+fn by_formula(c: &[Expr]) -> R<Vec<Expr>> {
+    let found = if c.len() == 4 {
+        radicals::cubic(c).map(|t| {
+            let r = t.roots.clone();
+            radicals::record(radicals::Trace::Cubic(t));
+            r
+        })
+    } else {
+        radicals::quartic(c).map(|t| {
+            let r = t.roots.clone();
+            radicals::record(radicals::Trace::Quartic(t));
+            r
+        })
+    };
+    found.ok_or_else(|| format!("solve: can't solve this degree {} polynomial", c.len() - 1))
+}
+
+/// The irreducible factors over Q of a polynomial without rational roots
+/// (monic, each once per multiplicity); the polynomial itself when it does not split
+fn rational_factors(p: &[Number]) -> Vec<Poly> {
+    use num_bigint::BigInt;
+    use num_traits::ToPrimitive;
+    let whole = vec![p.to_vec()];
+    let mut l = 1i128;
+    for c in p {
+        let d = c.denom().unwrap_or(1);
+        l = l / gcd(l, d) * d;
+        if l > 1_000_000_000_000 {
+            return whole;
+        }
+    }
+    let Some(ints) = p
+        .iter()
+        .map(|c| c.mul(Number::int(l)).as_int().map(BigInt::from))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return whole;
+    };
+    let Some((_, fs)) = crate::algfactor::factor_zpoly(&ints) else {
+        return whole;
+    };
+    let mut out = vec![];
+    for (f, m) in fs {
+        let Some(f) = f
+            .iter()
+            .map(|v| v.to_i128().map(Number::int))
+            .collect::<Option<Poly>>()
+        else {
+            return whole;
+        };
+        let lead = f.last().unwrap().clone();
+        let f: Poly = f.iter().map(|v| v.div(&lead).unwrap()).collect();
+        for _ in 0..m {
+            out.push(f.clone());
+        }
+    }
+    if out.len() <= 1 { whole } else { out }
 }
 
 /// Factor a polynomial in one variable with rational coefficients into
@@ -460,10 +541,12 @@ pub fn solve(f: &Expr, x: &str) -> R<Vec<Expr>> {
         if d.contains_sym(x) && is_zero(&subst(&d, x, &r)) {
             continue;
         }
-        if !out
-            .iter()
-            .any(|o: &Expr| is_zero(&sub(o.clone(), r.clone())))
-        {
+        // large formulas (Cardano, Ferrari) are compared as written: simplifying
+        // their difference is slow
+        let same = |o: &Expr| {
+            *o == r || (o.size() + r.size() <= 120 && is_zero(&sub(o.clone(), r.clone())))
+        };
+        if !out.iter().any(same) {
             out.push(r);
         }
     }

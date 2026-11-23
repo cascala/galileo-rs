@@ -40,6 +40,7 @@ pub mod parser;
 pub mod plot;
 pub mod polyselect;
 pub mod print;
+pub mod radicals;
 pub mod ratfun;
 pub mod rsa_data;
 pub mod teach;

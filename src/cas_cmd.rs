@@ -382,7 +382,14 @@ impl Session {
             e => vec![crate::eval::equation_lhs(&e)],
         };
         if eqs.len() == 1 && xs.len() == 1 {
+            crate::radicals::begin();
             let r = cas::solve(&eqs[0], &xs[0]);
+            let traces = crate::radicals::take();
+            if r.is_ok() {
+                if let Some(md) = crate::radicals::notes(&traces, &xs[0], self.teaching()) {
+                    self.note2(crate::teach::plain(&md), md);
+                }
+            }
             if r.is_err() {
                 // sin(x) = 1/2 and friends: the solutions in [0, 2 pi)
                 if let Some(t) = crate::extra_cmd::solve_trig(&eqs[0], &xs[0]) {

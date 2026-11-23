@@ -166,8 +166,8 @@ pub const ENTRIES: &[Entry] = &[
         "solve",
         "Algebra",
         "solve(f, x) or solve([f1 f2], [x y])",
-        "Solves f = 0 (or an equation lhs == rhs) for x and returns all solutions in a row. An equation in one of sin(x), cos(x), tan(x) gives the solutions with 0 <= x < 2*pi. Exact for polynomials up to degree 2 and for polynomials whose other roots are rational; numeric (complex) roots otherwise. Rational functions work too. With a list of equations and unknowns, solves a linear system. For other equations use fsolve.",
-        "solve(x^2 - 5*x + 6, x)"
+        "Solves f = 0 (or an equation lhs == rhs) for x and returns all solutions in a row. An equation in one of sin(x), cos(x), tan(x) gives the solutions with 0 <= x < 2*pi. Polynomials are solved exactly up to degree 4: rational roots first, then the quadratic formula, Cardano's formula for cubics (written with cos when all three roots are real) and Ferrari's method for quartics, also with symbolic coefficients. Higher degrees are factored over the rationals and the pieces of degree 4 or less are solved exactly; numeric (complex) roots otherwise. explain = \"teach\" walks through the formula with the numbers of the equation. Rational functions work too. With a list of equations and unknowns, solves a linear system. For other equations use fsolve.",
+        "solve(x^3 - 3*x + 1, x)"
     ),
     e!(
         "fsolve",
