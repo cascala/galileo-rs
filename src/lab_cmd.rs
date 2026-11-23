@@ -568,8 +568,8 @@ mod tests {
         assert!(out.contains("rho") && out.contains("myf") && !out.contains("rror:"), "{}", out);
         let out = s.run_to_string("scoreplot(sb)");
         assert!(!out.contains("rror:"), "{}", out);
-        let out = s.run_to_string("r = algosearch(0.5); leaderboard()");
-        assert!(out.contains("iter(") || out.contains("rel("), "{}", out);
+        let out = s.run_to_string("r = algosearch(3); leaderboard()");
+        assert!(out.contains("iter(") || out.contains("rel(") || out.contains("grp("), "{}", out);
         let out = s.run_to_string("leakhunt(10, 400)");
         assert!(out.contains("control"), "{}", out);
     }

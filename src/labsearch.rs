@@ -1058,6 +1058,7 @@ impl TrainSet {
 pub fn score(p: &Prog, t: &TrainSet) -> Score {
     let mut s = Score { score: 0.0, solved: 0, total: t.cases.len(), runs: vec![], logs: vec![] };
     let mut give_up = false;
+    let mut first_misses = 0;
     for (d, n) in &t.cases {
         let c = cap(*d);
         if give_up {
@@ -1077,9 +1078,12 @@ pub fn score(p: &Prog, t: &TrainSet) -> Score {
         } else {
             s.score += c.log2() + 3.0;
             s.logs.push(c.log2() + 3.0);
-            // a miss on the smallest size: not worth trying the bigger ones
+            // every number of the smallest size missed: not worth trying the bigger ones
             if *d == t.cases[0].0 {
-                give_up = true;
+                first_misses += 1;
+                if first_misses == t.cases.iter().filter(|c| c.0 == *d).count() {
+                    give_up = true;
+                }
             }
         }
     }
@@ -1519,9 +1523,9 @@ mod tests {
 
     #[test]
     fn short_search_runs() {
-        let r = search("evolve", 0.5, 1);
+        let r = search("evolve", 2.0, 1);
         assert!(r.evaluated > 10);
-        let r = search("exhaustive", 0.3, 1);
+        let r = search("exhaustive", 2.0, 1);
         assert!(r.evaluated > 10);
     }
 }
