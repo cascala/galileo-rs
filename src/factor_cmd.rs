@@ -423,6 +423,10 @@ impl Session {
                         let (f, x) = af::base_search(&n.abs(), effort)?;
                         family_name = Some("found by writing N in base x with small digits".into());
                         Some(af::Form::Poly { f, x })
+                    })
+                    .or_else(|| {
+                        let (a, b) = af::fermat(&n.abs(), 20_000 * effort)?;
+                        Some(af::Form::Squares { a, b })
                     }),
             }
         };
@@ -473,6 +477,14 @@ impl Session {
                 let m = format!("This number is {} with x = {} and y = {}{}. The polynomial factors, so the number splits into {} pieces:", fs, x, y, from, p.len());
                 (p, m.clone(), m)
             }
+            Some(af::Form::Squares { a, b }) => {
+                let p = vec![
+                    af::Piece { text: "a - b".into(), latex: "a - b".into(), value: a - b, d: 0 },
+                    af::Piece { text: "a + b".into(), latex: "a + b".into(), value: a + b, d: 0 },
+                ];
+                let m = format!("This number is a difference of two squares, a^2 - b^2 = (a - b)(a + b), with a = {} and b = {} (found by Fermat's method, which works when two factors are close to the square root of N), so it splits into 2 pieces:", a, b);
+                (p, m.clone(), m)
+            }
             None => match &no_fit {
                 Some(fs) => {
                     let m = format!("This number is not {} for any whole number {}, so it is one piece:", fs, var);
@@ -489,8 +501,8 @@ impl Session {
         let (head_md, head_tx) = if head_md.is_empty() {
             let (b1, b2, k2) = ((12 * effort).min(10_000), (12 * effort).min(1000), (3000 * effort).min(10_000_000));
             (
-                format!("No algebraic form found: this {}-digit number is not $a^k \\pm 1$ for any $a$, not $a^k \\pm b^k$ for $b \\le {}$, and does not divide $b^k \\pm 1$ for $b \\le {}$, $k \\le {}$; it fits none of the listed families, and in no base $x$ is it a sparse polynomial with digits up to {} that factors. It is one piece:", nd, b1, b2, k2, (8 * effort).min(100_000)),
-                format!("No algebraic form found: this {}-digit number is not a^k ± 1 for any a, not a^k ± b^k for b <= {}, and does not divide b^k ± 1 for b <= {}, k <= {}; it fits none of the listed families, and in no base x is it a sparse polynomial with digits up to {} that factors. It is one piece:", nd, b1, b2, k2, (8 * effort).min(100_000)),
+                format!("No algebraic form found: this {}-digit number is not $a^k \\pm 1$ for any $a$, not $a^k \\pm b^k$ for $b \\le {}$, and does not divide $b^k \\pm 1$ for $b \\le {}$, $k \\le {}$; it fits none of the listed families, in no base $x$ is it a sparse polynomial with digits up to {} that factors, and it is not $a^2 - b^2$ with $a$ within {} of $\\sqrt{{N}}$. It is one piece:", nd, b1, b2, k2, (8 * effort).min(100_000), 20_000 * effort),
+                format!("No algebraic form found: this {}-digit number is not a^k ± 1 for any a, not a^k ± b^k for b <= {}, and does not divide b^k ± 1 for b <= {}, k <= {}; it fits none of the listed families, in no base x is it a sparse polynomial with digits up to {} that factors, and it is not a^2 - b^2 with a within {} of sqrt(N). It is one piece:", nd, b1, b2, k2, (8 * effort).min(100_000), 20_000 * effort),
             )
         } else {
             (head_md, head_tx)

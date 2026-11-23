@@ -1348,6 +1348,8 @@ pub enum Form {
     Poly { f: ZPoly, x: BigInt },
     /// n = y^d f(x/y), the homogeneous form of a polynomial f of degree d that factors
     Poly2 { f: ZPoly, x: BigInt, y: BigInt },
+    /// n = a^2 - b^2 = (a - b)(a + b), found by Fermat's method
+    Squares { a: BigInt, b: BigInt },
 }
 
 /// Search for an algebraic form of n >= 2. effort (1 = about a second) sets
@@ -1587,6 +1589,13 @@ fn builtin_families() -> Vec<(String, ZPoly)> {
     ] {
         if factors_nontrivially(&f) && !out.iter().any(|(_, g)| *g == f) {
             out.push((name.to_string(), f));
+        }
+    }
+    for (name, cs) in crate::auri_families::AURI_FAMILIES {
+        let sign = if cs.last().is_some_and(|&v| v < 0) { -1 } else { 1 };
+        let f: ZPoly = cs.iter().map(|&v| BigInt::from(sign * v)).collect();
+        if !out.iter().any(|(_, g)| *g == f) {
+            out.push((format!("Aurifeuillean-type {}", name), f));
         }
     }
     let chernick = pmul(&pmul(&[BigInt::one(), BigInt::from(6)], &[BigInt::one(), BigInt::from(12)]), &[BigInt::one(), BigInt::from(18)]);
@@ -1870,4 +1879,32 @@ pub fn poly2_pieces(f: &[BigInt], x: &BigInt, y: &BigInt) -> Option<Vec<Piece>> 
         }
     }
     Some(out)
+}
+
+/// Fermat's method: n = a^2 - b^2 for a = ceil(sqrt(n)), ceil(sqrt(n)) + 1, ...
+/// (steps tries). It succeeds quickly exactly when n has two factors close to
+/// sqrt(n), the case Pollard rho and p - 1 are worst at. Skips n = 2 mod 4,
+/// which is never a difference of two squares.
+pub fn fermat(n: &BigInt, steps: u64) -> Option<(BigInt, BigInt)> {
+    if n <= &BigInt::from(3) || n.mod_floor(&BigInt::from(4)) == BigInt::from(2) {
+        return None;
+    }
+    let mut a = n.sqrt();
+    if &(&a * &a) < n {
+        a += 1u32;
+    }
+    let mut r = &a * &a - n;
+    for _ in 0..steps {
+        let b = r.sqrt();
+        if &b * &b == r {
+            if (&a - &b) > BigInt::one() {
+                return Some((a, b));
+            }
+            return None;
+        }
+        // (a + 1)^2 - n = r + 2a + 1
+        r += &a * 2u32 + 1u32;
+        a += 1u32;
+    }
+    None
 }

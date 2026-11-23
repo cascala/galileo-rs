@@ -88,3 +88,18 @@ fn small_primes_equal_to_a_base() {
         assert!(galileo_rs::numtheory::small::is_prime(p), "{}", p);
     }
 }
+
+#[test]
+fn aurifeuillean_type_families_and_fermat() {
+    let mut s = galileo_rs::eval::Session::new();
+    let run = |s: &mut galileo_rs::eval::Session, src: &str| -> String {
+        s.run(src).into_iter().map(|r| format!("{:?}", r)).collect::<Vec<_>>().join("\n")
+    };
+    let out = run(&mut s, "x = 98765432123456789; algfactor(x^6 + 8*x^2 - 1)");
+    assert!(out.contains("Aurifeuillean-type"), "{}", out);
+    let out = run(&mut s, "x = 10^20 + 7; algfactor(100*x^4 - 120*x^2 + 1)");
+    assert!(out.contains("splits into 2 pieces"), "{}", out);
+    let out = run(&mut s, "p = nextprime(10^60); q = nextprime(p + 10^31); algfactor(p*q)");
+    assert!(out.contains("Fermat"), "{}", out);
+    assert!(out.contains("All 2 prime factors found"), "{}", out);
+}
