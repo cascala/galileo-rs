@@ -28,6 +28,7 @@ pub mod groups;
 pub mod groups_cmd;
 pub mod factor_cmd;
 pub mod factorlab;
+pub mod labgroups;
 pub mod labsearch;
 pub mod lableak;
 pub mod lab_cmd;

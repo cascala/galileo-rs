@@ -23,6 +23,7 @@
 //! each), the same on every machine, so programs are compared fairly.
 
 use crate::factorlab::{self as lab, Rng};
+use crate::labgroups::{self as lg, World};
 use crate::parser::{Node, Op, Stmt};
 use num_bigint::BigInt;
 use num_integer::Integer;
@@ -54,6 +55,8 @@ pub enum E {
 pub enum Prog {
     Iter { f: E, h: E, x0: E },
     Rel { s: E, fb: usize },
+    /// grp(world, e, r): powers in a group mod N, see labgroups
+    Grp { w: World, e: E, r: u64 },
 }
 
 // ---------- printing and parsing ----------
@@ -93,6 +96,7 @@ impl std::fmt::Display for Prog {
         match self {
             Prog::Iter { f: g, h, x0 } => write!(f, "iter({}, {}, {})", g, h, x0),
             Prog::Rel { s, fb } => write!(f, "rel({}, {})", s, fb),
+            Prog::Grp { w, e, r } => write!(f, "grp({}, {}, {})", w, e, r),
         }
     }
 }
@@ -157,13 +161,64 @@ pub fn parse_prog(text: &str) -> Result<Prog, String> {
             }
             Ok(Prog::Rel { s: to_e(s)?, fb })
         }
-        _ => Err("a lab program looks like iter(f, h, x0) or rel(s, fb)".into()),
+        ("grp", [w, e]) => Ok(Prog::Grp { w: world_of(w)?, e: to_e(e)?, r: 0 }),
+        ("grp", [w, e, Node::Num(k)]) => {
+            let r: u64 = k.parse().map_err(|_| "grp(world, e, r): r is a whole number")?;
+            Ok(Prog::Grp { w: world_of(w)?, e: to_e(e)?, r })
+        }
+        _ => Err("a lab program looks like iter(f, h, x0), rel(s, fb) or grp(world, e, r)".into()),
     }
+}
+
+fn world_of(n: &Node) -> Result<World, String> {
+    let num = |n: &Node| -> Result<i64, String> {
+        match n {
+            Node::Num(s) => s.parse().map_err(|_| "world parameters are whole numbers".to_string()),
+            Node::Neg(a) => match &**a {
+                Node::Num(s) => s.parse::<i64>().map(|v| -v).map_err(|_| "world parameters are whole numbers".to_string()),
+                _ => Err("world parameters are whole numbers".into()),
+            },
+            _ => Err("world parameters are whole numbers".into()),
+        }
+    };
+    match n {
+        Node::Ident(s) if s == "mul" => Ok(World::Mul),
+        Node::Ident(s) if s == "mat" => Ok(World::Mat),
+        Node::Call(f, a) if a.len() == 1 && f == "quad" => Ok(World::Quad(num(&a[0])?)),
+        Node::Call(f, a) if a.len() == 1 && f == "cubic" => Ok(World::Cubic(num(&a[0])?)),
+        Node::Call(f, a) if a.len() == 1 && f == "ec" => Ok(World::Ec(num(&a[0])?)),
+        _ => Err("worlds: mul, quad(d), cubic(c), mat, ec(a)".into()),
+    }
+}
+
+/// a whole-number value of e at step i (x and the other names count as 1), between 1 and 2^24
+pub fn int_eval(e: &E, i: u64) -> u64 {
+    fn go(e: &E, i: i128) -> i128 {
+        let c = |v: i128| v.clamp(-(1 << 40), 1 << 40);
+        match e {
+            E::I => i,
+            E::C(k) => *k as i128,
+            E::Add(a, b) => c(go(a, i) + go(b, i)),
+            E::Sub(a, b) => c(go(a, i) - go(b, i)),
+            E::Mul(a, b) => c(go(a, i).saturating_mul(go(b, i))),
+            E::Pow(a, k) => {
+                let v = go(a, i);
+                let mut r: i128 = 1;
+                for _ in 0..*k {
+                    r = c(r.saturating_mul(v));
+                }
+                r
+            }
+            E::PowI(a) | E::Luc(a) | E::Inv(a) => go(a, i),
+            _ => 1,
+        }
+    }
+    go(e, i as i128).clamp(1, 1 << 24) as u64
 }
 
 pub fn is_prog_text(t: &str) -> bool {
     let t = t.trim_start();
-    t.starts_with("iter(") || t.starts_with("rel(")
+    t.starts_with("iter(") || t.starts_with("rel(") || t.starts_with("grp(")
 }
 
 // ---------- arithmetic modulo N ----------
@@ -649,12 +704,16 @@ pub fn run_prog(p: &Prog, n: &BigInt) -> Option<BigInt> {
     if n.is_even() {
         return Some(BigInt::from(2));
     }
+    if let Prog::Grp { w, e, r } = p {
+        return lg::run(*w, &|i| int_eval(e, i), *r, n);
+    }
     match n.to_u64().filter(|&v| v < 1 << 63) {
         Some(v) => {
             let r = R64 { n: v, nb: n.clone() };
             match p {
                 Prog::Iter { f, h, x0 } => run_iter(&r, f, h, x0),
                 Prog::Rel { s, fb } => run_rel(&r, s, *fb),
+                Prog::Grp { .. } => unreachable!(),
             }
         }
         None => {
@@ -662,6 +721,7 @@ pub fn run_prog(p: &Prog, n: &BigInt) -> Option<BigInt> {
             match p {
                 Prog::Iter { f, h, x0 } => run_iter(&r, f, h, x0),
                 Prog::Rel { s, fb } => run_rel(&r, s, *fb),
+                Prog::Grp { .. } => unreachable!(),
             }
         }
     }
@@ -701,7 +761,23 @@ fn rand_e(rng: &mut Rng, depth: u32, iter: bool) -> E {
     }
 }
 
+pub const RESTARTS: [u64; 6] = [0, 0, 20, 50, 100, 300];
+
+fn rand_exponent(rng: &mut Rng) -> E {
+    let b = Box::new;
+    match rng.below(6) {
+        0 | 1 => E::I,
+        2 => E::Pow(b(E::I), 2),
+        3 => E::Mul(b(E::C([2, 3, 6, 12][rng.below(4) as usize])), b(E::I)),
+        4 => E::Add(b(E::I), b(E::C([1, 2, -1][rng.below(3) as usize]))),
+        _ => E::C([2, 3, 6, 30, 210][rng.below(5) as usize]),
+    }
+}
+
 pub fn random_prog(rng: &mut Rng) -> Prog {
+    if rng.below(4) == 0 {
+        return Prog::Grp { w: lg::random_world(rng), e: rand_exponent(rng), r: RESTARTS[rng.below(6) as usize] };
+    }
     if rng.below(3) < 2 {
         let h = match rng.below(4) {
             0 => E::Sub(Box::new(E::X), Box::new(E::Y)),
@@ -755,12 +831,23 @@ pub fn simplify_prog(p: &Prog) -> Prog {
     match p {
         Prog::Iter { f, h, x0 } => Prog::Iter { f: simplify(f), h: simplify(h), x0: simplify(x0) },
         Prog::Rel { s, fb } => Prog::Rel { s: simplify(s), fb: *fb },
+        Prog::Grp { w, e, r } => Prog::Grp { w: *w, e: simplify(e), r: *r },
     }
 }
 
 /// What a program computes on a fixed modulus in its first steps: programs
 /// with the same fingerprint behave the same, so only one is scored.
 fn fingerprint(p: &Prog) -> u64 {
+    if let Prog::Grp { w, e, r } = p {
+        let mut h: u64 = 7;
+        for b in format!("{}/{}", w, r).bytes() {
+            h = (h ^ b as u64).wrapping_mul(0x100_0000_01B3);
+        }
+        for i in 1..=12 {
+            h = (h ^ int_eval(e, i)).wrapping_mul(0x100_0000_01B3);
+        }
+        return h;
+    }
     let n = BigInt::from(1_000_000_016_000_000_063u64); // 1000000007 * 1000000009
     let r = R64 { n: 1_000_000_016_000_000_063, nb: n };
     let c = consts(&r);
@@ -768,6 +855,7 @@ fn fingerprint(p: &Prog) -> u64 {
     let mut h: u64 = match p {
         Prog::Iter { .. } => 1,
         Prog::Rel { fb, .. } => 1000 + *fb as u64,
+        Prog::Grp { .. } => unreachable!(),
     };
     let saved = lab::spent();
     if let Prog::Iter { x0, .. } = p {
@@ -785,6 +873,7 @@ fn fingerprint(p: &Prog) -> u64 {
                 cx.eval(h)
             }),
             Prog::Rel { s, .. } => cx.eval(s).inspect(|&v| cx.x = v),
+            Prog::Grp { .. } => unreachable!(),
         }
         .unwrap_or(0);
         if cx.i.is_power_of_two() {
@@ -857,6 +946,7 @@ pub fn mutate(p: &Prog, other: &Prog, rng: &mut Rng) -> Prog {
     let donor = match other {
         Prog::Iter { f, .. } => f.clone(),
         Prog::Rel { s, .. } => s.clone(),
+        Prog::Grp { e, .. } => e.clone(),
     };
     let cross = rng.below(4) == 0;
     match &mut p {
@@ -879,6 +969,25 @@ pub fn mutate(p: &Prog, other: &Prog, rng: &mut Rng) -> Prog {
             }
             _ => mutate_e(s, rng, false),
         },
+        Prog::Grp { w, e, r } => match rng.below(10) {
+            0..=1 => *w = lg::random_world(rng),
+            2 => {
+                *w = match *w {
+                    World::Quad(d) => World::Quad(d + [-1, 1][rng.below(2) as usize]),
+                    World::Cubic(c) => World::Cubic(c + [-1, 1][rng.below(2) as usize]),
+                    World::Ec(a) => World::Ec(a + [-1, 1][rng.below(2) as usize]),
+                    o => o,
+                }
+            }
+            3..=4 => *r = RESTARTS[rng.below(6) as usize],
+            5 => *e = rand_exponent(rng),
+            _ => {
+                mutate_e(e, rng, false);
+                if size(e) > 7 {
+                    *e = rand_exponent(rng);
+                }
+            }
+        },
     }
     p
 }
@@ -889,9 +998,11 @@ pub fn mutate(p: &Prog, other: &Prog, rng: &mut Rng) -> Prog {
 pub const TRAIN: [u32; 4] = [12, 14, 16, 18];
 pub const PER_SIZE: u64 = 3;
 
-/// Work cap per instance: 4 times what Pollard rho typically needs
+/// Work cap per instance: 4 times what Pollard rho typically needs, plus a
+/// fixed 50000 so methods with a start-up cost (ECM-like group programs,
+/// factor bases) are not ruled out on the smallest numbers
 pub fn cap(digits: u32) -> f64 {
-    12.0 * 10f64.powf(digits as f64 / 4.0)
+    12.0 * 10f64.powf(digits as f64 / 4.0) + 50_000.0
 }
 
 #[derive(Clone, Debug)]
@@ -984,6 +1095,11 @@ pub const CLASSICS: &[(&str, &str)] = &[
     ("Hart one-line", "rel(rti, 0)"),
     ("Dixon near sqrt(N)", "rel(rt + i, 64)"),
     ("Dixon near sqrt(iN)", "rel(rti, 64)"),
+    ("p - 1 as a group program", "grp(mul, i, 0)"),
+    ("p + 1 side (a + b sqrt(-1))", "grp(quad(-1), i, 0)"),
+    ("cyclotomic Phi_3 (Bach-Shallit)", "grp(cubic(2), i, 0)"),
+    ("2 x 2 matrices", "grp(mat, i, 0)"),
+    ("ECM, 100 steps per curve", "grp(ec(3), i, 100)"),
 ];
 
 // ---------- the leaderboard ----------
@@ -1171,6 +1287,19 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
                 if !go {
                     break 'outer;
                 }
+                if sz <= 4 {
+                    // group programs: every world, every exponent made of i and constants
+                    for e in trees(sz, false).into_iter().filter(|e| int_only(e)) {
+                        for w in lg::all_worlds() {
+                            for r in [0, 30, 100] {
+                                eval(Prog::Grp { w, e: e.clone(), r }, "exhaustive", &mut scored, &mut seen, &mut units);
+                                if done(units) {
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         "random" => {
@@ -1249,6 +1378,16 @@ pub fn search_with(mode: &str, seconds: f64, seed: u64, sizes: &[u32]) -> Search
     }
     let (train_count, test_count) = (t.cases.len(), test.cases.len());
     SearchResult { evaluated, distinct, best: scored, classics, units, seconds, rho_test, train_sizes, test_sizes, train_count, test_count, seeded }
+}
+
+/// whether e uses only i, constants, + - * and ^k
+fn int_only(e: &E) -> bool {
+    match e {
+        E::I | E::C(_) => true,
+        E::Add(a, b) | E::Sub(a, b) | E::Mul(a, b) => int_only(a) && int_only(b),
+        E::Pow(a, _) => int_only(a),
+        _ => false,
+    }
 }
 
 /// calls f on every expression with exactly `size` nodes, using the stored
@@ -1351,6 +1490,18 @@ mod tests {
         let (n, p, q) = lab::semiprime(22, 3);
         lab::start_budget(1e8, 10.0);
         let f = run_prog(&parse_prog("iter(x^2 + 1, x - y, 2)").unwrap(), &n).unwrap();
+        lab::end_budget();
+        assert!(f == p || f == q);
+    }
+
+    #[test]
+    fn group_programs_parse_and_run() {
+        for t in ["grp(mul, i, 0)", "grp(quad(-1), i^2, 50)", "grp(ec(3), i, 100)", "grp(mat, 2*i, 0)", "grp(cubic(2), i, 0)"] {
+            assert_eq!(parse_prog(t).unwrap().to_string(), t);
+        }
+        let (n, p, q) = lab::semiprime(18, 2);
+        lab::start_budget(1e9, 20.0);
+        let f = run_prog(&parse_prog("grp(ec(3), i, 100)").unwrap(), &n).unwrap();
         lab::end_budget();
         assert!(f == p || f == q);
     }
