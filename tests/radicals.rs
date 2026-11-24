@@ -204,3 +204,57 @@ fn notes() {
     let (_, off) = roots("explain = 0; solve(x^3 - 2*x + 2, x)");
     assert!(off.is_empty());
 }
+
+#[test]
+fn low_degree_notes() {
+    let (_, t) = roots("explain = \"teach\"; solve(2*x^2 - 3*x - 5, x)");
+    for part in [
+        "completing the square",
+        "(x-3/4)^2",
+        "49/16",
+        "D = b^2 − 4ac = 49",
+        "perfect square",
+        "2*(-1)^2 − 3*(-1) − 5 = 0",
+        "Vieta",
+    ] {
+        assert!(t.contains(part), "missing {}: {}", part, t);
+    }
+    let (_, t) = roots("explain = \"teach\"; solve(x^2 + 2*x + 5, x)");
+    assert!(
+        t.contains("±2·i") && t.contains("two complex roots"),
+        "{}",
+        t
+    );
+    let (_, t) = roots("explain = \"teach\"; solve(a*x^2 + b*x + c, x)");
+    assert!(
+        t.contains("a is assumed not to be 0") && t.contains("b^2-4*a*c"),
+        "{}",
+        t
+    );
+    let (_, t) = roots("explain = \"teach\"; solve(x^3 - 2*x^2 + x - 2, x)");
+    for part in [
+        "rational root test",
+        "±1, ±2",
+        "x = 2",
+        "x^2+1",
+        "completing the square",
+    ] {
+        assert!(t.contains(part), "missing {}: {}", part, t);
+    }
+    let (_, b) = roots("solve(x^3 - 6*x^2 + 11*x - 6, x)");
+    assert!(
+        b.contains("Rational roots") && b.contains("1, 2, 3"),
+        "{}",
+        b
+    );
+    let mut s = Session::new();
+    let r = s.run_notes("explain = \"teach\"; solve(3*x + 7, x)");
+    let n: Vec<String> = r
+        .last()
+        .unwrap()
+        .2
+        .iter()
+        .map(|n| n.plain.clone())
+        .collect();
+    assert!(n.join(" ").contains("x = −b/a = -7/3"), "{:?}", n);
+}

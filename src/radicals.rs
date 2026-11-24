@@ -89,6 +89,21 @@ pub enum Trace {
     Numeric {
         poly: Vec<Expr>,
     },
+    /// a x + b = 0
+    Linear {
+        poly: Vec<Expr>,
+    },
+    /// a x^2 + b x + c = 0, by completing the square
+    Quadratic {
+        poly: Vec<Expr>,
+    },
+    /// rational roots (with multiplicities) found by the rational root test, and
+    /// the polynomial left after dividing them out
+    RationalRoots {
+        poly: Vec<Expr>,
+        roots: Vec<(Expr, usize)>,
+        rest: Vec<Expr>,
+    },
 }
 
 thread_local! {
@@ -698,6 +713,11 @@ pub fn notes(traces: &[Trace], x: &str, teach: bool) -> Option<String> {
     for t in traces {
         parts.push(match t {
             Trace::Cubic(c) => cubic_note(c, x, teach),
+            Trace::Linear { poly } => linear_note(poly, x, teach),
+            Trace::Quadratic { poly } => quadratic_note(poly, x, teach),
+            Trace::RationalRoots { poly, roots, rest } => {
+                rational_note(poly, roots, rest, x, teach)
+            }
             Trace::Quartic(q) => quartic_note(q, x, teach),
             Trace::Factored { poly, factors } => format!(
                 "{} = 0 has no rational roots, but it splits over the rationals as {}, so each factor is solved on its own{}.",
@@ -749,4 +769,352 @@ fn factor_text(factors: &[Vec<Expr>], x: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("·")
+}
+
+// ---------- degree 1 and 2, and rational roots ----------
+
+fn linear_note(c: &[Expr], x: &str, teach: bool) -> String {
+    let r = tidy(&div(neg(c[0].clone()), c[1].clone()));
+    if teach {
+        format!(
+            "**A linear equation.** {} = 0 has the form a·{x} + b = 0 with a = {} and b = {}. Subtract b and divide by a (a is not 0): {x} = −b/a = {}.",
+            poly_text(c, x),
+            sh(&c[1]),
+            sh(&c[0]),
+            sh(&r)
+        )
+    } else {
+        format!("Linear: {x} = −b/a = {}.", sh(&r))
+    }
+}
+
+/// "2*(5/2)^2-3*(5/2)-5": the polynomial with the value written in
+fn plugged(c: &[Expr], v: &Expr) -> String {
+    let vs = crate::print::show(v);
+    let vs = if vs.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        vs
+    } else {
+        format!("({})", vs)
+    };
+    let mut terms = vec![];
+    for (k, a) in c.iter().enumerate().rev() {
+        if a.is_zero() {
+            continue;
+        }
+        let a_s = crate::print::show(a);
+        let a_s =
+            if a_s.contains(['+', '-']) && !a_s.starts_with('-') || a_s[1..].contains(['+', '-']) {
+                format!("({})", a_s)
+            } else {
+                a_s
+            };
+        let t = match k {
+            0 => a_s.clone(),
+            1 => format!("{}*{}", a_s, vs),
+            _ => format!("{}*{}^{}", a_s, vs, k),
+        };
+        let t = t.replacen("1*", "", if a.is_one() { 1 } else { 0 });
+        terms.push(t);
+    }
+    terms.join(" + ").replace("+ -", "− ")
+}
+
+fn quadratic_note(c: &[Expr], x: &str, teach: bool) -> String {
+    let (a, b, cc) = (&c[2], &c[1], &c[0]);
+    let d = tidy(&sub(
+        pow(b.clone(), int(2)),
+        mul(vec![int(4), a.clone(), cc.clone()]),
+    ));
+    let roots = crate::cas::quadratic(a, b, cc);
+    let real = real_coeffs(c);
+    let sd = tidy(&sqrt(d.clone()));
+    let rational_d = real && sd.num().is_some_and(|n| n.is_exact());
+    let (sign, kind) = if !real {
+        (
+            "",
+            "with letters its sign decides which case it is".to_string(),
+        )
+    } else if zero(&d) {
+        ("D = 0: ", "one double root".to_string())
+    } else if val(&d) > 0.0 {
+        (
+            "D > 0: ",
+            format!(
+                "two real roots{}",
+                if rational_d {
+                    ", rational because D is a perfect square"
+                } else {
+                    ""
+                }
+            ),
+        )
+    } else {
+        ("D < 0: ", "two complex roots".to_string())
+    };
+    if !teach {
+        return format!(
+            "**Quadratic formula** {x} = (−b ± sqrt(D))/(2a) with D = b^2 − 4ac = {}; {}{}.",
+            sh(&d),
+            sign,
+            kind
+        );
+    }
+    let xv = Expr::sym(x);
+    let h = tidy(&div(b.clone(), mul2(int(2), a.clone()))); // x + h
+    let k = tidy(&div(d.clone(), mul2(int(4), pow(a.clone(), int(2))))); // (x + h)^2 = k
+    let monic: Vec<Expr> = c.iter().map(|v| tidy(&div(v.clone(), a.clone()))).collect();
+    let square = sh(&pow(add2(xv.clone(), h.clone()), int(2)));
+    let mut md = vec![format!(
+        "**Solving {} = 0, a quadratic, by completing the square.** Here a = {}, b = {}, c = {}{}.",
+        poly_text(c, x),
+        sh(a),
+        sh(b),
+        sh(cc),
+        if real {
+            ""
+        } else {
+            " (a is assumed not to be 0)"
+        }
+    )];
+    md.push(format!(
+        "**Step 1: make the x^2 coefficient 1.** Divide by a: {} = 0.",
+        poly_text(&monic, x)
+    ));
+    md.push(format!(
+        "**Step 2: complete the square.** (x + h)^2 = x^2 + 2h·x + h^2, so with h = b/(2a) = {} the first two terms are the start of the square {}. Add h^2 = {} to both sides and move c/a = {} across: {} = h^2 − c/a = {}. The right side is (b^2 − 4ac)/(4a^2) = D/(4a^2): the discriminant D = b^2 − 4ac = {} appears by itself.",
+        sh(&h),
+        square,
+        sh(&tidy(&pow(h.clone(), int(2)))),
+        sh(&monic[0]),
+        square,
+        sh(&k),
+        sh(&d)
+    ));
+    let lhs = sh(&add2(xv.clone(), h.clone()));
+    let ks = crate::print::show(&k);
+    let step3 = if zero(&k) {
+        format!("{} = 0, only one value", lhs)
+    } else if real && val(&k) < 0.0 {
+        let r = crate::print::show(&tidy(&sqrt(tidy(&neg(k.clone())))));
+        let r = if r == "1" {
+            String::new()
+        } else {
+            format!("{}·", r)
+        };
+        format!(
+            "{} = ±sqrt({}) = ±{}i, since a negative number has no real square root",
+            lhs, ks, r
+        )
+    } else {
+        let r = crate::print::show(&tidy(&sqrt(k.clone())));
+        if r == format!("sqrt({})", ks) {
+            format!("{} = ±{}", lhs, r)
+        } else {
+            format!("{} = ±sqrt({}) = ±{}", lhs, ks, r)
+        }
+    };
+    md.push(format!(
+        "**Step 3: take square roots.** {}. Subtract h: {x} = {}. In letters this is the quadratic formula {x} = (−b ± sqrt(b^2 − 4ac))/(2a): completing the square once with letters is all the formula is.",
+        step3,
+        roots.iter().map(sh).collect::<Vec<_>>().join(if roots.len() == 2 { " or " } else { ", " })
+    ));
+    md.push(format!(
+        "**Step 4: what D says.** D > 0: two real roots, where the parabola y = {} crosses the x-axis. D = 0: one double root, where it touches the axis. D < 0: two complex roots, the parabola misses the axis. A perfect-square D means rational roots. Here D = {}{}{}.",
+        crate::print::show(&from_poly(c, x)),
+        sh(&d),
+        if real { ", so " } else { "; " },
+        kind
+    ));
+    // the check: plug in, and the sum and product of the roots
+    let (r1, r2) = (roots[0].clone(), roots.last().unwrap().clone());
+    let sum = tidy(&calc::expand(&add2(r1.clone(), r2.clone())));
+    let prod = tidy(&calc::expand(&mul2(r1.clone(), r2.clone())));
+    let mut check = vec![];
+    if real {
+        let v = tidy(&calc::expand(&calc::subst(&from_poly(c, x), x, &r1)));
+        check.push(format!(
+            "Put {x} = {} back in: `{}` = {}.",
+            crate::print::show(&r1),
+            plugged(c, &r1),
+            if zero(&v) {
+                "0".to_string()
+            } else {
+                crate::print::show(&v)
+            }
+        ));
+    }
+    check.push(format!(
+        "The roots add up to {} and multiply to {}, which should be −b/a = {} and c/a = {} (Vieta: a(x − r1)(x − r2) expands to a·x^2 − a(r1 + r2)·x + a·r1·r2){}.",
+        sh(&sum),
+        sh(&prod),
+        sh(&tidy(&div(neg(b.clone()), a.clone()))),
+        sh(&tidy(&div(cc.clone(), a.clone()))),
+        if roots.len() == 1 { "; a double root counts twice" } else { "" }
+    ));
+    md.push(format!("**Step 5: check.** {}", check.join(" ")));
+    md.join("\n\n")
+}
+
+fn divisors(n: i128) -> Vec<i128> {
+    let n = n.abs();
+    let mut d = vec![];
+    let mut k = 1i128;
+    while k * k <= n {
+        if n % k == 0 {
+            d.push(k);
+            if k * k != n {
+                d.push(n / k);
+            }
+        }
+        k += 1;
+    }
+    d.sort();
+    d
+}
+
+fn rational_note(
+    c: &[Expr],
+    roots: &[(Expr, usize)],
+    rest: &[Expr],
+    x: &str,
+    teach: bool,
+) -> String {
+    let found: Vec<String> = roots
+        .iter()
+        .map(|(r, m)| match m {
+            1 => crate::print::show(r),
+            2 => format!("{} (twice)", crate::print::show(r)),
+            m => format!("{} ({} times)", crate::print::show(r), m),
+        })
+        .collect();
+    let left = if rest.len() > 1 {
+        format!("; what is left is {} = 0", poly_text(rest, x))
+    } else {
+        String::new()
+    };
+    if !teach {
+        return format!(
+            "Rational roots (rational root test): {}{}.",
+            found.join(", "),
+            left
+        );
+    }
+    let mut md = vec![format!(
+        "**Solving {} = 0: rational roots first.**",
+        poly_text(c, x)
+    )];
+    // integer coefficients
+    let nums: Vec<crate::num::Number> = c.iter().filter_map(|e| e.num()).collect();
+    let mut l = 1i128;
+    for n in &nums {
+        let d = n.denom().unwrap_or(1);
+        l = l / gcd(l, d) * d;
+    }
+    let ints: Vec<i128> = nums
+        .iter()
+        .map(|n| n.mul(crate::num::Number::int(l)).as_int().unwrap_or(0))
+        .collect();
+    let scaled = if l != 1 {
+        format!(
+            " Multiplying by {} first gives integer coefficients: {} = 0.",
+            l,
+            poly_text(&ints.iter().map(|&v| int(v)).collect::<Vec<_>>(), x)
+        )
+    } else {
+        String::new()
+    };
+    let zeros = ints.iter().take_while(|v| **v == 0).count();
+    let ints = &ints[zeros..];
+    md.push(format!(
+        "**The rational root test.** If a fraction p/q in lowest terms is a root of a polynomial with integer coefficients, then p divides the constant term and q divides the leading coefficient. (Put {x} = p/q, multiply by q^n, and every term but the last is a multiple of p, every term but the first a multiple of q.) So there are only finitely many candidates to try.{}",
+        scaled
+    ));
+    let mut cand = vec![];
+    if zeros > 0 {
+        cand.push(format!(
+            "Every term has a factor {x}{}, so {x} = 0 is a root{} and we divide it out.",
+            if zeros > 1 {
+                format!("^{}", zeros)
+            } else {
+                String::new()
+            },
+            if zeros > 1 {
+                format!(" {} times", zeros)
+            } else {
+                String::new()
+            }
+        ));
+    }
+    let (a0, an) = (ints[0], *ints.last().unwrap());
+    let ps = divisors(a0);
+    let qs = divisors(an);
+    let mut fr: Vec<(i128, i128)> = vec![];
+    for q in &qs {
+        for p in &ps {
+            if gcd(*p, *q) == 1 {
+                fr.push((*p, *q));
+            }
+        }
+    }
+    fr.sort_by(|a, b| (a.0 * b.1).cmp(&(b.0 * a.1)));
+    let show_fr = |(p, q): &(i128, i128)| {
+        if *q == 1 {
+            format!("±{}", p)
+        } else {
+            format!("±{}/{}", p, q)
+        }
+    };
+    let list: Vec<String> = fr.iter().take(16).map(show_fr).collect();
+    cand.push(format!(
+        "Constant term {}, leading coefficient {}: p is one of {}, q one of {}, so the candidates are {}{} ({} in all, counting signs).",
+        a0,
+        an,
+        ps.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
+        qs.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
+        list.join(", "),
+        if fr.len() > 16 { ", …" } else { "" },
+        2 * fr.len()
+    ));
+    md.push(format!("**The candidates.** {}", cand.join(" ")));
+    let lin: Vec<String> = roots
+        .iter()
+        .filter(|(r, _)| !r.is_zero())
+        .map(|(r, m)| {
+            let f = crate::print::show(&from_poly(&[neg(r.clone()), Expr::one()], x));
+            if *m > 1 {
+                format!("({})^{}", f, m)
+            } else {
+                format!("({})", f)
+            }
+        })
+        .collect();
+    md.push(format!(
+        "**Trying them.** Putting each candidate in, these give 0: {x} = {}. A root r means {x} − r divides the polynomial, so we divide each one out (and try the same r again on the quotient, which finds repeated roots). Dividing by {} leaves {}.",
+        found.join(", "),
+        if lin.is_empty() { format!("{x}") } else { lin.join("·") },
+        if rest.len() > 1 {
+            format!(
+                "{}, which has no rational roots, so its roots are found next{}",
+                poly_text(rest, x),
+                match rest.len() {
+                    3 => " by completing the square",
+                    4 => " with Cardano's formula",
+                    5 => " with Ferrari's method",
+                    _ => "",
+                }
+            )
+        } else {
+            "a constant, so these are all the roots".to_string()
+        }
+    ));
+    md.push("**What to notice.** The test only finds rational roots, but it is exact and needs no formula; each root found lowers the degree by one, so a cubic with one rational root is down to a quadratic.".into());
+    md.join("\n\n")
+}
+
+fn gcd(a: i128, b: i128) -> i128 {
+    let (mut a, mut b) = (a.abs(), b.abs());
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
 }

@@ -339,7 +339,7 @@ fn complex_expr(r: (f64, f64)) -> Expr {
     }
 }
 
-fn quadratic(a: &Expr, b: &Expr, c: &Expr) -> Vec<Expr> {
+pub(crate) fn quadratic(a: &Expr, b: &Expr, c: &Expr) -> Vec<Expr> {
     let disc = simplify(&sub(
         pow(b.clone(), int(2)),
         mul(vec![int(4), a.clone(), c.clone()]),
@@ -366,8 +366,22 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
             "no solution".into()
         });
     }
+    // degree 1 and 2 are explained as such (the quadratic by completing the square,
+    // even when its roots are rational)
+    match n {
+        1 => radicals::record(radicals::Trace::Linear { poly: c.clone() }),
+        2 => radicals::record(radicals::Trace::Quadratic { poly: c.clone() }),
+        _ => {}
+    }
     if let Some(p) = exact_poly(&c) {
         let (roots, rest) = rational_roots(&p);
+        if n > 2 && !roots.is_empty() {
+            radicals::record(radicals::Trace::RationalRoots {
+                poly: c.clone(),
+                roots: roots.iter().map(|(r, m)| (Num(r.clone()), *m)).collect(),
+                rest: rest.iter().cloned().map(Num).collect(),
+            });
+        }
         let mut out: Vec<Expr> = roots.into_iter().map(|(r, _)| Num(r)).collect();
         let pieces = if rest.len() > 4 {
             rational_factors(&rest)
@@ -388,7 +402,12 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
             match piece.len() {
                 0 | 1 => {}
                 2 => out.push(Num(piece[0].neg().div(&piece[1]).unwrap())),
-                3 => out.extend(quadratic(&e[2], &e[1], &e[0])),
+                3 => {
+                    if n > 2 {
+                        radicals::record(radicals::Trace::Quadratic { poly: e.clone() });
+                    }
+                    out.extend(quadratic(&e[2], &e[1], &e[0]))
+                }
                 4 | 5 => out.extend(by_formula(&e)?),
                 _ => {
                     radicals::record(radicals::Trace::Numeric { poly: e });
