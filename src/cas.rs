@@ -990,6 +990,29 @@ fn lim(e: &Expr, x: &str, p: &Point, depth: usize) -> Option<L> {
                 },
             }
         }
+        Apply(f, args) if crate::special::is_special(f, args.len()) => {
+            // the variable sits in the last argument (orders are constants)
+            let k = args.len() - 1;
+            if args[..k].iter().any(|a| a.contains_sym(x)) {
+                return None;
+            }
+            match lim(&args[k], x, p, depth + 1)? {
+                L::F(v) => {
+                    let mut a = args.clone();
+                    a[k] = v;
+                    let r = crate::special::apply(f, a);
+                    if numeric::value(&r).is_finite() || !r.symbols().is_empty() {
+                        Some(L::F(r))
+                    } else {
+                        None
+                    }
+                }
+                l => match crate::special::at_infinity(f, inf_sign(&l))? {
+                    Some(v) => Some(L::F(v)),
+                    None => Some(L::Inf),
+                },
+            }
+        }
         _ => None,
     }
 }
@@ -1537,6 +1560,9 @@ fn integ(e: &Expr, x: &str, depth: usize) -> Option<Expr> {
     if let Some(r) = table(e, x) {
         return Some(r);
     }
+    if let Some(r) = gaussian(e, x) {
+        return Some(r);
+    }
     if let Some(r) = rational(e, x) {
         return Some(r);
     }
@@ -1551,6 +1577,77 @@ fn integ(e: &Expr, x: &str, depth: usize) -> Option<Expr> {
         return integ(&ex, x, depth + 1);
     }
     None
+}
+
+/// P(x) e^(a x^2 + b x + c) with a polynomial P: write the antiderivative as
+/// R(x) e^q + k * (integral of e^q), where R' + R q' = P - k, and the last
+/// integral is an error function (erf for a < 0, erfi for a > 0)
+fn gaussian(e: &Expr, x: &str) -> Option<Expr> {
+    let fs = match e {
+        Mul(f) => f.clone(),
+        o => vec![o.clone()],
+    };
+    let mut q = None;
+    let mut poly = vec![];
+    for f in fs {
+        match &f {
+            Pow(b, p) if **b == Const(Const::E) && p.contains_sym(x) => {
+                if q.is_some() {
+                    return None;
+                }
+                q = Some((**p).clone());
+            }
+            _ if is_poly(&f, x) => poly.push(f),
+            _ => return None,
+        }
+    }
+    let q = q?;
+    let qc = poly_coeffs(&calc::expand(&q), x)?;
+    if qc.len() != 3 || is_zero(&qc[2]) {
+        return None;
+    }
+    let (c0, b, a) = (qc[0].clone(), qc[1].clone(), qc[2].clone());
+    let av = numeric::value(&a);
+    let negative = if av.is_finite() { av < 0.0 } else { a.is_negative_term() };
+    let p = poly_coeffs(&calc::expand(&mul(poly)), x)?;
+    let n = p.len() - 1;
+    // r_{m-1} = (p_m - b r_m - (m+1) r_{m+1}) / (2a), from the top down
+    let mut r = vec![Expr::zero(); n + 2];
+    for m in (1..=n).rev() {
+        let t = sub(
+            sub(p[m].clone(), mul2(b.clone(), r[m].clone())),
+            mul2(int(m as i128 + 1), r[m + 1].clone()),
+        );
+        r[m - 1] = simplify(&div(t, mul2(int(2), a.clone())));
+    }
+    let k = simplify(&sub(p[0].clone(), add2(mul2(b.clone(), r[0].clone()), r[1].clone())));
+    let xs = Expr::sym(x);
+    let big_r = add((0..n).map(|j| mul2(r[j].clone(), pow(xs.clone(), int(j as i128)))).collect());
+    let eq = exp(q.clone());
+    let mut out = mul2(big_r, eq);
+    if !is_zero(&k) {
+        // e^q = e^(c - b^2/(4a)) e^(a (x + b/(2a))^2)
+        let shift = add2(xs.clone(), div(b.clone(), mul2(int(2), a.clone())));
+        let konst = exp(sub(c0, div(pow(b, int(2)), mul2(int(4), a.clone()))));
+        let (name, s2) = if negative { ("erf", neg(a)) } else { ("erfi", a) };
+        let base = mul(vec![
+            div(mul2(sqrt(Const(Const::Pi)), rsqrt(&div(Expr::one(), s2.clone()))), int(2)),
+            konst,
+            crate::special::apply(name, vec![mul2(rsqrt(&s2), shift)]),
+        ]);
+        out = add2(out, mul2(k, base));
+    }
+    Some(out)
+}
+
+/// sqrt with rationals written as sqrt(p q)/q, so sqrt(1/2) = sqrt(2)/2
+pub fn rsqrt(e: &Expr) -> Expr {
+    if let Some(n) = e.num().filter(|n| n.is_exact() && !n.is_integer() && !n.is_negative()) {
+        if let (Some(p), Some(q)) = (n.numer(), n.denom()) {
+            return div(sqrt(int(p * q)), int(q));
+        }
+    }
+    sqrt(e.clone())
 }
 
 /// d/dx F equals f at sample points (other symbols get sample values too)

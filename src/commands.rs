@@ -10,7 +10,7 @@ use crate::plot::{self, Curve, Figure, Figure3D, Series, Surface};
 use crate::print::show;
 use std::rc::Rc;
 
-fn obj(o: Obj) -> Expr {
+pub(crate) fn obj(o: Obj) -> Expr {
     Expr::Obj(Rc::new(o))
 }
 
@@ -57,7 +57,7 @@ fn function_name(f: &str) -> bool {
     first && (rest.is_empty() || rest.starts_with('_') || rest.chars().all(|x| x.is_ascii_digit()))
 }
 
-fn ident(n: &Node, what: &str) -> R<String> {
+pub(crate) fn ident(n: &Node, what: &str) -> R<String> {
     match n {
         Node::Ident(s) => Ok(s.clone()),
         _ => Err(format!("{} must be a variable name", what)),
@@ -65,7 +65,7 @@ fn ident(n: &Node, what: &str) -> R<String> {
 }
 
 /// [r phi] or [r, phi]: a list of names, taken literally (not evaluated)
-fn names(n: &Node, what: &str) -> R<Vec<String>> {
+pub(crate) fn names(n: &Node, what: &str) -> R<Vec<String>> {
     match n {
         Node::Matrix(rows) => rows.iter().flatten().map(|x| ident(x, what)).collect(),
         Node::Ident(s) => Ok(vec![s.clone()]),
@@ -81,7 +81,7 @@ fn flat(e: Expr) -> Vec<Expr> {
 }
 
 /// plot labels are the expressions as typed
-fn label(n: &Node, _v: &Expr) -> String {
+pub(crate) fn label(n: &Node, _v: &Expr) -> String {
     crate::parser::source(n)
 }
 
@@ -99,6 +99,9 @@ type Trajectory = (String, Vec<(f64, Vec<f64>)>);
 impl Session {
     pub(crate) fn command_call(&mut self, f: &str, args: &[Node]) -> R<Expr> {
         if let Some(r) = self.cas_call(f, args) {
+            return r;
+        }
+        if let Some(r) = self.mv_call(f, args) {
             return r;
         }
         if let Some(r) = self.factor_call(f, args) {
@@ -199,7 +202,7 @@ impl Session {
     }
 
     /// A number, or an error naming the argument
-    fn number(&mut self, n: &Node, what: &str) -> R<f64> {
+    pub(crate) fn number(&mut self, n: &Node, what: &str) -> R<f64> {
         let v = self.eval(n)?;
         let x = numeric::value(&v);
         if x.is_finite() {
@@ -209,7 +212,7 @@ impl Session {
         }
     }
 
-    fn numbers(&mut self, n: &Node, what: &str) -> R<Vec<f64>> {
+    pub(crate) fn numbers(&mut self, n: &Node, what: &str) -> R<Vec<f64>> {
         let v = self.eval(n)?;
         let xs: Vec<f64> = flat(v.clone()).iter().map(numeric::value).collect();
         if xs.iter().all(|x| x.is_finite()) {
@@ -219,7 +222,7 @@ impl Session {
         }
     }
 
-    fn range(&mut self, cmd: &str, a: &Node, b: &Node) -> R<(f64, f64)> {
+    pub(crate) fn range(&mut self, cmd: &str, a: &Node, b: &Node) -> R<(f64, f64)> {
         let (x, y) = (self.number(a, "the range")?, self.number(b, "the range")?);
         if x == y {
             return Err(format!("{}: the range must be two different numbers", cmd));
@@ -228,7 +231,7 @@ impl Session {
     }
 
     /// Evaluate `n` with `vars` unbound and compile it as a function of them
-    fn function(&mut self, n: &Node, vars: &[String]) -> R<(numeric::Code, Expr)> {
+    pub(crate) fn function(&mut self, n: &Node, vars: &[String]) -> R<(numeric::Code, Expr)> {
         let v = self.eval_hidden(n, vars)?;
         if !v.is_scalar() {
             return Err(format!("can't plot {}", show(&v)));

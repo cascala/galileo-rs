@@ -82,10 +82,24 @@ galileo> kretschmann(S)
 * Components are indexed from 0: `g[0,0]`, `riemann(g)[1,0,1,0]`.
 * `geodesic(g, x0, v0, s1)` integrates a geodesic and plots it.
 
+## Multivariable calculus and special functions
+
+* `grad`, `div`, `curl`, `laplacian` in Cartesian, polar, cylindrical and spherical
+  coordinates; `jacobian`, `hessian`, `potential` (a scalar potential, or `[]`).
+* `lineint` (work and arc length), `flux` and `surfint` over parametrized surfaces.
+* `critical`, `classify` (second-derivative test), `minimize`/`maximize` (closed interval,
+  critical points, or BFGS from a start), `lagrange` (one or more constraints).
+* `solve` and `fsolve` handle systems: polynomial systems exactly (substitution, factoring,
+  resultants; real solutions, and curves of solutions with a free unknown), others by Newton.
+* `gamma`, `beta`, `digamma`, `polygamma`, `erf`, `erfc`, `erfi`, `zeta`, `besselj`,
+  `bessely`, `besseli`, with exact values (`gamma(7/2)`, `zeta(4)`), derivatives and limits;
+  `legendre`, `hermite`, `laguerre`, `chebyshev`, `chebyshevu` polynomials. Integrals of
+  `p(x) e^(ax^2+bx+c)` come out with `erf`, and `x^p e^(-kx)` over `[0, inf)` with `gamma`.
+
 ## Plots and ODEs
 
-`plot`, `parametric`, `plot3d`, `surface`, `parametric3d`, `odeplot`, `odesolve` and
-`geodesic`. In the terminal a plot is drawn in text; in a notebook it is an interactive
+`plot`, `parametric`, `plot3d`, `surface`, `parametric3d`, `contour`, `implicitplot`,
+`fieldplot`, `odeplot`, `odesolve` and `geodesic`. In the terminal a plot is drawn in text; in a notebook it is an interactive
 Plotly chart with an SVG fallback. `odesolve` uses fixed-step RK4.
 
 ## Jupyter
@@ -133,6 +147,8 @@ cargo build --release --target wasm32-unknown-unknown --lib
 | `src/ratfun.rs` | Rational-function normal form behind `simplify` |
 | `src/geometry.rs` | Metrics, curvature tensors, geodesic equations |
 | `src/commands.rs` | Geometry, plot and ODE commands |
+| `src/special.rs` | Special functions (gamma, erf, zeta, Bessel): exact values, numerics, derivatives; orthogonal polynomials |
+| `src/vcalc.rs`, `src/mv_cmd.rs` | Vector calculus, polynomial systems, optimization, Lagrange multipliers, contour and field plots |
 | `src/numeric.rs`, `src/ode.rs` | Compiled numeric evaluation and RK4 |
 | `src/plot.rs` | Figures: text, SVG and Plotly JSON |
 | `src/latex.rs`, `src/display.rs` | LaTeX and notebook MIME bundles |

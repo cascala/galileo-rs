@@ -175,6 +175,9 @@ fn fmt(e: &Expr) -> (String, u8) {
         }
         Apply(f, v) => {
             let args = v.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", ");
+            if let Some(s) = special_latex(f, v) {
+                return (s, P_ATOM);
+            }
             let f = if f == "atan2" {
                 "\\operatorname{atan2}".to_string()
             } else {
@@ -318,6 +321,25 @@ fn fmt_mul(e: &Expr) -> (String, u8) {
     } else {
         (s, P_MUL)
     }
+}
+
+/// \Gamma(x), \operatorname{erf}(x), J_n(x), \psi^{(n)}(x), ...
+fn special_latex(f: &str, v: &[Expr]) -> Option<String> {
+    if !crate::special::is_special(f, v.len()) {
+        return None;
+    }
+    let a = |k: usize| fmt(&v[k]).0;
+    Some(match f {
+        "gamma" => format!("\\Gamma\\left({}\\right)", a(0)),
+        "digamma" => format!("\\psi\\left({}\\right)", a(0)),
+        "polygamma" => format!("\\psi^{{({})}}\\left({}\\right)", a(0), a(1)),
+        "zeta" => format!("\\zeta\\left({}\\right)", a(0)),
+        "erf" | "erfc" | "erfi" => format!("\\operatorname{{{}}}\\left({}\\right)", f, a(0)),
+        "besselj" => format!("J_{{{}}}\\left({}\\right)", a(0), a(1)),
+        "bessely" => format!("Y_{{{}}}\\left({}\\right)", a(0), a(1)),
+        "besseli" => format!("I_{{{}}}\\left({}\\right)", a(0), a(1)),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

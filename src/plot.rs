@@ -101,7 +101,7 @@ fn fmt_tick(d: f64) -> String {
 }
 
 /// "Nice" tick positions (1, 2, 5 x 10^k)
-fn ticks(lo: f64, hi: f64, target: usize) -> Vec<f64> {
+pub(crate) fn ticks(lo: f64, hi: f64, target: usize) -> Vec<f64> {
     let raw = (hi - lo) / target as f64;
     if raw <= 0.0 || !raw.is_finite() {
         return vec![];
@@ -131,6 +131,19 @@ pub struct Series {
     pub markers: bool,
     /// vertical error bars, one per point (or none)
     pub errors: Vec<f64>,
+    /// a fixed color instead of the palette's (contour levels)
+    pub color: Option<String>,
+    /// thin lines (contours, arrows)
+    pub thin: bool,
+}
+
+impl Series {
+    fn col(&self, i: usize) -> &str {
+        self.color.as_deref().unwrap_or(PALETTE[i % PALETTE.len()])
+    }
+    fn width(&self) -> &'static str {
+        if self.thin { "1.3" } else { "2" }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -324,7 +337,7 @@ impl Figure {
                         (
                             "marker",
                             obj(&[
-                                ("color", jstr(PALETTE[i % PALETTE.len()])),
+                                ("color", jstr(s.col(i))),
                                 ("size", if pts.len() > 1500 { "2" } else { "8" }.into()),
                             ]),
                         ),
@@ -350,8 +363,8 @@ impl Figure {
                     (
                         "line",
                         obj(&[
-                            ("color", jstr(PALETTE[i % PALETTE.len()])),
-                            ("width", "2".into()),
+                            ("color", jstr(s.col(i))),
+                            ("width", s.width().into()),
                         ]),
                     ),
                 ])
@@ -537,7 +550,7 @@ impl Figure {
         for (i, ser) in self.series.iter().enumerate() {
             if ser.markers && ser.points.len() > 1500 {
                 // many points (a fractal, a bifurcation diagram): tiny squares in one path
-                let c = PALETTE[i % PALETTE.len()];
+                let c = ser.col(i);
                 let mut d = String::new();
                 for &(x, y) in &ser.points {
                     if finite(x) && finite(y) {
@@ -548,7 +561,7 @@ impl Figure {
                 continue;
             }
             if ser.markers {
-                let c = PALETTE[i % PALETTE.len()];
+                let c = ser.col(i);
                 for (k, &(x, y)) in ser.points.iter().enumerate() {
                     if !(finite(x) && finite(y)) {
                         continue;
@@ -588,9 +601,10 @@ impl Figure {
             }
             let _ = write!(
                 s,
-                r#"<path d="{}" stroke="{}"/>"#,
+                r#"<path d="{}" stroke="{}" stroke-width="{}"/>"#,
                 d,
-                PALETTE[i % PALETTE.len()]
+                ser.col(i),
+                ser.width()
             );
         }
         s.push_str("</g>");
@@ -639,7 +653,7 @@ impl Figure {
             );
             for (i, ser) in self.series.iter().enumerate() {
                 let y = ly + 10.0 + i as f64 * 18.0;
-                let c = PALETTE[i % PALETTE.len()];
+                let c = ser.col(i);
                 if ser.markers {
                     let _ = write!(
                         s,

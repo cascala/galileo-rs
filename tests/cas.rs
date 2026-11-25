@@ -35,7 +35,7 @@ fn antiderivatives() {
             f
         );
     }
-    assert!(one("integrate(exp(-x^2), x)").starts_with("ERROR"));
+    assert_eq!(one("integrate(exp(-x^2), x)"), "sqrt(pi)*erf(x)/2");
 }
 
 #[test]
@@ -45,8 +45,7 @@ fn definite_integrals() {
     assert_eq!(one("integrate(log(x), x, 0, 1)"), "-1");
     assert_eq!(one("integrate(x^2, x, 0, a)"), "a^3/3");
     assert!(one("integrate(1/x^2, x, -1, 1)").contains("diverges"));
-    let g: f64 = one("integrate(exp(-x^2), x, -inf, inf)").parse().unwrap();
-    assert!((g - std::f64::consts::PI.sqrt()).abs() < 1e-9);
+    assert_eq!(one("integrate(exp(-x^2), x, -inf, inf)"), "sqrt(pi)");
 }
 
 #[test]

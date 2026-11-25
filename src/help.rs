@@ -166,14 +166,14 @@ pub const ENTRIES: &[Entry] = &[
         "solve",
         "Algebra",
         "solve(f, x) or solve([f1 f2], [x y])",
-        "Solves f = 0 (or an equation lhs == rhs) for x and returns all solutions in a row. An equation in one of sin(x), cos(x), tan(x) gives the solutions with 0 <= x < 2*pi. Polynomials are solved exactly up to degree 4: rational roots first, then the quadratic formula, Cardano's formula for cubics (written with cos when all three roots are real) and Ferrari's method for quartics, also with symbolic coefficients. Higher degrees are factored over the rationals and the pieces of degree 4 or less are solved exactly; numeric (complex) roots otherwise. explain = \"teach\" walks through the formula with the numbers of the equation. Rational functions work too. With a list of equations and unknowns, solves a linear system. For other equations use fsolve.",
+        "Solves f = 0 (or an equation lhs == rhs) for x and returns all solutions in a row. An equation in one of sin(x), cos(x), tan(x) gives the solutions with 0 <= x < 2*pi. Polynomials are solved exactly up to degree 4: rational roots first, then the quadratic formula, Cardano's formula for cubics (written with cos when all three roots are real) and Ferrari's method for quartics, also with symbolic coefficients. Higher degrees are factored over the rationals and the pieces of degree 4 or less are solved exactly; numeric (complex) roots otherwise. explain = \"teach\" walks through the formula with the numbers of the equation. Rational functions work too. With a list of equations and unknowns, solves a linear system, or a polynomial system (by substitution, factoring and resultants), giving the real solutions one per row. For other equations use fsolve.",
         "solve(x^3 - 3*x + 1, x)"
     ),
     e!(
         "fsolve",
         "Algebra",
-        "fsolve(f, x, guess)",
-        "A numeric solution of f = 0 near the guess (Newton's method).",
+        "fsolve(f, x, guess) or fsolve([f1 f2], [x y], [x0 y0])",
+        "A numeric solution of f = 0 near the guess (Newton's method); for a system, Newton's method with the Jacobian.",
         "fsolve(cos(x) - x, x, 1)"
     ),
     e!(
@@ -229,7 +229,7 @@ pub const ENTRIES: &[Entry] = &[
         "deriv",
         "Calculus",
         "deriv(expr, x)",
-        "Derivative of expr with respect to x.",
+        "Derivative of expr with respect to the variable given (other letters count as constants: a partial derivative).",
         "deriv(x^3 - 2*x, x)"
     ),
     e!(
@@ -960,6 +960,146 @@ pub const ENTRIES: &[Entry] = &[
         "Column k of a matrix (counting from 1), as a column vector.",
         "column([1 2; 3 4], 2)"
     ),
+    e!(
+        "grad",
+        "Multivariable calculus",
+        "grad(f, [x y z]) or grad(f, [r theta phi], \"spherical\")",
+        "Gradient: the row of partial derivatives, pointing where f increases fastest. Coordinate systems: \"cartesian\" (default), \"polar\" [r theta], \"cylindrical\" [r theta z], \"spherical\" [r theta phi] with theta measured from the z axis; the components are then along the unit vectors.",
+        "grad(x^2*y, [x y])"
+    ),
+    e!(
+        "div",
+        "Multivariable calculus",
+        "div([P Q R], [x y z]) or div(F, [r theta phi], \"spherical\")",
+        "Divergence of a vector field: the net outflow per unit volume, dP/dx + dQ/dy + dR/dz in Cartesian coordinates. Same coordinate systems as grad.",
+        "div([x*y, y*z, z*x], [x y z])"
+    ),
+    e!(
+        "curl",
+        "Multivariable calculus",
+        "curl([P Q R], [x y z]) or curl([P Q], [x y])",
+        "Curl of a vector field: the row [dR/dy - dQ/dz, dP/dz - dR/dx, dQ/dx - dP/dy] in 3D, the number dQ/dx - dP/dy in the plane. Same coordinate systems as grad.",
+        "curl([-y, x, 0], [x y z])"
+    ),
+    e!(
+        "laplacian",
+        "Multivariable calculus",
+        "laplacian(f, [x y z]) or laplacian(f, [r theta phi], \"spherical\")",
+        "The Laplacian div(grad f): the sum of the second partial derivatives in Cartesian coordinates.",
+        "laplacian(1/r, [r theta phi], \"spherical\")"
+    ),
+    e!(
+        "jacobian",
+        "Multivariable calculus",
+        "jacobian([f g], [x y])",
+        "Jacobian matrix: row i holds the partial derivatives of the i-th function. Its determinant is the area scale factor of a change of variables.",
+        "jacobian([r*cos(t), r*sin(t)], [r t])"
+    ),
+    e!(
+        "hessian",
+        "Multivariable calculus",
+        "hessian(f, [x y])",
+        "Hessian matrix of second partial derivatives.",
+        "hessian(x^3 - 3*x*y + y^3, [x y])"
+    ),
+    e!(
+        "potential",
+        "Multivariable calculus",
+        "potential([P Q R], [x y z])",
+        "A function phi with grad(phi) = F, or [] when the field is not conservative (its curl is not zero).",
+        "potential([2*x*y, x^2 + 3*y^2], [x y])"
+    ),
+    e!(
+        "lineint",
+        "Multivariable calculus",
+        "lineint(F, [x y], [x(t) y(t)], t, a, b)",
+        "Line integral along the path r(t), a <= t <= b. For a vector field F: the work, the integral of F(r(t)) . r'(t) dt. For a scalar f: the integral of f ds with ds = |r'(t)| dt (f = 1 gives the length).",
+        "lineint([-y, x], [x y], [cos(t), sin(t)], t, 0, 2*pi)"
+    ),
+    e!(
+        "flux",
+        "Multivariable calculus",
+        "flux(F, [x y z], [x(u,v) y(u,v) z(u,v)], u, a, b, v, c, d), surfint(f, ...)",
+        "Flux of a vector field through a parametrized surface, the double integral of F . (r_u x r_v) du dv; surfint integrates a scalar f dS (f = 1 gives the area).",
+        "flux([x, y, z], [x y z], [sin(u)*cos(v), sin(u)*sin(v), cos(u)], u, 0, pi, v, 0, 2*pi)"
+    ),
+    e!(
+        "critical",
+        "Multivariable calculus",
+        "critical(f, [x y])",
+        "Critical points: the real solutions of grad f = 0, one per row (exact for polynomial systems). The explanation classifies each with the second-derivative test.",
+        "critical(x^3 - 3*x*y + y^3, [x y])"
+    ),
+    e!(
+        "classify",
+        "Multivariable calculus",
+        "classify(f, [x y], [x0 y0])",
+        "Second-derivative test at a point: \"min\", \"max\", \"saddle\" or \"inconclusive\", from the signs of the Hessian's eigenvalues.",
+        "classify(x^2 - y^2, [x y], [0 0])"
+    ),
+    e!(
+        "minimize",
+        "Multivariable calculus",
+        "minimize(f, x, a, b), minimize(f, [x y]), minimize(f, [x y], [x0 y0]); maximize the same",
+        "Where f is smallest: on an interval by the closed interval method (exact); in several variables the best local minimum among the critical points; or numerically (BFGS) from a starting point. maximize works the same way.",
+        "minimize(x^3 - 3*x, x, -3, 2)"
+    ),
+    e!(
+        "lagrange",
+        "Multivariable calculus",
+        "lagrange(f, g, [x y]) or lagrange(f, [g1 g2], [x y z])",
+        "Lagrange multipliers: the points where grad f = lambda grad g on the constraint g = 0 (an equation g1 == g2 works too), one per row. The explanation gives lambda and f at each point.",
+        "lagrange(x*y, x^2 + y^2 == 2, [x y])"
+    ),
+    e!(
+        "contour",
+        "Plotting",
+        "contour(f, x, from, to, y, from, to) or contour(f, x, a, b, y, c, d, levels)",
+        "Level curves of f(x, y), colored from blue (low) to red (high). levels is a count (12) or a list of values ([0 1 4 9]). Combine with other plots using show.",
+        "contour(x^2 - y^2, x, -2, 2, y, -2, 2)"
+    ),
+    e!(
+        "fieldplot",
+        "Plotting",
+        "fieldplot([P Q], x, from, to, y, from, to) or with a last argument n (arrows per side, default 15)",
+        "Arrows of a vector field in the plane; lengths relative to the longest arrow. vectorfield is the same.",
+        "fieldplot([-y, x], x, -2, 2, y, -2, 2)"
+    ),
+    e!(
+        "gamma",
+        "Special functions",
+        "gamma(x), beta(a, b), digamma(x), polygamma(n, x)",
+        "The gamma function, the integral of t^(x-1) e^(-t) from 0 to inf: gamma(n) = (n-1)!, gamma(1/2) = sqrt(pi), exact at whole and half-whole numbers. beta(a, b) = gamma(a) gamma(b) / gamma(a+b); digamma is the derivative of log(gamma(x)), polygamma(n, x) its n-th derivative.",
+        "gamma(7/2)"
+    ),
+    e!(
+        "erf",
+        "Special functions",
+        "erf(x), erfc(x), erfi(x)",
+        "Error function, 2/sqrt(pi) times the integral of e^(-t^2) from 0 to x; erfc = 1 - erf; erfi(x) = -i erf(ix). Integrals of e^(polynomial of degree 2) come out with them.",
+        "integrate(exp(-x^2), x, 0, inf)"
+    ),
+    e!(
+        "zeta",
+        "Special functions",
+        "zeta(s)",
+        "Riemann zeta function, the sum of 1/k^s for s > 1, continued to all s except 1. Exact at even numbers (zeta(2) = pi^2/6) and at 0 and negative whole numbers (zeta(-1) = -1/12).",
+        "zeta(4)"
+    ),
+    e!(
+        "besselj",
+        "Special functions",
+        "besselj(n, x), bessely(n, x), besseli(n, x)",
+        "Bessel functions of whole order n: J_n and Y_n solve x^2 y'' + x y' + (x^2 - n^2) y = 0 (J_n is the one finite at 0); I_n is the modified Bessel function.",
+        "plot(besselj(0, x), besselj(1, x), x, 0, 20)"
+    ),
+    e!(
+        "legendre",
+        "Special functions",
+        "legendre(n, x), hermite(n, x), laguerre(n, x), chebyshev(n, x), chebyshevu(n, x)",
+        "Classical orthogonal polynomials of degree n: Legendre P_n, Hermite H_n (physicists'), Laguerre L_n, Chebyshev T_n and U_n.",
+        "legendre(3, x)"
+    ),
 ];
 
 const ALIASES: &[(&str, &str)] = &[
@@ -981,6 +1121,22 @@ const ALIASES: &[(&str, &str)] = &[
     ("not", "and"),
     ("zeros", "ones"),
     ("diff", "deriv"),
+    ("gradient", "grad"),
+    ("divergence", "div"),
+    ("surfint", "flux"),
+    ("maximize", "minimize"),
+    ("vectorfield", "fieldplot"),
+    ("erfc", "erf"),
+    ("erfi", "erf"),
+    ("beta", "gamma"),
+    ("digamma", "gamma"),
+    ("polygamma", "gamma"),
+    ("bessely", "besselj"),
+    ("besseli", "besselj"),
+    ("hermite", "legendre"),
+    ("laguerre", "legendre"),
+    ("chebyshev", "legendre"),
+    ("chebyshevu", "legendre"),
     ("int", "integrate"),
     ("series", "taylor"),
     ("prod", "sum"),

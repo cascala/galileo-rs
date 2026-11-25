@@ -649,6 +649,7 @@ impl Session {
                     points: pts,
                     markers: true,
                     errors: vec![],
+                    ..Default::default()
                 });
             }
         }
@@ -682,6 +683,7 @@ impl Session {
                     points: pts,
                     markers: false,
                     errors: vec![],
+                    ..Default::default()
                 });
             }
         }

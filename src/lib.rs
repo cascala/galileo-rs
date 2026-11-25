@@ -43,6 +43,9 @@ pub mod print;
 pub mod radicals;
 pub mod ratfun;
 pub mod rsa_data;
+pub mod special;
+pub mod vcalc;
+pub mod mv_cmd;
 pub mod teach;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;

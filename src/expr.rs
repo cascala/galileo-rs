@@ -283,7 +283,7 @@ impl Expr {
             Mul(v) => mul(v.iter().map(&mut *f).collect()),
             Pow(a, b) => pow(f(a), f(b)),
             Func(g, a) => func(*g, f(a)),
-            Apply(g, v) => Apply(g.clone(), v.iter().map(&mut *f).collect()),
+            Apply(g, v) => crate::special::apply(g, v.iter().map(&mut *f).collect()),
             Matrix(rows) => Matrix(
                 rows.iter()
                     .map(|r| r.iter().map(&mut *f).collect())

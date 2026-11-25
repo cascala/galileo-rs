@@ -80,6 +80,12 @@ pub fn deriv(e: &Expr, x: &str) -> Expr {
                 add2(pow(xx.clone(), Expr::int(2)), pow(y.clone(), Expr::int(2))),
             )
         }
+        Apply(f, args)
+            if crate::special::is_special(f, args.len())
+                && crate::special::deriv(f, args, x).is_some() =>
+        {
+            crate::special::deriv(f, args, x).unwrap()
+        }
         Apply(f, args) if args.len() == 1 => {
             // chain rule with a new function f'
             mul2(Apply(format!("{}'", f), args.clone()), deriv(&args[0], x))

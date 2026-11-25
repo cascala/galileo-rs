@@ -16,6 +16,8 @@ pub enum Code {
     Pow(Box<Code>, Box<Code>),
     F(Func, Box<Code>),
     Atan2(Box<Code>, Box<Code>),
+    /// a special function (gamma, erf, besselj, ...)
+    Sp(&'static str, Vec<Code>),
 }
 
 /// Compile `e` as a function of the named variables (in that order)
@@ -45,6 +47,10 @@ pub fn compile(e: &Expr, names: &[&str]) -> Code {
             Box::new(compile(&v[0], names)),
             Box::new(compile(&v[1], names)),
         )),
+        Expr::Apply(f, v) if crate::special::is_special(f, v.len()) => {
+            let name = crate::special::NAMES.iter().find(|p| p.0 == f).unwrap().0;
+            fold(Sp(name, v.iter().map(|x| compile(x, names)).collect()))
+        }
         _ => K(f64::NAN),
     }
 }
@@ -52,7 +58,7 @@ pub fn compile(e: &Expr, names: &[&str]) -> Code {
 /// constant folding
 fn fold(c: Code) -> Code {
     let constant = match &c {
-        Code::Add(v) | Code::Mul(v) => v.iter().all(|x| matches!(x, Code::K(_))),
+        Code::Add(v) | Code::Mul(v) | Code::Sp(_, v) => v.iter().all(|x| matches!(x, Code::K(_))),
         Code::PowI(b, _) | Code::F(_, b) => matches!(**b, Code::K(_)),
         Code::Pow(a, b) | Code::Atan2(a, b) => {
             matches!(**a, Code::K(_)) && matches!(**b, Code::K(_))
@@ -72,6 +78,10 @@ pub fn run(c: &Code, x: &[f64]) -> f64 {
         Code::Pow(b, p) => run(b, x).powf(run(p, x)),
         Code::F(f, a) => f.apply(run(a, x)),
         Code::Atan2(y, xx) => run(y, x).atan2(run(xx, x)),
+        Code::Sp(f, v) => {
+            let a: Vec<f64> = v.iter().map(|t| run(t, x)).collect();
+            crate::special::value(f, &a)
+        }
     }
 }
 

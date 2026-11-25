@@ -401,7 +401,28 @@ impl Session {
             }
             return r.map(row);
         }
-        cas::solve_linear(&eqs, &xs).map(row)
+        match cas::solve_linear(&eqs, &xs) {
+            Ok(v) => Ok(row(v)),
+            Err(e) if e.contains("linear") => {
+                // polynomial systems: elimination, real solutions
+                let sols = crate::vcalc::solve_system(&eqs, &xs).ok_or_else(|| {
+                    "solve: can't solve this system exactly; try fsolve([f1 f2], [x y], [x0 y0]) from a guess".to_string()
+                })?;
+                if sols.is_empty() {
+                    return Err("solve: no real solution".into());
+                }
+                self.note(format!(
+                    "Real solutions of the system, one per row ({}). Found by eliminating unknowns one at a time (substitution, factoring and resultants); complex solutions are left out.{}",
+                    xs.join(", "),
+                    crate::vcalc::family_note(&sols)
+                ));
+                if sols.len() == 1 {
+                    return Ok(row(sols.into_iter().next().unwrap()));
+                }
+                Ok(Expr::Matrix(sols))
+            }
+            Err(e) => Err(e),
+        }
     }
 
     fn fsolve(&mut self, args: &[Node]) -> R<Expr> {
@@ -410,6 +431,28 @@ impl Session {
                 "usage: fsolve(f, x, guess): a numeric root of f = 0 near the guess".into(),
             );
         };
+        if let Node::Matrix(_) = x {
+            // a system: fsolve([f1 f2], [x y], [x0 y0])
+            let xs = names(x, "fsolve: the unknowns")?;
+            let fx: Vec<Expr> = match self.eval_hidden(f, &xs)? {
+                Expr::Matrix(m) => m.into_iter().flatten().map(|e| crate::eval::equation_lhs(&e)).collect(),
+                e => vec![crate::eval::equation_lhs(&e)],
+            };
+            let g: Vec<f64> = match self.eval(g)? {
+                Expr::Matrix(m) => m.into_iter().flatten().map(|e| numeric::value(&e)).collect(),
+                e => vec![numeric::value(&e)],
+            };
+            if g.len() != xs.len() || g.iter().any(|v| !v.is_finite()) {
+                return Err("fsolve: the guess needs one number per unknown".into());
+            }
+            let free: Vec<String> = fx.iter().flat_map(|e| numeric::free(e, &xs.iter().map(|s| s.as_str()).collect::<Vec<_>>())).collect();
+            if !free.is_empty() {
+                return Err(format!("fsolve: give values to {} first", free.join(", ")));
+            }
+            let r = crate::vcalc::newton(&fx, &xs, &g).map_err(|e| format!("fsolve: {}", e))?;
+            self.note("Newton's method for a system: at each step it replaces the equations by their linear approximation (the Jacobian) and solves that; it converges fast from a good guess. Another guess can give another solution.");
+            return Ok(row(r.into_iter().map(Expr::float).collect()));
+        }
         let x = name(x, "fsolve: x")?;
         let fx = crate::eval::equation_lhs(&self.eval_hidden(f, std::slice::from_ref(&x))?);
         let free = numeric::free(&fx, &[x.as_str()]);
@@ -812,7 +855,54 @@ fn charpoly(m: &[Vec<Expr>], x: &str) -> R<Expr> {
 }
 
 /// definite integral; splits at singular points inside the interval
-fn definite(fx: &Expr, x: &str, a: &Expr, b: &Expr, depth: usize) -> R<Expr> {
+/// c x^p e^(-k x) integrated from 0 to inf = c gamma(p+1) / k^(p+1)
+fn gamma_integral(fx: &Expr, x: &str, a: &Expr, b: &Expr) -> Option<Expr> {
+    if !a.is_zero() || is_inf(b) != 1 {
+        return None;
+    }
+    let fs = match fx {
+        Expr::Mul(v) => v.clone(),
+        o => vec![o.clone()],
+    };
+    let (mut p, mut k) = (None, None);
+    let mut c = vec![];
+    for f in fs {
+        match &f {
+            Expr::Sym(s) if s == x && p.is_none() => p = Some(Expr::one()),
+            Expr::Pow(base, e) if matches!(&**base, Expr::Sym(s) if s == x) && !e.contains_sym(x) && p.is_none() => {
+                p = Some((**e).clone())
+            }
+            Expr::Pow(base, q) if **base == Expr::Const(crate::expr::Const::E) && q.contains_sym(x) && k.is_none() => {
+                let co = cas::poly_coeffs(q, x)?;
+                if co.len() != 2 || !co[0].is_zero() {
+                    return None;
+                }
+                k = Some(neg(co[1].clone()));
+            }
+            _ if !f.contains_sym(x) => c.push(f),
+            _ => return None,
+        }
+    }
+    let (p, k) = (p.unwrap_or_else(Expr::zero), k?);
+    let pv = numeric::value(&p);
+    let kv = numeric::value(&k);
+    // whole p: the antiderivative already gives p!; need p > -1 and k > 0
+    // (a symbolic p is taken to be > -1, the condition for the integral to exist)
+    if pv.is_finite() && (pv <= -1.0 || pv.fract() == 0.0) || kv.is_finite() && kv <= 0.0 {
+        return None;
+    }
+    let p1 = add2(p, Expr::one());
+    Some(crate::ratfun::tidy(&mul(vec![
+        mul(c),
+        crate::special::apply("gamma", vec![p1.clone()]),
+        pow(k, neg(p1)),
+    ])))
+}
+
+pub(crate) fn definite(fx: &Expr, x: &str, a: &Expr, b: &Expr, depth: usize) -> R<Expr> {
+    if let Some(g) = gamma_integral(fx, x, a, b) {
+        return Ok(g);
+    }
     let free = numeric::free(fx, &[x]);
     let (an, bn) = (real(a, "integrate").ok(), real(b, "integrate").ok());
     let numeric_ok = free.is_empty() && an.is_some() && bn.is_some();

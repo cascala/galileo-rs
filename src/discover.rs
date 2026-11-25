@@ -2056,6 +2056,7 @@ impl Session {
             points: pts,
             markers: true,
             errors: errs,
+            ..Default::default()
         };
         // x = r cos, y = r sin: a picture of positions, same scale on both axes
         let polar = show(&ms[0]).contains("cos(") && show(&ms[1]).contains("sin(");
