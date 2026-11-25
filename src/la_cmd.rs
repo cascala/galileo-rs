@@ -49,6 +49,39 @@ impl Session {
                 Ok(m(j))
             }),
             "expm" => self.expm(args),
+            "cond" => self.one_matrix(f, args).and_then(|a| {
+                let r = decomp::svd(&a)?;
+                let big = r.sigma.first().cloned().unwrap_or(Expr::zero());
+                let small = r.sigma.last().cloned().unwrap_or(Expr::zero());
+                let (m, n) = dims(&a);
+                let full = m == n;
+                if small.is_zero() || !full {
+                    self.note("The condition number σ_max/σ_min is infinite: the matrix is singular (or not square), so some direction is squashed to 0 and A x = b can't be solved stably.");
+                    return Ok(Expr::sym("inf"));
+                }
+                let c = decomp::rad(&crate::build::div(big.clone(), small.clone()));
+                self.note(format!(
+                    "Condition number = largest/smallest singular value = {}/{}. It bounds how much a relative error in b can grow in the solution of A x = b: you can lose about log10 of it in decimal digits.",
+                    show(&big), show(&small)
+                ));
+                Ok(c)
+            }),
+            "posdef" | "isposdef" => self.one_matrix(f, args).map(|a| {
+                let r = decomp::cholesky(&a);
+                let yes = r.is_ok();
+                match r {
+                    Ok((_, d)) => self.note(format!(
+                        "Positive definite: symmetric, and elimination gives the pivots {}, all positive (so chol(A) exists, every eigenvalue is positive and xᵀAx > 0 for every x ≠ 0).",
+                        list(&d)
+                    )),
+                    Err(e) => self.note(if e.contains("symmetric") {
+                        "Not positive definite: only symmetric matrices (A = transpose(A)) are called positive definite.".to_string()
+                    } else {
+                        format!("Not positive definite: {}.", e.trim_start_matches("chol: the matrix is not positive definite ").trim_start_matches('(').replace("); every", ", and every"))
+                    }),
+                }
+                Expr::Bool(yes)
+            }),
             "kron" => {
                 if args.len() != 2 {
                     return Some(Err("usage: kron(A, B)".into()));

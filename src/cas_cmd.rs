@@ -405,7 +405,21 @@ impl Session {
             return r.map(row);
         }
         match cas::solve_linear(&eqs, &xs) {
-            Ok(v) => Ok(row(v)),
+            Ok(v) => {
+                let free: Vec<&String> = xs.iter().zip(&v).filter(|(x, e)| **e == Expr::sym(x)).map(|p| p.0).collect();
+                if !free.is_empty() {
+                    let names: Vec<&str> = free.iter().map(|s| s.as_str()).collect();
+                    self.note(format!(
+                        "Infinitely many solutions: {} {} free (any value works) and the other unknowns are given in terms of {}. Elimination left {} independent equation(s) for {} unknowns.",
+                        names.join(", "),
+                        if names.len() == 1 { "is" } else { "are" },
+                        if names.len() == 1 { "it" } else { "them" },
+                        xs.len() - names.len(),
+                        xs.len()
+                    ));
+                }
+                Ok(row(v))
+            }
             Err(e) if e.contains("linear") => {
                 // polynomial systems: elimination, real solutions
                 let sols = crate::vcalc::solve_system(&eqs, &xs).ok_or_else(|| {

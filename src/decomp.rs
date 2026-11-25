@@ -504,8 +504,14 @@ pub fn expm_exact(a: &Mat, t: Option<&str>) -> R<Mat> {
     let pinv = linalg::inverse(&pr)?;
     let r = matmul(&matmul(&pr, &e)?, &pinv)?;
     Ok(linalg::map(&r, |x| {
-        let s = simplify(&crate::calc::expand(x));
-        crate::ratfun::tidy(&s)
+        // the shortest of the expanded, simplified and factored forms
+        let e = crate::calc::expand(x);
+        let s = simplify(&e);
+        let t = crate::ratfun::tidy(&s);
+        [t, s, e]
+            .into_iter()
+            .min_by_key(|c| crate::print::show(c).len())
+            .unwrap()
     }))
 }
 
@@ -541,12 +547,25 @@ fn fmat(m: &[Vec<f64>]) -> Mat {
                     if x.abs() < 1e-13 * big.max(1.0) {
                         Expr::int(0)
                     } else {
-                        Expr::float((x * 1e12).round() / 1e12 * (1.0 + 0.0))
+                        Expr::float(sig12(x))
                     }
                 })
                 .collect()
         })
         .collect()
+}
+
+/// x rounded to 12 significant digits (hides the last bits of rounding noise)
+fn sig12(x: f64) -> f64 {
+    if x == 0.0 || !x.is_finite() {
+        return x;
+    }
+    let k = 11 - x.abs().log10().floor() as i32;
+    if !(-290..=290).contains(&k) {
+        return x;
+    }
+    let m = 10f64.powi(k);
+    (x * m).round() / m
 }
 
 fn fmul(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {

@@ -284,7 +284,7 @@ fn satisfies(eqs: &[Expr], vars: &[String], point: &[Expr]) -> bool {
 
 /// decimals as exact fractions: 2.1 becomes 21/10 (from the shortest decimal
 /// that prints as the same float)
-fn exactify(e: &Expr) -> Expr {
+pub(crate) fn exactify(e: &Expr) -> Expr {
     match e {
         Expr::Num(n) if !n.is_exact() => {
             let v = n.to_f64();

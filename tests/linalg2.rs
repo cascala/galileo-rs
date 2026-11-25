@@ -68,7 +68,7 @@ fn matrix_exponential() {
     // derivative at 0 gives A back
     assert_eq!(one("E = expm([1 -2; 1 3], t); subs(deriv(E, t), t, 0)"), "[1, -2;\n 1,  3]");
     let r = one("expm([0.1 1; 0 0.2])");
-    assert!(r.contains("1.10517091807"), "{}", r);
+    assert!(r.contains("1.1051709180"), "{}", r);
 }
 
 #[test]
@@ -77,4 +77,17 @@ fn kron_diag_least_squares() {
     assert_eq!(one("diag([1 2 3])"), "[1, 0, 0;\n 0, 2, 0;\n 0, 0, 3]");
     assert_eq!(one("diag([1 2; 3 4])"), "[1, 4]");
     assert_eq!(one("[1 1; 1 2; 1 3]\\[1; 2; 2]"), "[2/3;\n 1/2]");
+}
+
+#[test]
+fn posdef_cond_and_systems() {
+    assert_eq!(one("posdef([2 -1; -1 2])"), "true");
+    assert_eq!(one("posdef([1 2; 2 1])"), "false");
+    assert_eq!(one("cond([3 0; 4 5])"), "3");
+    assert_eq!(one("cond([1 2; 2 4])"), "inf");
+    // singular linear systems: free unknowns stay as symbols
+    assert_eq!(one("solve([x + y + z == 6, x - y == 0, 2*x + 2*y + 2*z == 12], [x, y, z])"), "[3-z/2, 3-z/2, z]");
+    assert!(one("solve([x + y == 1, 2*x + 2*y == 3], [x, y])").contains("no solution"));
+    // decimals: no rounding noise
+    assert_eq!(one("[1 1; 1 2; 1 3; 1 4; 1 5]\\[2.1; 3.9; 6.2; 7.8; 10.1]"), "[0.05;\n 1.99]");
 }

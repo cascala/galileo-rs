@@ -1218,6 +1218,19 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
         (Op::Div, M(x), M(y)) => M(linalg::matmul(&x, &linalg::inverse(&y)?)?),
         (Op::Div, M(x), s) => M(linalg::map(&x, |p| div(p.clone(), s.clone()))),
         (Op::Div, _, M(_)) => return Err("can't divide by a matrix; use inv(A)".into()),
+        (Op::Solve, M(x), M(y))
+            if (x.iter().chain(&y).flatten().any(crate::vcalc::has_float))
+                && x.iter().chain(&y).flatten().all(|e| e.symbols().is_empty()) =>
+        {
+            // decimals: solve with the exact fractions they stand for (no rounding
+            // noise), then give decimals back
+            let ex = |m: &linalg::Mat| linalg::map(m, crate::vcalc::exactify);
+            let r = arith(Op::Solve, M(ex(&x)), M(ex(&y)))?;
+            match r {
+                M(m) => M(linalg::map(&m, calc::evalf)),
+                o => o,
+            }
+        }
         (Op::Solve, M(x), M(y)) if linalg::dims(&x).0 > linalg::dims(&x).1 => {
             // more equations than unknowns: least squares, A^T A x = A^T b
             let xt = linalg::transpose(&x);

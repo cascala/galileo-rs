@@ -303,6 +303,20 @@ pub const ENTRIES: &[Entry] = &[
         "chol([4 2; 2 3])"
     ),
     e!(
+        "posdef",
+        "Matrices",
+        "posdef(A)",
+        "true when A is symmetric positive definite (x^T*A*x > 0 for every x not 0), tested by elimination: every pivot must be positive. The note lists the pivots. Also isposdef(A).",
+        "posdef([2 -1; -1 2])"
+    ),
+    e!(
+        "cond",
+        "Matrices",
+        "cond(A)",
+        "Condition number: the largest singular value divided by the smallest (inf for a singular matrix). Solving A x = b can magnify relative errors in b by this factor.",
+        "cond([1 1; 1 1.0001])"
+    ),
+    e!(
         "svd",
         "Matrices",
         "svd(A) or [U, S, V] = svd(A)",
@@ -1162,6 +1176,7 @@ const ALIASES: &[(&str, &str)] = &[
     ("julia", "mandelbrot"),
     ("orth", "gramschmidt"),
     ("cholesky", "chol"),
+    ("isposdef", "posdef"),
     ("rank", "rref"),
     ("null", "rref"),
     ("cols", "rows"),

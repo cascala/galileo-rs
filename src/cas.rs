@@ -595,11 +595,29 @@ pub fn solve_linear(eqs: &[Expr], vars: &[String]) -> R<Vec<Expr>> {
         a.push(row);
         b.push(vec![neg(rest)]);
     }
-    if a.len() != vars.len() {
-        return Err("solve: give as many equations as unknowns".into());
+    if a.len() == vars.len() {
+        if let Ok(sol) = crate::linalg::solve(&a, &b) {
+            return Ok(sol.into_iter().map(|r| tidy(&r[0])).collect());
+        }
     }
-    let sol = crate::linalg::solve(&a, &b)?;
-    Ok(sol.into_iter().map(|r| tidy(&r[0])).collect())
+    // singular or not square: row reduce [A | b]; free unknowns stay as symbols
+    let n = vars.len();
+    let aug: Vec<Vec<Expr>> = a.iter().zip(&b).map(|(r, c)| r.iter().chain(c).cloned().collect()).collect();
+    let (r, pivots) = crate::linalg::rref(&aug);
+    if pivots.contains(&n) {
+        return Err("solve: no solution; elimination leads to 0 = 1, so the equations contradict each other".into());
+    }
+    let mut out: Vec<Expr> = vars.iter().map(|v| Expr::sym(v)).collect();
+    for (i, &p) in pivots.iter().enumerate() {
+        let mut terms = vec![r[i][n].clone()];
+        for (j, v) in vars.iter().enumerate() {
+            if j != p && !pivots.contains(&j) && !r[i][j].is_zero() {
+                terms.push(neg(mul2(r[i][j].clone(), Expr::sym(v))));
+            }
+        }
+        out[p] = tidy(&add(terms));
+    }
+    Ok(out)
 }
 
 /// Newton's method for f(x) = 0 from x0
