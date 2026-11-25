@@ -368,6 +368,9 @@ impl Session {
     }
 
     fn solve(&mut self, args: &[Node]) -> R<Expr> {
+        if let [f, x, n] = args {
+            return self.solve_mod(f, x, n);
+        }
         let [f, x] = args else {
             return Err("usage: solve(f, x) solves f = 0; solve([f1 f2], [x y]) solves a linear system; A \\ b solves A*x = b".into());
         };
@@ -423,6 +426,48 @@ impl Session {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// solve(f, x, N): the roots of a polynomial in Z/N
+    fn solve_mod(&mut self, f: &Node, x: &Node, n: &Node) -> R<Expr> {
+        let x = name(x, "solve: x")?;
+        let n = match self.eval(n)? {
+            Expr::Num(v) => v.as_bigint(),
+            _ => None,
+        }
+        .ok_or("solve(f, x, N): N must be an integer")?;
+        let fx = crate::eval::equation_lhs(&self.eval_hidden(f, std::slice::from_ref(&x))?);
+        let c = cas::poly_coeffs(&fx, &x)
+            .ok_or_else(|| format!("solve(f, x, N): {} is not a polynomial in {}", show(&fx), x))?;
+        let mut ints = vec![];
+        for e in &c {
+            let r = e
+                .num()
+                .and_then(|v| v.big())
+                .ok_or("solve(f, x, N): the coefficients must be integers or fractions")?;
+            let inv = crate::numtheory::modinv(&r.denom().clone(), &n).ok_or_else(|| {
+                format!(
+                    "solve(f, x, N): the denominator {} has no inverse mod {}",
+                    r.denom(),
+                    n
+                )
+            })?;
+            ints.push(r.numer() * inv);
+        }
+        let t = crate::modsolve::solve(&ints, &n)?;
+        let md = crate::modsolve::notes(&t, &show(&fx), &x, self.teaching());
+        self.note2(crate::teach::plain(&md), md);
+        let roots: Vec<Expr> = t
+            .roots
+            .iter()
+            .cloned()
+            .map(crate::extra_cmd::bnum)
+            .collect();
+        Ok(if roots.is_empty() {
+            Expr::Matrix(vec![])
+        } else {
+            row(roots)
+        })
     }
 
     fn fsolve(&mut self, args: &[Node]) -> R<Expr> {

@@ -2,7 +2,7 @@
 //! `galileo --kernel` to serve the notebook kernel protocol on stdin/stdout.
 
 use galileo_rs::{Output, Session};
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, IsTerminal};
 
 /// Print results; statements ending in ; stay quiet. Returns false on exit.
 fn report(s: &mut Session, src: &str) -> bool {
@@ -86,45 +86,102 @@ fn run(args: Vec<String>) -> i32 {
         }
         None => {
             let mut s = Session::new();
-            let interactive = io::stdin().is_terminal();
-            if interactive {
-                println!(
-                    "Galileo {} (type help for commands, exit to quit)",
-                    env!("CARGO_PKG_VERSION")
-                );
+            if io::stdin().is_terminal() {
+                interactive(&mut s)
+            } else {
+                piped(&mut s)
             }
-            let stdin = io::stdin();
-            // a statement continues while brackets are open, so a matrix
-            // printed over several lines can be pasted back in
-            let mut buf = String::new();
-            loop {
-                if interactive {
-                    print!(
-                        "{}",
-                        if buf.is_empty() {
-                            "galileo> "
-                        } else {
-                            "    ...> "
-                        }
-                    );
-                    io::stdout().flush().ok();
-                }
-                let mut line = String::new();
-                if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
-                    if !buf.is_empty() {
-                        report(&mut s, &buf);
-                    }
-                    return 0;
-                }
+        }
+    }
+}
+
+/// Input piped in (no terminal): read lines, no prompt
+fn piped(s: &mut Session) -> i32 {
+    let stdin = io::stdin();
+    // a statement continues while brackets are open, so a matrix
+    // printed over several lines can be pasted back in
+    let mut buf = String::new();
+    loop {
+        let mut line = String::new();
+        if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
+            if !buf.is_empty() {
+                report(s, &buf);
+            }
+            return 0;
+        }
+        buf.push_str(&line);
+        if open_brackets(&buf) > 0 {
+            continue;
+        }
+        let src = std::mem::take(&mut buf);
+        if !report(s, &src) {
+            return 0;
+        }
+    }
+}
+
+/// Where the prompt keeps its history: $GALILEO_HISTORY, else ~/.galileo_history
+fn history_path() -> Option<std::path::PathBuf> {
+    if let Some(p) = std::env::var_os("GALILEO_HISTORY") {
+        return Some(p.into());
+    }
+    std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".galileo_history"))
+}
+
+/// The interactive prompt, with line editing: arrow keys move through the
+/// line and the history, backspace deletes, Ctrl-R searches the history,
+/// Ctrl-C drops the current input, Ctrl-D quits.
+fn interactive(s: &mut Session) -> i32 {
+    use rustyline::error::ReadlineError;
+    println!(
+        "Galileo {} (type help for commands, exit to quit)",
+        env!("CARGO_PKG_VERSION")
+    );
+    let mut rl = match rustyline::DefaultEditor::new() {
+        Ok(rl) => rl,
+        // no usable terminal after all: fall back to plain reading
+        Err(_) => return piped(s),
+    };
+    let history = history_path();
+    if let Some(h) = &history {
+        rl.load_history(h).ok();
+    }
+    let mut buf = String::new();
+    let code = loop {
+        let prompt = if buf.is_empty() { "galileo> " } else { "    ...> " };
+        match rl.readline(prompt) {
+            Ok(line) => {
                 buf.push_str(&line);
+                buf.push('\n');
                 if open_brackets(&buf) > 0 {
                     continue;
                 }
                 let src = std::mem::take(&mut buf);
-                if !report(&mut s, &src) {
-                    return 0;
+                let entry = src.trim_end();
+                if !entry.trim().is_empty() {
+                    rl.add_history_entry(entry).ok();
+                }
+                if !report(s, &src) {
+                    break 0;
                 }
             }
+            // Ctrl-C: forget the unfinished statement, keep going
+            Err(ReadlineError::Interrupted) => buf.clear(),
+            // Ctrl-D: run what is left, then quit
+            Err(ReadlineError::Eof) => {
+                if !buf.is_empty() {
+                    report(s, &buf);
+                }
+                break 0;
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                break 1;
+            }
         }
+    };
+    if let Some(h) = &history {
+        rl.save_history(h).ok();
     }
+    code
 }
