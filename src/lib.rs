@@ -32,6 +32,7 @@ pub mod lableak;
 pub mod labsearch;
 pub mod latex;
 pub mod linalg;
+pub mod modsolve;
 pub mod num;
 pub mod numeric;
 pub mod numtheory;
