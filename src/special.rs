@@ -627,6 +627,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // digamma(1) = -EULER_GAMMA, written out as a literal
     fn values() {
         assert!(close(gamma(0.5), PI.sqrt(), 1e-14));
         assert!(close(gamma(4.5), 11.631_728_396_567_45, 1e-13));
