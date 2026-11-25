@@ -344,7 +344,10 @@ impl Session {
                             .collect();
                         vec![Expr::Matrix(v), Expr::Matrix(d)]
                     }
-                    _ => return Err("only lu(...) and eig(...) return several values".into()),
+                    Node::Call(f, args) if crate::la_cmd::is_multi(f) => {
+                        self.la_multi(f, args, names.len()).unwrap()?
+                    }
+                    _ => return Err("only lu, eig, qr, svd and jordan return several values".into()),
                 };
                 let pairs: Vec<(String, Expr)> = names.iter().cloned().zip(vals).collect();
                 for (n, v) in &pairs {
@@ -504,7 +507,7 @@ impl Session {
         (plain, md)
     }
 
-    fn matrix_arg(&mut self, n: &Node, f: &str) -> R<Mat> {
+    pub(crate) fn matrix_arg(&mut self, n: &Node, f: &str) -> R<Mat> {
         match self.eval(n)? {
             Expr::Matrix(m) => Ok(m),
             other => Err(format!("{} needs a matrix, got {}", f, show(&other))),
@@ -1215,6 +1218,15 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
         (Op::Div, M(x), M(y)) => M(linalg::matmul(&x, &linalg::inverse(&y)?)?),
         (Op::Div, M(x), s) => M(linalg::map(&x, |p| div(p.clone(), s.clone()))),
         (Op::Div, _, M(_)) => return Err("can't divide by a matrix; use inv(A)".into()),
+        (Op::Solve, M(x), M(y)) if linalg::dims(&x).0 > linalg::dims(&x).1 => {
+            // more equations than unknowns: least squares, A^T A x = A^T b
+            let xt = linalg::transpose(&x);
+            let n = linalg::matmul(&xt, &x)?;
+            let r = linalg::matmul(&xt, &y)?;
+            M(linalg::solve(&n, &r).map_err(|_| {
+                "A\\b: the columns of A are dependent, so the least squares solution is not unique".to_string()
+            })?)
+        }
         (Op::Solve, M(x), M(y)) => M(linalg::solve(&x, &y)?),
         (Op::Solve, ..) => return Err("A\\b needs two matrices".into()),
         (Op::Pow, M(x), s) => {

@@ -271,7 +271,7 @@ pub const ENTRIES: &[Entry] = &[
         "inv",
         "Matrices",
         "inv(A)",
-        "Inverse of a matrix; works with symbolic entries. Matrices are written [a b; c d].",
+        "Inverse of a matrix; works with symbolic entries. Matrices are written [a b; c d]. To solve A x = b use A\\b, which also gives the least squares solution when A has more rows than columns.",
         "A = [a b; c d]; inv(A)"
     ),
     e!(
@@ -280,6 +280,62 @@ pub const ENTRIES: &[Entry] = &[
         "det(A)",
         "Determinant.",
         "det([a b; c d])"
+    ),
+    e!(
+        "qr",
+        "Matrices",
+        "[Q, R] = qr(A)",
+        "QR factorization A = Q*R: Gram-Schmidt on the columns of A gives Q with orthonormal columns (Q^T*Q = I), and R is upper triangular with R[i, j] = q_i . a_j. Exact (with square roots) for exact entries. The columns of A must be independent. Least squares A x = b becomes R x = Q^T b.",
+        "[Q, R] = qr([1 1; 1 0; 0 1])"
+    ),
+    e!(
+        "gramschmidt",
+        "Matrices",
+        "gramschmidt(A)",
+        "Orthonormal basis of the column space of A (Gram-Schmidt), as the columns of a matrix; dependent columns are skipped. Also orth(A).",
+        "gramschmidt([1 1; 1 0; 0 1])"
+    ),
+    e!(
+        "chol",
+        "Matrices",
+        "chol(A)",
+        "Cholesky factorization of a symmetric positive definite matrix: the lower triangular L with A = L*L^T and a positive diagonal. Gives an error, naming the first pivot that is not positive, when A is not positive definite: this is the quickest test.",
+        "chol([4 2; 2 3])"
+    ),
+    e!(
+        "svd",
+        "Matrices",
+        "svd(A) or [U, S, V] = svd(A)",
+        "Singular value decomposition A = U*S*V^T: U and V orthogonal, S diagonal with the singular values s1 >= s2 >= ... >= 0 (square roots of the eigenvalues of A^T*A). svd(A) gives the singular values. Exact when A^T*A has rational eigenvalues, numeric otherwise. The number of nonzero singular values is the rank, and keeping the k largest gives the best rank-k approximation.",
+        "[U, S, V] = svd([3 0; 4 5])"
+    ),
+    e!(
+        "jordan",
+        "Matrices",
+        "jordan(A) or [P, J] = jordan(A)",
+        "Jordan form A = P*J*P^-1: J is block diagonal with eigenvalues on the diagonal and 1s just above it inside a block. All blocks 1x1 means A is diagonalizable. The columns of P are eigenvectors and generalized eigenvectors. Needs exact eigenvalues.",
+        "[P, J] = jordan([2 1; 0 2])"
+    ),
+    e!(
+        "expm",
+        "Matrices",
+        "expm(A) or expm(A, t)",
+        "Matrix exponential e^A = I + A + A^2/2! + ..., or e^(A t) with a symbol t: exact from the Jordan form (complex eigenvalues a +- bi give e^(a t) cos(b t) and e^(a t) sin(b t)), numeric for decimal entries. x(t) = expm(A, t)*x0 solves x' = A x with x(0) = x0.",
+        "expm([0 -1; 1 0], t)"
+    ),
+    e!(
+        "kron",
+        "Matrices",
+        "kron(A, B)",
+        "Kronecker (tensor) product: each entry a_ij of A becomes the block a_ij*B.",
+        "kron([1 2; 3 4], eye(2))"
+    ),
+    e!(
+        "diag",
+        "Matrices",
+        "diag(v) or diag(A)",
+        "diag of a vector is the diagonal matrix with those entries; diag of a matrix is the row of its diagonal entries.",
+        "diag([1 2 3])"
     ),
     e!(
         "lu",
@@ -1104,6 +1160,8 @@ pub const ENTRIES: &[Entry] = &[
 
 const ALIASES: &[(&str, &str)] = &[
     ("julia", "mandelbrot"),
+    ("orth", "gramschmidt"),
+    ("cholesky", "chol"),
     ("rank", "rref"),
     ("null", "rref"),
     ("cols", "rows"),

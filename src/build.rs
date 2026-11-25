@@ -144,6 +144,7 @@ fn mul_inner(factors: Vec<Expr>) -> Expr {
     if coeff.is_zero() && coeff.is_exact() {
         return Expr::zero();
     }
+    combine_sqrts(&mut groups, &mut coeff);
     let mut out = vec![];
     let mut again = false;
     for (b, e) in groups {
@@ -177,6 +178,56 @@ fn mul_inner(factors: Vec<Expr>) -> Expr {
     } else {
         Mul(out)
     }
+}
+
+/// sqrt(2)*sqrt(6) = sqrt(12) = 2*sqrt(3), sqrt(10)/sqrt(2) = sqrt(5): square roots of
+/// positive integers combine when there are two or more of them
+fn combine_sqrts(groups: &mut Vec<(Expr, Expr)>, coeff: &mut Number) {
+    let half = |e: &Expr| -> Option<i128> {
+        let n = e.num()?;
+        if n == Number::rat(1, 2)? {
+            Some(1)
+        } else if n == Number::rat(-1, 2)? {
+            Some(-1)
+        } else {
+            None
+        }
+    };
+    let is_root = |(b, e): &(Expr, Expr)| {
+        b.num().is_some_and(|n| n.is_integer() && !n.is_negative() && n.as_int().is_some()) && half(e).is_some()
+    };
+    let roots = groups.iter().filter(|g| is_root(g)).count();
+    if roots == 1 {
+        // 6/sqrt(2) = 3*sqrt(2): the denominator divides the coefficient
+        let i = groups.iter().position(&is_root).unwrap();
+        let n = groups[i].0.num().unwrap().as_int().unwrap();
+        if half(&groups[i].1) == Some(-1) && n > 1 && coeff.is_exact() {
+            if let (Some(a), Some(b)) = (coeff.numer(), coeff.denom()) {
+                if a % n == 0 {
+                    *coeff = Number::rat(a / n, b).unwrap();
+                    groups[i].1 = Expr::Num(Number::rat(1, 2).unwrap());
+                }
+            }
+        }
+        return;
+    }
+    if roots < 2 {
+        return;
+    }
+    let (mut p, mut q) = (1i128, 1i128);
+    for g in groups.iter().filter(|g| is_root(g)) {
+        let n = g.0.num().unwrap().as_int().unwrap();
+        let ok = if half(&g.1) == Some(1) { p.checked_mul(n).map(|x| p = x) } else { q.checked_mul(n).map(|x| q = x) };
+        if ok.is_none() || p > 1 << 60 || q > 1 << 60 {
+            return;
+        }
+    }
+    let Some(pq) = p.checked_mul(q) else { return };
+    groups.retain(|g| !is_root(g));
+    if q != 1 {
+        *coeff = coeff.mul(Number::rat(1, q).unwrap());
+    }
+    groups.push((Expr::int(pq), Expr::Num(Number::rat(1, 2).unwrap())));
 }
 
 pub fn pow(b: Expr, e: Expr) -> Expr {

@@ -152,6 +152,8 @@ cargo build --release --target wasm32-unknown-unknown --lib
 | `src/calc.rs` | `deriv`, `expand`, `factor`, `simplify`, substitution, numeric evaluation |
 | `src/algfactor.rs`, `src/factor_cmd.rs` | Polynomial factoring over the integers (Zassenhaus), cyclotomic polynomials, Aurifeuillean factors, algebraic splitting of `a^n ± b^n`; `cyclotomic`, `algfactor`, `factorsearch` |
 | `src/linalg.rs` | Matrices: product, inverse, determinant, LU, solve, norms |
+| `src/decomp.rs` | Decompositions: Gram-Schmidt and QR, Cholesky, SVD, Jordan form, matrix exponential, Kronecker product |
+| `src/la_cmd.rs` | Commands for the decompositions (`[Q, R] = qr(A)`, `svd`, `jordan`, `expm`, `chol`, `kron`, `diag`) |
 | `src/parser.rs` | Lexer and Pratt parser |
 | `src/eval.rs` | Sessions: variables, commands, built-in functions |
 | `src/help.rs` | `help` and `help(name)` |
