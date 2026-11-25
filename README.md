@@ -54,10 +54,21 @@ docker run -it --rm cascala/galileo                          # interactive promp
 docker run --rm -v "$PWD:/work" cascala/galileo file.gg      # run a file
 ```
 
+The `-it` matters for the prompt: without it Docker gives Galileo no terminal, so the
+arrow keys and backspace cannot work. At the prompt, left and right move through the
+line, up and down step through earlier input, Ctrl-R searches it, Ctrl-C drops the
+current input and Ctrl-D (or `exit`) quits. History is kept in `~/.galileo_history`
+(or the file named by `GALILEO_HISTORY`). To keep it between container runs, give it a
+volume:
+
+```
+docker run -it --rm -v galileo-home:/home/galileo cascala/galileo
+```
+
 To publish the image for both architectures:
 
 ```
-docker buildx build --platform linux/amd64,linux/arm64 -t cascala/galileo:0.3.0 -t cascala/galileo:latest --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t cascala/galileo:0.3.2 -t cascala/galileo:latest --push .
 ```
 
 Type `help` for the list of commands, and `help(name)` for one of them. A statement ending
