@@ -1478,6 +1478,76 @@ pub const ENTRIES: &[Entry] = &[
         "Classical orthogonal polynomials of degree n: Legendre P_n, Hermite H_n (physicists'), Laguerre L_n, Chebyshev T_n and U_n.",
         "legendre(3, x)"
     ),
+    e!(
+        "graph",
+        "Graphs",
+        "graph(edges), graph(edges, n), graph(edges, {names}), digraph(edges)",
+        "A graph (network) as a value: one edge per row, [1, 2; 2, 3; 3, 1], with a third column for weights (distances, costs, capacities): [\"A\", \"B\", 4; \"B\", \"C\", 2]. Vertices are the numbers 1..n (graph(edges, n) adds isolated ones) or names in quotes. digraph makes the edges one-way arrows. A graph prints as the call that rebuilds it and shows as a drawing in notebooks. order(G) counts vertices, size(G) edges.",
+        "G = graph([1, 2; 2, 3; 3, 1; 3, 4])"
+    ),
+    e!(
+        "complete",
+        "Graphs",
+        "complete(n), complete(m, n), cycle(n), path(n), star(n), wheel(n), grid(m, n), hypercube(d), petersen(), randgraph(n, p)",
+        "Ready-made graphs: every pair joined (K_n), the complete bipartite K_(m,n), a ring, a line, a hub with n spokes, a hub inside a ring, a lattice of m rows of n, the d-dimensional cube (2^d vertices), the Petersen graph, and a random graph (each pair joined with probability p, or randgraph(n, m) with m edges; seed(k) first to repeat it).",
+        "chromatic(petersen())"
+    ),
+    e!(
+        "vertices",
+        "Graphs",
+        "vertices(G), edges(G), degree(G), degree(G, v), neighbors(G, v), adjacency(G), laplacian(G), subgraph(G, {vs}), complement(G)",
+        "Looking at a graph: the vertex list, the edge rows (with weights), the degree of every vertex (as a row) or of one, the neighbours of v, the adjacency matrix A (A^k counts walks of length k), the Laplacian L = D - A (its zero eigenvalues count components; a cofactor counts spanning trees), the graph on some vertices with the edges between them, and the graph of the missing edges.",
+        "laplacian(cycle(4))"
+    ),
+    e!(
+        "components",
+        "Graphs",
+        "isconnected(G), components(G), isbipartite(G), istree(G), bfs(G, s), dfs(G, s), toposort(G)",
+        "Structure: whether every vertex can reach every other, the connected components (strongly connected ones for a digraph), whether the vertices split in two sides with every edge across (no odd cycle), whether G is a tree, the breadth-first and depth-first orders from s, and an order of a digraph's vertices with every arrow pointing forward (a schedule for tasks with prerequisites).",
+        "components(graph([1, 2; 3, 4], 5))"
+    ),
+    e!(
+        "shortest",
+        "Graphs",
+        "shortest(G, s, t), dist(G, s, t), dist(G), diameter(G)",
+        "Shortest paths: the vertices of a shortest path from s to t (fewest edges, or least total weight), its length, the matrix of all distances (inf where there is no path), and the largest distance. Dijkstra's algorithm for weights of 0 or more, Bellman-Ford when a digraph has negative weights.",
+        "shortest(grid(3, 3), 1, 9)"
+    ),
+    e!(
+        "mst",
+        "Graphs",
+        "mst(G), maxflow(G, s, t), mincut(G, s, t)",
+        "A minimum spanning tree: the cheapest set of edges that connects every vertex (Kruskal). maxflow is the most that can flow from s to t when each edge's weight is its capacity (Edmonds-Karp; the note shows the flow on each edge), and mincut the cheapest set of edges whose removal separates s from t; the two numbers are equal (max-flow min-cut theorem).",
+        "maxflow(digraph([1, 2, 3; 1, 3, 2; 2, 3, 1; 2, 4, 2; 3, 4, 3]), 1, 4)"
+    ),
+    e!(
+        "matching",
+        "Graphs",
+        "matching(G), coloring(G), chromatic(G), chromaticpoly(G, k)",
+        "matching: the largest set of edges with no shared vertex, one pair per row (Edmonds' blossom algorithm, any graph). coloring: a color 1, 2, ... for each vertex (as a row) so that joined vertices differ, with as few colors as possible; chromatic is that number; chromaticpoly is the number of such colorings with k colors, a polynomial in k (deletion-contraction, up to 45 edges).",
+        "chromaticpoly(cycle(4), k)"
+    ),
+    e!(
+        "eulerian",
+        "Graphs",
+        "eulerian(G), hamiltonian(G)",
+        "Tours: a walk that uses every edge exactly once (an Euler circuit or trail; it exists when the graph is connected and at most two vertices have odd degree), and a cycle through every vertex exactly once (Hamiltonian; up to 22 vertices). Each gives the vertices in order, or false when there is none.",
+        "eulerian(complete(5))"
+    ),
+    e!(
+        "centrality",
+        "Graphs",
+        "centrality(G), centrality(G, \"closeness\"), centrality(G, \"degree\"), pagerank(G), pagerank(G, d)",
+        "How central each vertex is, as a row: betweenness (how many shortest paths between other vertices pass through it), closeness (1 over the average distance to the others), degree, or PageRank (the share of time a random surfer spends there, following a random arrow with probability d = 0.85 and jumping anywhere otherwise).",
+        "centrality(path(5))"
+    ),
+    e!(
+        "draw",
+        "Graphs",
+        "draw(G, path), draw(G, H), draw(G, edges), draw(G, coloring(G))",
+        "A drawing of G with something marked: a path or cycle such as shortest(G, s, t) or hamiltonian(G), a graph on the same vertices such as mst(G), edge rows such as matching(G) or mincut(G, s, t), or a coloring from coloring(G). Graphs that come from cycle, grid, petersen and the like keep their own layout; others are drawn as trees, circles or with a spring layout.",
+        "G = grid(3, 4); draw(G, shortest(G, 1, 12))"
+    ),
 ];
 
 /// other names for a command: (alias, the entry it is described under)
@@ -1647,6 +1717,34 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("pinverse", "compose"),
     ("psign", "porder"),
     ("cayley", "generate"),
+    ("digraph", "graph"),
+    ("cycle", "complete"),
+    ("path", "complete"),
+    ("star", "complete"),
+    ("wheel", "complete"),
+    ("grid", "complete"),
+    ("hypercube", "complete"),
+    ("petersen", "complete"),
+    ("randgraph", "complete"),
+    ("edges", "vertices"),
+    ("neighbors", "vertices"),
+    ("adjacency", "vertices"),
+    ("complement", "vertices"),
+    ("isconnected", "components"),
+    ("isbipartite", "components"),
+    ("istree", "components"),
+    ("bfs", "components"),
+    ("dfs", "components"),
+    ("toposort", "components"),
+    ("dist", "shortest"),
+    ("diameter", "shortest"),
+    ("maxflow", "mst"),
+    ("mincut", "mst"),
+    ("coloring", "matching"),
+    ("chromatic", "matching"),
+    ("chromaticpoly", "matching"),
+    ("hamiltonian", "eulerian"),
+    ("pagerank", "centrality"),
 ];
 
 /// all names help knows about, for completion

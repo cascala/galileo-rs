@@ -52,6 +52,7 @@ pub fn bundle(e: &Expr) -> Option<Bundle> {
                 ("text/markdown", q.markdown()),
             ],
             Obj::Group(g) => vec![("text/plain", g.name.clone())],
+            Obj::Graph(g) => vec![("text/plain", g.name.clone()), ("image/svg+xml", g.svg())],
             Obj::List(_) | Obj::Record(_) => vec![("text/plain", o.text())],
             Obj::Ring(_) | Obj::Elem(_) | Obj::QRing(_) | Obj::QElem(_) | Obj::Quat(_) => vec![("text/plain", o.text())],
             // the text of a report is its explanation (a note); it shows its value
