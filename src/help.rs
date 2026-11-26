@@ -968,6 +968,13 @@ pub const ENTRIES: &[Entry] = &[
         "K = numfield(x^3 - 2); minpoly(K(x^2 + x))"
     ),
     e!(
+        "galois",
+        "Rings and fields",
+        "galois(f) or galois(f, x)",
+        "The Galois group over Q of an irreducible polynomial of degree up to 5, as a group of permutations of its roots (order, issolvable and the other group commands apply). Degree 3 and 4 use the discriminant and the resolvent cubic; degree 5 adds how f factors mod many primes. The note says whether the roots can be written with radicals.",
+        "issolvable(galois(x^5 - x - 1))"
+    ),
+    e!(
         "table",
         "Calculus",
         "table(expr, k, a, b (, step)) or table(expr, k, [v1, v2, ...])",

@@ -123,6 +123,7 @@ impl Session {
             "inideal",
             "numfield",
             "minpoly",
+            "galois",
         ];
         if !NAMES.contains(&f) {
             return None;
@@ -160,6 +161,9 @@ impl Session {
                 "minpoly(x) takes an element of a number field, such as numfield(x^2 - 2, x + 1)"
                     .into(),
             ));
+        }
+        if f == "galois" {
+            return Some(self.galois_cmd(&v));
         }
         if matches!(f, "groebner" | "polyrem" | "inideal") {
             return Some(self.groebner_cmd(f, &v));
@@ -459,6 +463,89 @@ impl Session {
                 f
             )),
         }
+    }
+
+    fn galois_cmd(&mut self, v: &[Expr]) -> R<Expr> {
+        use num_bigint::BigInt;
+        let (p, x) = match v {
+            [p] => {
+                let s = p.symbols();
+                if s.len() != 1 {
+                    return Err(
+                        "galois: give a polynomial in one variable, such as galois(x^5 - x - 1)"
+                            .into(),
+                    );
+                }
+                (p, s[0].clone())
+            }
+            [p, Expr::Sym(x)] => (p, x.clone()),
+            _ => return Err("usage: galois(f) or galois(f, x)".into()),
+        };
+        let cs = crate::cas::poly_coeffs(p, &x).ok_or_else(|| {
+            format!(
+                "galois: {} is not a polynomial in {}",
+                crate::print::show(p),
+                x
+            )
+        })?;
+        let mut qs = vec![];
+        for c in &cs {
+            let c = crate::calc::simplify(c);
+            qs.push(
+                c.num()
+                    .filter(|n| n.is_exact())
+                    .and_then(|n| n.big())
+                    .ok_or("galois: the coefficients must be rational numbers")?,
+            );
+        }
+        while qs.last().is_some_and(|c| num_traits::Zero::is_zero(c)) {
+            qs.pop();
+        }
+        if qs.len() < 2 {
+            return Err("galois: the polynomial must have degree at least 1".into());
+        }
+        let den = qs.iter().fold(BigInt::from(1), |a, c| {
+            num_integer::Integer::lcm(&a, c.denom())
+        });
+        let z: Vec<BigInt> = qs
+            .iter()
+            .map(|c| (c * num_rational::BigRational::from_integer(den.clone())).to_integer())
+            .collect();
+        if z.len() > 6 {
+            return Err("galois: degree up to 5".into());
+        }
+        let irreducible = z.len() == 2
+            || crate::algfactor::factor_zpoly(&z)
+                .is_some_and(|(_, fs)| fs.len() == 1 && fs[0].1 == 1);
+        if !irreducible {
+            return Err(format!(
+                "galois: {} factors over Q; give one irreducible factor (factor({}) shows them)",
+                crate::print::show(p),
+                crate::print::show(p)
+            ));
+        }
+        let g = crate::galois::galois(&z)?;
+        let n = z.len() - 1;
+        let solv = g.group.is_solvable()?;
+        let radicals = if n <= 4 {
+            "Every group here is solvable, so the roots are expressible by radicals: solve gives them (Cardano for degree 3, Ferrari for 4).".to_string()
+        } else if solv {
+            "The group is solvable, so the roots are expressible by radicals (though solve does not build quintic radicals).".to_string()
+        } else {
+            format!(
+                "The group is not solvable ({} contains the simple group A5), so no formula with + - * / and roots gives the roots of this polynomial (Abel–Ruffini, Galois).",
+                g.group.name
+            )
+        };
+        self.note(&format!(
+            "The Galois group of {} over Q, acting on its {} roots, has order {}. {} {}",
+            crate::print::show(p),
+            n,
+            g.group.order(),
+            g.method,
+            radicals
+        ));
+        Ok(gval(g.group))
     }
 
     fn ring_cmd(&mut self, f: &str, v: &[Expr]) -> R<Expr> {

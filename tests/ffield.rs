@@ -182,7 +182,9 @@ fn quotient_identities() {
     use num_rational::BigRational;
     let mut seed = 12345u64;
     let mut rnd = |m: i64| {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((seed >> 33) % (2 * m as u64 + 1)) as i64 - m
     };
     for case in 0..60 {
@@ -193,10 +195,14 @@ fn quotient_identities() {
             f.push_str(&format!(" + ({})*x^{}", rnd(4), k));
         }
         let fe = galileo_rs::eval::Session::new().run(&f).pop().unwrap().ok();
-        let Some(galileo_rs::Output::Value(fe)) = fe else { panic!() };
+        let Some(galileo_rs::Output::Value(fe)) = fe else {
+            panic!()
+        };
         let r = qr::make(&fe, "x", p, false).unwrap();
         for _ in 0..5 {
-            let v: Vec<BigRational> = (0..n).map(|_| BigRational::from_integer(rnd(5).into())).collect();
+            let v: Vec<BigRational> = (0..n)
+                .map(|_| BigRational::from_integer(rnd(5).into()))
+                .collect();
             let a = r.elem(v);
             if let Ok(b) = a.inv() {
                 assert_eq!(a.mul(&b), r.elem(vec![BigRational::from_integer(1.into())]));
@@ -210,4 +216,26 @@ fn quotient_identities() {
             assert!(acc.v.is_empty(), "minpoly fails in {}", r.name());
         }
     }
+}
+
+#[test]
+fn galois_groups() {
+    for (code, want) in [
+        ("galois(x^3 - 2)", "sym(3)"),
+        ("galois(x^3 - 3*x + 1)", "alt(3)"),
+        ("galois(x^4 - 2)", "dihedral(4)"),
+        ("galois(x^4 + 1)", "group(\"V4\")"),
+        ("galois(x^4 - 4*x^2 + 2)", "cyclic(4)"),
+        ("galois(x^4 + x + 1)", "sym(4)"),
+        ("galois(x^4 + 8*x + 12)", "alt(4)"),
+        ("galois(x^5 - x - 1)", "sym(5)"),
+        ("order(galois(x^5 - 2))", "20"),
+        ("galois(x^5 + 20*x + 16)", "alt(5)"),
+        ("galois(x^5 - 5*x + 12)", "dihedral(5)"),
+        ("galois(x^5 + x^4 - 4*x^3 - 3*x^2 + 3*x + 1)", "cyclic(5)"),
+        ("issolvable(galois(x^5 - 10*x + 2))", "false"),
+    ] {
+        assert_eq!(one(code), want, "{}", code);
+    }
+    assert!(one("galois(x^4 - 1)").starts_with("ERROR"));
 }
