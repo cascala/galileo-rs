@@ -596,6 +596,13 @@ impl Session {
             let v = self.eval(a)?;
             let d = self.eval(d)?.num().and_then(|k| k.as_int()).filter(|k| (0..=15).contains(k)).ok_or("round: the number of decimals must be a whole number from 0 to 15")?;
             let k = 10f64.powi(d as i32);
+            // a quantity: round its number, keep its units (round(194.04 m, 1) = 194.0 m)
+            if crate::units::has_units(&v) && !matches!(v, Expr::Matrix(_)) {
+                if let Some((c, u)) = crate::units::split(&v).filter(|(c, _)| !crate::units::has_units(c)) {
+                    let c = elementwise_num(&c, f, &|x| Expr::float((x * k).round() / k + 0.0))?;
+                    return Ok(crate::build::mul2(c, crate::units::expr_of(&u)));
+                }
+            }
             return elementwise_num(&v, f, &|x| Expr::float((x * k).round() / k + 0.0));
         }
         let [a] = args else {

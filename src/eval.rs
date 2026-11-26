@@ -1071,6 +1071,13 @@ impl Session {
                         .and_then(|n| n.as_int())
                         .filter(|&k| (1..=100_000).contains(&k))
                         .ok_or("eval(x, digits): digits is a whole number from 1 to 100000")?;
+                    // a quantity: its number to that many digits, with its units
+                    if crate::units::has_units(&a) && !matches!(a, Expr::Matrix(_)) {
+                        if let Some((c, u)) = crate::units::split(&a).filter(|(c, _)| !crate::units::has_units(c)) {
+                            let c = crate::prec::eval_digits(&c, d as u32)?;
+                            return Ok(build::mul2(c, crate::units::expr_of(&u)));
+                        }
+                    }
                     return crate::prec::eval_digits(&a, d as u32);
                 }
                 if f == "factor" && args.len() == 2 {

@@ -108,3 +108,12 @@ fn bare_numbers() {
     assert_eq!(one("value(100 km/h, m/s)"), "27.7777777777778");
     assert_eq!(one("value([1 2] km, m)"), "[1000, 2000]");
 }
+
+#[test]
+fn rounding_and_alike_units() {
+    assert_eq!(one("round(194.03950962779996 m, 1)"), "194.0 m");
+    assert_eq!(one("eval(0.0009031764719805297 kg/m, 3)"), "0.000903 kg/m");
+    // units of one kind in a product merge, keeping the SI one
+    assert_eq!(one("(2 cm^2)*(1 kg/m^3)"), "0.0002 kg/m");
+    assert_eq!(one("(2 km)*(3 m)"), "6000 m^2");
+}

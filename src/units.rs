@@ -402,8 +402,51 @@ pub fn tidy(e: Expr) -> Expr {
     }
     match dims(&u) {
         Ok(d) if d == NONE => crate::calc::simplify(&build::mul2(c, scale(&u))),
-        _ => e,
+        _ => merge_alike(c, u).unwrap_or(e),
     }
+}
+
+/// units of the same kind in one product become one unit: cm^2*kg/m^3 is
+/// kg/m times a number. The SI unit (scale 1) is kept when there is one.
+fn merge_alike(c: Expr, u: Units) -> Option<Expr> {
+    let info: Vec<(Scale, Dims)> = u.iter().map(|(n, _)| lookup(n)).collect::<Option<_>>()?;
+    let mut target: Vec<usize> = (0..u.len()).collect();
+    let mut changed = false;
+    for i in 0..u.len() {
+        if info[i].1 == NONE {
+            continue;
+        }
+        let same: Vec<usize> = (0..u.len()).filter(|&j| info[j].1 == info[i].1).collect();
+        if same.len() < 2 {
+            continue;
+        }
+        let keep = same
+            .iter()
+            .copied()
+            .find(|&j| matches!(info[j].0, Scale::Rat(1, 1)))
+            .unwrap_or(same[0]);
+        if target[i] != keep {
+            target[i] = keep;
+            changed = true;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    let mut factor = vec![c];
+    let mut out: Units = vec![];
+    for (i, (n, e)) in u.iter().enumerate() {
+        let k = target[i];
+        if k != i {
+            let ratio = build::div(scale_expr(info[i].0), scale_expr(info[k].0));
+            factor.push(build::pow(ratio, Expr::Num(e.clone())));
+        }
+        out.push((u[k].0.clone(), e.clone()));
+    }
+    let out = merge(out);
+    let k = crate::calc::simplify(&build::mul(factor));
+    // a conversion factor was applied: a fraction becomes a decimal, as in convert
+    Some(build::mul2(decimal(k), expr_of(&out)))
 }
 
 /// a quantity to a power: (3 m)^2 = 9 m^2, sqrt(4 m^2) = 2 m
