@@ -239,3 +239,33 @@ fn galois_groups() {
     }
     assert!(one("galois(x^4 - 1)").starts_with("ERROR"));
 }
+
+#[test]
+fn quaternions() {
+    for (code, want) in [
+        ("quat(0, 1, 0, 0) * quat(0, 0, 1, 0)", "quat(0, 0, 0, 1)"),
+        ("quat(0, 0, 1, 0) * quat(0, 1, 0, 0)", "quat(0, 0, 0, -1)"),
+        ("q = quat(1, 2, 3, 4); q * q^-1", "quat(1, 0, 0, 0)"),
+        ("1 / quat(1, 2, 3, 4)", "quat(1/30, -1/15, -1/10, -2/15)"),
+        ("norm(quat(1, 2, 3, 4))", "sqrt(30)"),
+        ("conj(quat(1, 2, 3, 4))", "quat(1, -2, -3, -4)"),
+        ("conj(3 + 4*i)", "3-4*i"),
+        ("rotate(quat(pi/2, [0, 0, 1]), [1, 0, 0])", "[0, 1, 0]"),
+        (
+            "r = quat(2*pi/3, [1, 1, 1]); rotate(r, [1, 0, 0])",
+            "[0, 1, 0]",
+        ),
+        (
+            "r = quat(1, 2, 3, 4); rotmatrix(-r) == rotmatrix(r)",
+            "true",
+        ),
+        (
+            "p = quat(1, 2, 0, 1); q = quat(0, 1, 3, 2); su2(p*q) == su2(p)*su2(q)",
+            "true",
+        ),
+        ("parts(quat(1, 2, 3, 4))", "[1, 2, 3, 4]"),
+        ("quat(1, 2, 3, 4) + 1", "quat(2, 2, 3, 4)"),
+    ] {
+        assert_eq!(one(code), want, "{}", code);
+    }
+}

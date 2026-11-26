@@ -124,6 +124,12 @@ impl Session {
             "numfield",
             "minpoly",
             "galois",
+            "quat",
+            "conj",
+            "rotate",
+            "rotmatrix",
+            "su2",
+            "parts",
         ];
         if !NAMES.contains(&f) {
             return None;
@@ -161,6 +167,14 @@ impl Session {
                 "minpoly(x) takes an element of a number field, such as numfield(x^2 - 2, x + 1)"
                     .into(),
             ));
+        }
+        if matches!(f, "quat" | "rotate" | "rotmatrix" | "su2" | "parts")
+            || (f == "conj" && v.first().and_then(crate::quat::as_quat).is_some())
+        {
+            return Some(self.quat_cmd(f, &v));
+        }
+        if f == "conj" {
+            return None;
         }
         if f == "galois" {
             return Some(self.galois_cmd(&v));
@@ -460,6 +474,79 @@ impl Session {
             }
             _ => Err(format!(
                 "{}: wrong arguments; numfield(f), quotient(f, x), quotient(f, x, p) build rings, and K(g) builds elements",
+                f
+            )),
+        }
+    }
+
+    fn quat_cmd(&mut self, f: &str, v: &[Expr]) -> R<Expr> {
+        use crate::quat::{self as qt, Quat};
+        let q = |e: &Expr| -> R<Quat> {
+            qt::as_quat(e)
+                .cloned()
+                .ok_or_else(|| format!("{}: expected a quaternion such as quat(1, 2, 3, 4)", f))
+        };
+        let vec3 = |e: &Expr| -> R<Vec<Expr>> {
+            let items: Vec<Expr> = match e {
+                Expr::Matrix(m) if m.len() == 1 => m[0].clone(),
+                Expr::Matrix(m) if m.iter().all(|r| r.len() == 1) => {
+                    m.iter().map(|r| r[0].clone()).collect()
+                }
+                Expr::Obj(o) => match &**o {
+                    Obj::List(l) => l.clone(),
+                    _ => vec![],
+                },
+                _ => vec![],
+            };
+            if items.len() == 3 {
+                Ok(items)
+            } else {
+                Err(format!("{}: expected a vector [x, y, z]", f))
+            }
+        };
+        let scalar = |e: &Expr| -> R<Expr> {
+            if e.is_scalar() {
+                Ok(e.clone())
+            } else {
+                Err(format!(
+                    "quat: components must be numbers or expressions, got {}",
+                    crate::print::show(e)
+                ))
+            }
+        };
+        match (f, v) {
+            ("quat", [a, b, c, d]) => Ok(qt::value(Quat([
+                scalar(a)?,
+                scalar(b)?,
+                scalar(c)?,
+                scalar(d)?,
+            ]))),
+            ("quat", [t, axis]) => {
+                let r = qt::from_axis(&scalar(t)?, &vec3(axis)?)?;
+                self.note("The unit quaternion cos(t/2) + sin(t/2) (x i + y j + z k)/|(x, y, z)|: rotate(q, v) turns v by the angle t about the axis.");
+                Ok(qt::value(r))
+            }
+            ("quat", [a]) => Ok(qt::value(Quat::scalar(scalar(a)?))),
+            ("conj", [a]) => {
+                self.note("The conjugate a - b i - c j - d k; q conj(q) = |q|^2, so q^-1 = conj(q)/|q|^2.");
+                Ok(qt::value(q(a)?.conj()))
+            }
+            ("parts", [a]) => Ok(Expr::Matrix(vec![q(a)?.0.to_vec()])),
+            ("rotate", [a, x]) => {
+                let r = q(a)?.rotate(&vec3(x)?)?;
+                Ok(Expr::Matrix(vec![r]))
+            }
+            ("rotmatrix", [a]) => {
+                let a = q(a)?;
+                self.note("The matrix of v -> q v q^-1, a rotation (in SO(3)); q and -q give the same matrix, so unit quaternions (SU(2)) cover SO(3) twice.");
+                Ok(Expr::Matrix(a.rotation_matrix()?))
+            }
+            ("su2", [a]) => {
+                self.note("q = a + b i + c j + d k as the complex matrix [a + b i, c + d i; -c + d i, a - b i]; for |q| = 1 it lies in SU(2), and quaternion products become matrix products.");
+                Ok(Expr::Matrix(q(a)?.su2()))
+            }
+            _ => Err(format!(
+                "{}: usage quat(a, b, c, d), quat(angle, [x, y, z]), conj(q), norm(q), parts(q), rotate(q, [x, y, z]), rotmatrix(q), su2(q)",
                 f
             )),
         }

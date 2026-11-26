@@ -975,6 +975,13 @@ pub const ENTRIES: &[Entry] = &[
         "issolvable(galois(x^5 - x - 1))"
     ),
     e!(
+        "quat",
+        "Rings and fields",
+        "quat(a, b, c, d), quat(angle, [x, y, z]), conj(q), norm(q), parts(q), rotate(q, v), rotmatrix(q), su2(q)",
+        "Quaternions a + b i + c j + d k (components may be symbolic), with + - * / and whole powers; i j = k but j i = -k. quat(angle, axis) is the unit quaternion of a rotation; rotate(q, v) computes q v q^-1, rotmatrix(q) its 3x3 rotation matrix and su2(q) the matching 2x2 complex matrix: unit quaternions are SU(2), and q and -q give the same rotation (the double cover SU(2) -> SO(3)).",
+        "rotate(quat(pi/2, [0, 0, 1]), [1, 0, 0])"
+    ),
+    e!(
         "table",
         "Calculus",
         "table(expr, k, a, b (, step)) or table(expr, k, [v1, v2, ...])",
