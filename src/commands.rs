@@ -104,6 +104,9 @@ impl Session {
         if let Some(r) = self.de_call(f, args) {
             return r;
         }
+        if let Some(r) = self.stats_call(f, args) {
+            return r;
+        }
         if let Some(r) = self.la_call(f, args) {
             return r;
         }

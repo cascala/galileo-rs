@@ -135,6 +135,8 @@ pub struct Series {
     pub color: Option<String>,
     /// thin lines (contours, arrows)
     pub thin: bool,
+    /// fill each closed run (histogram and bar chart bars)
+    pub fill: bool,
 }
 
 impl Series {
@@ -360,6 +362,17 @@ impl Figure {
                         ));
                     }
                     return obj(&fields);
+                }
+                if s.fill {
+                    return obj(&[
+                        ("type", jstr("scatter")),
+                        ("mode", jstr("lines")),
+                        ("fill", jstr("toself")),
+                        ("name", jstr(&s.label)),
+                        ("x", jnums(&xs)),
+                        ("y", jnums(&ys)),
+                        ("line", obj(&[("color", jstr(s.col(i))), ("width", "1.5".into())])),
+                    ]);
                 }
                 obj(&[
                     ("type", jstr("scatter")),
@@ -591,6 +604,19 @@ impl Figure {
                         sy(y)
                     );
                 }
+                continue;
+            }
+            if ser.fill {
+                let mut d = String::new();
+                for run in self.runs(ser, &b) {
+                    for (k, (x, y)) in run.iter().enumerate() {
+                        let yy = y.clamp(b.y0 - span, b.y1 + span);
+                        let _ = write!(d, "{}{:.2},{:.2}", if k == 0 { "M" } else { "L" }, sx(*x), sy(yy));
+                    }
+                    d.push('Z');
+                }
+                let c = ser.col(i);
+                let _ = write!(s, r#"<path d="{d}" fill="{c}" fill-opacity="0.35" stroke="{c}" stroke-width="1.5"/>"#);
                 continue;
             }
             let mut d = String::new();

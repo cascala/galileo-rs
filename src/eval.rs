@@ -1261,7 +1261,7 @@ fn clock_seed() -> u64 {
     }
 }
 
-fn rand_f64() -> f64 {
+pub(crate) fn rand_f64() -> f64 {
     RAND_STATE.with(|s| {
         let mut x = s.get();
         if x == 0 {
@@ -1389,6 +1389,37 @@ pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
             Op::Ne => Ok(Expr::Bool(a != b)),
             _ => Err("only numbers can be ordered".into()),
         };
+    }
+    // elementwise order comparisons: [1 2 3] < 2 gives [1, 0, 0]
+    if matches!(op, Op::Lt | Op::Gt | Op::Le | Op::Ge) {
+        let as01 = |r: R<Expr>| -> R<Expr> {
+            match r? {
+                Expr::Bool(t) => Ok(Expr::int(t as i128)),
+                _ => Err("comparisons in a matrix need numbers".into()),
+            }
+        };
+        match (&a, &b) {
+            (Expr::Matrix(m), Expr::Matrix(n)) => {
+                if m.len() != n.len() || m.iter().zip(n).any(|(r, s)| r.len() != s.len()) {
+                    return Err("compared matrices must have the same size".into());
+                }
+                let rows: Vec<Vec<Expr>> = m
+                    .iter()
+                    .zip(n)
+                    .map(|(r, s)| r.iter().zip(s).map(|(x, y)| as01(compare(op, x.clone(), y.clone()))).collect::<R<_>>())
+                    .collect::<R<_>>()?;
+                return Ok(Expr::Matrix(rows));
+            }
+            (Expr::Matrix(m), y) => {
+                let rows: Vec<Vec<Expr>> = m.iter().map(|r| r.iter().map(|x| as01(compare(op, x.clone(), y.clone()))).collect::<R<_>>()).collect::<R<_>>()?;
+                return Ok(Expr::Matrix(rows));
+            }
+            (x, Expr::Matrix(n)) => {
+                let rows: Vec<Vec<Expr>> = n.iter().map(|r| r.iter().map(|y| as01(compare(op, x.clone(), y.clone()))).collect::<R<_>>()).collect::<R<_>>()?;
+                return Ok(Expr::Matrix(rows));
+            }
+            _ => {}
+        }
     }
     if let (Expr::Matrix(_), _) | (_, Expr::Matrix(_)) = (&a, &b) {
         return match op {

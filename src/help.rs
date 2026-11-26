@@ -898,6 +898,55 @@ pub const ENTRIES: &[Entry] = &[
         "dsolve(y' == y*(1 - y/10), y, x, 0, 1)"
     ),
     e!(
+        "mean",
+        "Statistics",
+        "mean(x), median(x), mode(x), var(x), std(x), summary(x), quantile(x, p)",
+        "Descriptive statistics of a list of numbers (a row or column). var and std divide by n - 1 (sample variance). summary gives [min, Q1, median, Q3, max]; quantile interpolates linearly between sorted values (p may be a list). Whole numbers and fractions give exact answers.",
+        "summary([2 4 4 4 5 5 7 9])"
+    ),
+    e!(
+        "tally",
+        "Statistics",
+        "tally(x), sort(x), numel(x), cumsum(x)",
+        "tally lists the distinct values (first row) and how often each occurs (second row); sort sorts; numel counts; cumsum gives running totals. Comparisons such as x < 2 work entry by entry, giving 1 or 0, so sum(x < 2) counts.",
+        "tally([1 3 3 2 3 1])"
+    ),
+    e!(
+        "cov",
+        "Statistics",
+        "cov(x, y), corr(x, y), linfit(xs, ys) or linfit(xs, ys, x)",
+        "Sample covariance, the correlation coefficient r, and the least-squares line a + b x through the points (xs, ys), with r squared in the note.",
+        "linfit([1 2 3 4], [2 4 5 8])"
+    ),
+    e!(
+        "seed",
+        "Statistics",
+        "seed(n); randn(n) or randn(n, m); randint(a, b, n); randbin(n, p, count); randpois(lambda, count)",
+        "Random samples: seed(n) makes them repeatable. randn gives standard normal numbers, randint whole numbers from a to b, randbin binomial counts (successes in n trials), randpois Poisson counts. A single count gives a row; two give a matrix.",
+        "seed(1); randint(1, 6, 10)"
+    ),
+    e!(
+        "normpdf",
+        "Statistics",
+        "normpdf(x, mu, sigma), normcdf(x, mu, sigma), norminv(p, mu, sigma); binopdf(k, n, p), binocdf; poisspdf(k, lambda), poisscdf; tpdf(x, df), tcdf, tinv(p, df); chi2pdf(x, df), chi2cdf, chi2inv",
+        "Probability distributions: pdf is the density or probability P(X = k), cdf is P(X <= x), inv is the inverse of the cdf. mu = 0 and sigma = 1 when left out. Densities with a symbol for x are formulas you can plot and integrate; binomial and Poisson probabilities are exact for exact inputs.",
+        "binopdf(3, 10, 1/2)"
+    ),
+    e!(
+        "ci",
+        "Statistics",
+        "ci(data) or ci(data, level); ttest(data, mu0) or ttest(x, y); chi2test(observed, expected) or chi2test(table)",
+        "Inference: the t confidence interval for a mean (level 0.95 by default); the two-sided p-value of a one-sample or two-sample (Welch) t-test; the p-value of a chi-square test of fit (expected counts or probabilities) or of independence in a table of counts. The note gives the test statistic and degrees of freedom.",
+        "chi2test([18 22 20 25 15], [20 20 20 20 20])"
+    ),
+    e!(
+        "hist",
+        "Statistics",
+        "hist(data), hist(data, bins), hist(data, [edges]), with a last \"density\"; bar(heights) or bar(xs, heights)",
+        "Histogram of a list of numbers (bins equal-width bins, or the given edges); \"density\" scales the area to 1 to compare with a density curve using show. bar draws bars of the given heights, for example the probabilities of a discrete distribution.",
+        "show(hist(randn(1, 1000), 20, \"density\"), plot(normpdf(x), x, -4, 4))"
+    ),
+    e!(
         "seriessolve",
         "Differential equations",
         "seriessolve(ode, y, x, n) or seriessolve(ode, y, x, n, [y(0), y'(0), ...])",
@@ -1286,6 +1335,37 @@ const ALIASES: &[(&str, &str)] = &[
     ("unassume", "assume"),
     ("assumptions", "assume"),
     ("apart", "partfrac"),
+    ("median", "mean"),
+    ("mode", "mean"),
+    ("var", "mean"),
+    ("std", "mean"),
+    ("summary", "mean"),
+    ("quantile", "mean"),
+    ("sort", "tally"),
+    ("numel", "tally"),
+    ("cumsum", "tally"),
+    ("corr", "cov"),
+    ("linfit", "cov"),
+    ("randn", "seed"),
+    ("randint", "seed"),
+    ("randbin", "seed"),
+    ("randpois", "seed"),
+    ("normcdf", "normpdf"),
+    ("norminv", "normpdf"),
+    ("binopdf", "normpdf"),
+    ("binocdf", "normpdf"),
+    ("poisspdf", "normpdf"),
+    ("poisscdf", "normpdf"),
+    ("tpdf", "normpdf"),
+    ("tcdf", "normpdf"),
+    ("tinv", "normpdf"),
+    ("chi2pdf", "normpdf"),
+    ("chi2cdf", "normpdf"),
+    ("chi2inv", "normpdf"),
+    ("ttest", "ci"),
+    ("chi2test", "ci"),
+    ("histogram", "hist"),
+    ("bar", "hist"),
     ("cholesky", "chol"),
     ("isposdef", "posdef"),
     ("rank", "rref"),
