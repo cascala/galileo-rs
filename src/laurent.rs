@@ -715,3 +715,81 @@ impl Session {
         Ok(Expr::Obj(Rc::new(Obj::Figure(Figure::new(vec![s1, s2], "Re w", "Im w", true)))))
     }
 }
+
+/// The integral over the real line (or over [0, inf) for an even integrand) of
+/// R(x) cos(kx) or R(x) sin(kx), R rational with numeric coefficients and
+/// deg den > deg num: 2 pi i times the residues of R e^(ikz) in the upper half
+/// plane (Jordan's lemma), plus pi i times those on the real axis where the
+/// integrand stays finite.
+pub fn fourier_integral(fx: &Expr, x: &str, half: bool) -> Option<Expr> {
+    use crate::calc::{num_den, together};
+    if fx.symbols().iter().any(|s| s != x) {
+        return None;
+    }
+    let fs = match fx {
+        Expr::Mul(v) => v.clone(),
+        o => vec![o.clone()],
+    };
+    let mut trig = None;
+    let mut rest = vec![];
+    for f in fs {
+        match &f {
+            Expr::Func(g @ (Func::Cos | Func::Sin), a) if a.contains_sym(x) && trig.is_none() => {
+                let co = crate::cas::poly_coeffs(a, x)?;
+                if co.len() != 2 || !co[0].is_zero() {
+                    return None;
+                }
+                trig = Some((*g, co[1].clone()));
+            }
+            _ => rest.push(f),
+        }
+    }
+    let (g, k) = trig?;
+    let kv = crate::numeric::value(&k);
+    if !kv.is_finite() || kv == 0.0 {
+        return None;
+    }
+    let (k, sign) = if kv < 0.0 { (neg(k), if g == Func::Sin { -1 } else { 1 }) } else { (k, 1) };
+    let r = together(&mul(rest));
+    let (n, d) = num_den(&r);
+    let (pn, pd) = (crate::cas::poly_coeffs(&crate::calc::expand(&n), x)?, crate::cas::poly_coeffs(&crate::calc::expand(&d), x)?);
+    if pd.len() < 2 || pd.len() <= pn.len() {
+        return None;
+    }
+    if half {
+        // only an even integrand halves
+        let m = crate::calc::subst(fx, x, &neg(Expr::sym(x)));
+        if !crate::cas::is_zero(&simplify(&sub(m, fx.clone()))) {
+            return None;
+        }
+    }
+    let roots = crate::cas::solve(&d, x).ok()?;
+    let ez = mul2(r.clone(), exp(mul(vec![Expr::Const(Const::I), k.clone(), Expr::sym(x)])));
+    let mut acc = vec![];
+    for p in roots {
+        let pv = ceval(&p, &[])?;
+        if pv.im > 1e-12 {
+            let l = laurent(&ez, x, &p, 0, 6).ok()?;
+            acc.push(mul(vec![Expr::int(2), Expr::Const(Const::Pi), Expr::Const(Const::I), l.residue]));
+        } else if pv.im.abs() <= 1e-12 {
+            // allowed only where the integrand is finite (sin(x)/x at 0)
+            let at = |h: f64| ceval(fx, &[(x, C::new(pv.re + h, 0.0))]).map(|c| c.re);
+            match (at(1e-7), at(-1e-7)) {
+                (Some(u), Some(v)) if u.is_finite() && v.is_finite() && (u - v).abs() < 1e-3 * u.abs().max(1.0) => {}
+                _ => return None,
+            }
+            let l = laurent(&ez, x, &p, 0, 6).ok()?;
+            acc.push(mul(vec![Expr::Const(Const::Pi), Expr::Const(Const::I), l.residue]));
+        }
+    }
+    let total = simplify(&add(acc));
+    let (re, im) = crate::extra_cmd::parts(&total).ok()?;
+    let mut v = if g == Func::Cos { re } else { im };
+    if sign < 0 {
+        v = neg(v);
+    }
+    if half {
+        v = div(v, Expr::int(2));
+    }
+    Some(simplify(&v))
+}

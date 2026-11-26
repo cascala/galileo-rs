@@ -45,3 +45,13 @@ fn non_analytic_integrands() {
     assert_eq!(one("cint(conj(z), z, t + i*t^2, t, 0, 1)"), "1.0+0.333333333333*i");
     assert_eq!(one("cint(real(z), z, t + i*t, t, 0, 1)"), "0.5+0.5*i");
 }
+
+#[test]
+fn real_integrals_by_residues() {
+    assert_eq!(one("integrate(cos(x)/(x^2 + 1), x, -inf, inf)"), "pi/e");
+    assert_eq!(one("integrate(sin(x)/x, x, 0, inf)"), "pi/2");
+    assert_eq!(one("integrate(cos(2*x)/(x^2 + 1), x, 0, inf)"), "pi/(2*exp(2))");
+    assert_eq!(one("integrate(cos(x)/(x^2 + 4)^2, x, -inf, inf)"), "3*pi/(16*exp(2))");
+    assert_eq!(one("integrate(sin(x)/(x*(x^2+1)), x, -inf, inf)"), "pi*(e-1)/e");
+    assert!(one("integrate(cos(x)/x, x, -inf, inf)").starts_with("ERROR"));
+}

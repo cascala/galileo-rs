@@ -1215,6 +1215,11 @@ pub(crate) fn definite(fx: &Expr, x: &str, a: &Expr, b: &Expr, depth: usize) -> 
     if let Some(g) = gaussian_integral(fx, x, a, b) {
         return Ok(g);
     }
+    if is_inf(b) == 1 && (is_inf(a) == -1 || a.is_zero()) {
+        if let Some(g) = crate::laurent::fourier_integral(fx, x, a.is_zero()) {
+            return Ok(g);
+        }
+    }
     if let Some(r) = piecewise_definite(fx, x, a, b, depth) {
         return r;
     }

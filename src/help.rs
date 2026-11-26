@@ -236,7 +236,7 @@ pub const ENTRIES: &[Entry] = &[
         "integrate",
         "Calculus",
         "integrate(f, x) or integrate(f, x, a, b)",
-        "Antiderivative of f with respect to x (without the constant; log(x) stands for log|x|), or the definite integral from a to b. a and b can be inf or -inf. If no formula is found, a definite integral with numeric limits is computed numerically. int is the same.",
+        "Antiderivative of f with respect to x (without the constant; log(x) stands for log|x|), or the definite integral from a to b. a and b can be inf or -inf; over the whole line it also does a polynomial times e^(quadratic) and, by residues, a rational function times cos(kx) or sin(kx). If no formula is found, a definite integral with numeric limits is computed numerically. int is the same.",
         "integrate(x*exp(x), x)"
     ),
     e!(
