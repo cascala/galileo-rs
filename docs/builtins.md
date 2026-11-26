@@ -1938,13 +1938,13 @@ Also found as `dist`, `diameter`.
 
 ### mst
 
-`mst(G), maxflow(G, s, t), mincut(G, s, t)`
+`mst(G), spanningtrees(G), maxflow(G, s, t), mincut(G, s, t)`
 
-A minimum spanning tree: the cheapest set of edges that connects every vertex (Kruskal). maxflow is the most that can flow from s to t when each edge's weight is its capacity (Edmonds-Karp; the note shows the flow on each edge), and mincut the cheapest set of edges whose removal separates s from t; the two numbers are equal (max-flow min-cut theorem).
+A minimum spanning tree: the cheapest set of edges that connects every vertex (Kruskal); spanningtrees counts all the spanning trees (Kirchhoff's matrix-tree theorem). maxflow is the most that can flow from s to t when each edge's weight is its capacity (Edmonds-Karp; the note shows the flow on each edge), and mincut the cheapest set of edges whose removal separates s from t; the two numbers are equal (max-flow min-cut theorem).
 
 Example: `maxflow(digraph([1, 2, 3; 1, 3, 2; 2, 3, 1; 2, 4, 2; 3, 4, 3]), 1, 4)`
 
-Also found as `maxflow`, `mincut`.
+Also found as `maxflow`, `spanningtrees`, `mincut`.
 
 ### matching
 

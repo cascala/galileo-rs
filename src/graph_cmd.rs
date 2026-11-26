@@ -31,6 +31,7 @@ const ONLY: &[&str] = &[
     "shortest",
     "dist",
     "diameter",
+    "spanningtrees",
     "mst",
     "maxflow",
     "mincut",
@@ -484,8 +485,18 @@ impl Session {
                 self.note("the number of edges");
                 Ok(Expr::int(g.edges.len() as i128))
             }
-            "vertices" => Ok(list(g.labels.clone())),
-            "edges" => Ok(g.edge_rows()),
+            "vertices" => {
+                self.note(format!("{} vertices", n));
+                Ok(list(g.labels.clone()))
+            }
+            "edges" => {
+                self.note(format!(
+                    "{} edges, one per row{}",
+                    g.edges.len(),
+                    if g.weighted { ": from, to, weight" } else if g.directed { ": from, to" } else { "" }
+                ));
+                Ok(g.edge_rows())
+            }
             "degree" => {
                 let d = g.degrees();
                 if let Some(x) = v.first() {
@@ -514,6 +525,12 @@ impl Session {
                 let i = vertex(g, &v[0], f)?;
                 let mut nb: Vec<usize> = g.adj()[i].iter().map(|x| x.0).collect();
                 nb.sort();
+                self.note(format!(
+                    "the {} vertices {} {}",
+                    nb.len(),
+                    if g.directed { "that arrows lead to from" } else { "joined to" },
+                    g.label(i)
+                ));
                 Ok(labels(g, &nb))
             }
             "adjacency" | "laplacian" => {
@@ -651,6 +668,12 @@ impl Session {
                 [a, b] => {
                     let (s, t) = (vertex(g, a, f)?, vertex(g, b, f)?);
                     let (d, _) = gr::shortest_from(g, s).map_err(|e| format!("dist: {}", e))?;
+                    self.note(format!(
+                        "the {} of a shortest path from {} to {}",
+                        if g.weighted { "total weight" } else { "number of edges" },
+                        g.label(s),
+                        g.label(t)
+                    ));
                     Ok(number(&d[t]))
                 }
                 _ => Err("usage: dist(G, from, to) or dist(G) for all distances".into()),
@@ -676,6 +699,48 @@ impl Session {
                 let Some((x, i, j)) = best else { return Ok(Expr::int(0)) };
                 self.note(format!("the largest distance between two vertices, e.g. from {} to {}", g.label(i), g.label(j)));
                 Ok(Expr::Num(x))
+            }
+            "spanningtrees" => {
+                if g.directed {
+                    return Err("spanningtrees: needs an undirected graph".into());
+                }
+                if n > 300 {
+                    return Err("spanningtrees: at most 300 vertices".into());
+                }
+                // Kirchhoff: the determinant of the Laplacian without its first row and column
+                let mut m: Vec<Vec<Number>> = vec![vec![Number::zero(); n]; n];
+                for e in &g.edges {
+                    m[e.u][e.u] = m[e.u][e.u].add(Number::one());
+                    m[e.v][e.v] = m[e.v][e.v].add(Number::one());
+                    m[e.u][e.v] = m[e.u][e.v].sub(Number::one());
+                    m[e.v][e.u] = m[e.v][e.u].sub(Number::one());
+                }
+                let mut a: Vec<Vec<Number>> = m[1..].iter().map(|r| r[1..].to_vec()).collect();
+                let k = a.len();
+                let mut det = Number::one();
+                for c in 0..k {
+                    let Some(p) = (c..k).find(|&r| !a[r][c].is_zero()) else {
+                        det = Number::zero();
+                        break;
+                    };
+                    if p != c {
+                        a.swap(p, c);
+                        det = det.neg();
+                    }
+                    det = det.mul(&a[c][c]);
+                    for r in c + 1..k {
+                        if a[r][c].is_zero() {
+                            continue;
+                        }
+                        let f = a[r][c].div(&a[c][c]).unwrap();
+                        for j in c..k {
+                            let x = a[c][j].mul(&f);
+                            a[r][j] = a[r][j].sub(&x);
+                        }
+                    }
+                }
+                self.note("the number of different spanning trees (Kirchhoff's matrix-tree theorem: any cofactor of the Laplacian)");
+                Ok(Expr::Num(if n == 0 { Number::zero() } else { det }))
             }
             "mst" => {
                 if g.directed {
@@ -747,8 +812,15 @@ impl Session {
             }
             "matching" => {
                 let mate = gr::matching(g);
+                // a bipartite graph: each pair starts on the side of the first vertex
+                let side = gr::bipartition(g);
                 let pairs: Vec<Vec<Expr>> = (0..n)
-                    .filter_map(|i| mate[i].filter(|&j| i < j).map(|j| vec![g.labels[i].clone(), g.labels[j].clone()]))
+                    .filter_map(|i| mate[i].filter(|&j| i < j).map(|j| (i, j)))
+                    .map(|(i, j)| match &side {
+                        Some(sd) if sd[i] != sd[0] => (j, i),
+                        _ => (i, j),
+                    })
+                    .map(|(i, j)| vec![g.labels[i].clone(), g.labels[j].clone()])
                     .collect();
                 let k = pairs.len();
                 self.note(format!(
@@ -925,6 +997,12 @@ impl Session {
                 d.marks.edges.push((w[0], w[1]));
             }
         }
+        let what = match (d.marks.edges.is_empty(), d.marks.colors.is_empty()) {
+            (false, _) => format!("{} edges marked in orange", d.marks.edges.len()),
+            (true, false) => "vertices filled with their colors".to_string(),
+            _ => "the graph".to_string(),
+        };
+        self.note(what);
         d.name = if extra.is_empty() {
             g.name.clone()
         } else {

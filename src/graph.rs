@@ -1280,6 +1280,44 @@ pub fn layout(g: &Graph) -> Vec<(f64, f64)> {
     }
     let a = g.adj_undirected();
     let m = a.iter().map(|l| l.len()).sum::<usize>() / 2;
+    // a directed graph without cycles: layers by longest path from a source, arrows pointing down
+    if g.directed && n <= 200 {
+        if let Some(order) = toposort(g) {
+            let mut level = vec![0usize; n];
+            let a = g.adj();
+            for &u in &order {
+                for (v, _, _) in &a[u] {
+                    level[*v] = level[*v].max(level[u] + 1);
+                }
+            }
+            let depth = *level.iter().max().unwrap();
+            if depth > 0 {
+                // within a layer, order by the average position of the parents (one pass)
+                let mut pos = vec![(0.0, 0.0); n];
+                let width = (0..=depth).map(|l| level.iter().filter(|&&x| x == l).count()).max().unwrap() as f64;
+                let mut parents: Vec<Vec<usize>> = vec![vec![]; n];
+                for e in &g.edges {
+                    parents[e.v].push(e.u);
+                }
+                for l in 0..=depth {
+                    let mut layer: Vec<usize> = order.iter().copied().filter(|&v| level[v] == l).collect();
+                    let key = |v: usize, pos: &Vec<(f64, f64)>| {
+                        if parents[v].is_empty() {
+                            v as f64 / n as f64
+                        } else {
+                            parents[v].iter().map(|&p| pos[p].0).sum::<f64>() / parents[v].len() as f64
+                        }
+                    };
+                    layer.sort_by(|&a, &b| key(a, &pos).partial_cmp(&key(b, &pos)).unwrap_or(std::cmp::Ordering::Equal));
+                    let k = layer.len() as f64;
+                    for (j, &v) in layer.iter().enumerate() {
+                        pos[v] = ((j as f64 + 0.5) * width / k, -(l as f64) * 0.8);
+                    }
+                }
+                return pos;
+            }
+        }
+    }
     let comps = components(&Graph { directed: false, ..g.clone() });
     // forest: a tidy tree drawing (leaves side by side, parents above the middle of their children)
     if m + comps.len() == n {
@@ -1436,10 +1474,15 @@ impl Graph {
             (x0, x1, y0, y1) = (0.0, 1.0, 0.0, 1.0);
         }
         let (w, h) = ((x1 - x0).max(1e-9), (y1 - y0).max(1e-9));
-        let big = 420.0;
+        let text_of = |i: usize| match &self.labels[i] {
+            Expr::Str(st) => st.clone(),
+            _ => self.label(i),
+        };
+        let longest = (0..n).map(|i| text_of(i).chars().count()).max().unwrap_or(1);
+        let big = if longest > 3 { 560.0 } else { 420.0 };
         let scale = if w >= h { big / w } else { big / h };
         let scale = scale.min(if n <= 2 { 120.0 } else { f64::MAX });
-        let pad = 28.0;
+        let pad = if longest > 3 { 12.0 + 3.4 * longest.min(16) as f64 } else { 28.0 };
         let (pw, ph) = (w * scale + 2.0 * pad, h * scale + 2.0 * pad);
         let (pw, ph) = (pw.max(2.0 * pad + 40.0), ph.max(2.0 * pad + 40.0));
         let cx = |x: f64| pad + (x - x0) * scale + (pw - 2.0 * pad - w * scale).max(0.0) / 2.0;
@@ -1461,6 +1504,17 @@ impl Graph {
                 .iter()
                 .any(|&(a, b)| (a == u && b == v) || (!self.directed && a == v && b == u))
         };
+        // how far from its centre an edge leaves a vertex: a circle, or the box around a name
+        let reach = |i: usize, ux: f64, uy: f64| -> f64 {
+            let len = text_of(i).chars().count();
+            if labels && len > 2 {
+                let hw = (6.4 * len as f64 + 12.0) / 2.0;
+                let (tx, ty) = (hw / ux.abs().max(1e-9), 10.0 / uy.abs().max(1e-9));
+                tx.min(ty)
+            } else {
+                r
+            }
+        };
         for e in &self.edges {
             let (ax, ay, bx, by) = (cx(pos[e.u].0), cy(pos[e.u].1), cx(pos[e.v].0), cy(pos[e.v].1));
             let (dx, dy) = (bx - ax, by - ay);
@@ -1470,8 +1524,9 @@ impl Graph {
             let both = self.directed && self.has_edge(e.v, e.u);
             let off = if both { 4.0 } else { 0.0 };
             let (ox, oy) = (-uy * off, ux * off);
-            let (sx, sy) = (ax + ux * r + ox, ay + uy * r + oy);
-            let (tx, ty) = (bx - ux * (r + 1.0) + ox, by - uy * (r + 1.0) + oy);
+            let (ra, rb) = (reach(e.u, ux, uy), reach(e.v, ux, uy));
+            let (sx, sy) = (ax + ux * ra + ox, ay + uy * ra + oy);
+            let (tx, ty) = (bx - ux * (rb + 1.0) + ox, by - uy * (rb + 1.0) + oy);
             let m = marked(e.u, e.v);
             let (col, width) = if m { ("#d97706", "3.5") } else { ("#9ca3af", "1.6") };
             let marker = if self.directed {
@@ -1498,18 +1553,27 @@ impl Graph {
                 None => "white",
             };
             let text = if self.marks.colors.get(i).is_some() { "white" } else { "#111827" };
-            let _ = write!(
-                s,
-                r##"<circle cx="{:.1}" cy="{:.1}" r="{r}" fill="{fill}" stroke="#374151" stroke-width="1.3"/>"##,
-                cx(x),
-                cy(y)
-            );
+            let t = text_of(i);
+            let len = t.chars().count();
+            if labels && len > 2 {
+                // a name: a rounded box that fits it
+                let bw = 6.4 * len as f64 + 12.0;
+                let _ = write!(
+                    s,
+                    r##"<rect x="{:.1}" y="{:.1}" width="{bw:.1}" height="20" rx="10" fill="{fill}" stroke="#374151" stroke-width="1.3"/>"##,
+                    cx(x) - bw / 2.0,
+                    cy(y) - 10.0
+                );
+            } else {
+                let _ = write!(
+                    s,
+                    r##"<circle cx="{:.1}" cy="{:.1}" r="{r}" fill="{fill}" stroke="#374151" stroke-width="1.3"/>"##,
+                    cx(x),
+                    cy(y)
+                );
+            }
             if labels {
-                let mut t = self.label(i);
-                if let Expr::Str(st) = &self.labels[i] {
-                    t = st.clone();
-                }
-                let fs = if t.chars().count() > 2 { 9 } else { 11 };
+                let fs = 11;
                 let _ = write!(
                     s,
                     r#"<text x="{:.1}" y="{:.1}" dy="4" text-anchor="middle" font-size="{fs}" fill="{text}">{}</text>"#,
