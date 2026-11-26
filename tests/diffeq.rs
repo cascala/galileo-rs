@@ -63,3 +63,12 @@ fn series_and_fourier() {
     assert_eq!(one("fourier(x, x, pi, 3)"), "2*sin(x)-sin(2*x)+2*sin(3*x)/3");
     assert_eq!(one("fourier(x^2, x, pi, 2)"), "pi^2/3-4*cos(x)+cos(2*x)");
 }
+
+#[test]
+fn trig_products_and_window() {
+    assert_eq!(one("int(sin(3*x)*cos(5*x), x)"), "cos(2*x)/4-cos(8*x)/16");
+    assert_eq!(one("int(sin(3*x)*sin(5*x), x, -pi, pi)"), "0");
+    assert!(!one("window(plot(x, x, 0, 1), 0, 1, -1, 2)").starts_with("ERROR"));
+    assert!(one("window(plot(x, x, 0, 1), 1, 0, -1, 2)").starts_with("ERROR"));
+    assert_eq!(one("dsolve(P' == P*(1 - P) - 3/16, P, t, 0, 1)"), "(1-9*exp(t/2))/(4-12*exp(t/2))");
+}

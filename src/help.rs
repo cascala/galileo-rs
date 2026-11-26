@@ -506,6 +506,13 @@ pub const ENTRIES: &[Entry] = &[
         "polarplot(1 + cos(phi), phi, 0, 2*pi)"
     ),
     e!(
+        "window",
+        "Plotting",
+        "window(p, x0, x1, y0, y1)",
+        "A copy of the 2D plot p that shows exactly x0..x1 across and y0..y1 up; curves leaving the window are cut off.",
+        "window(plot(1/(1 - x), x, 0, 2), 0, 2, -10, 10)"
+    ),
+    e!(
         "show",
         "Plotting",
         "show(p1, p2, ...)",
