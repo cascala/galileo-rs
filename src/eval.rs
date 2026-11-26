@@ -138,6 +138,7 @@ fn first_sentence(s: &str) -> &str {
 
 impl Session {
     pub fn new() -> Session {
+        crate::assume::clear();
         Session {
             vars: builtins(),
             hidden: vec![],
