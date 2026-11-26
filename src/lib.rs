@@ -62,6 +62,8 @@ pub mod de_cmd;
 pub mod ode2;
 pub mod stats;
 pub mod stats_cmd;
+pub mod cnum;
+pub mod laurent;
 pub mod la_cmd;
 pub mod teach;
 #[cfg(target_arch = "wasm32")]

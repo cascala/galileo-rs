@@ -1,0 +1,40 @@
+//! Wave 5: Laurent series, residues, poles and contour integrals.
+
+use galileo_rs::Output;
+use galileo_rs::eval::Session;
+use galileo_rs::print::show;
+
+fn one(code: &str) -> String {
+    let mut s = Session::new();
+    let mut last = String::new();
+    for r in s.run(code) {
+        last = match r {
+            Ok(Output::Value(v)) => show(&v),
+            Ok(o) => format!("{:?}", o),
+            Err(e) => format!("ERROR {}", e),
+        };
+    }
+    last
+}
+
+#[test]
+fn laurent_and_residues() {
+    assert_eq!(one("laurent(exp(z)/z^3, z, 0, 2)"), "1/z^3+1/z^2+1/(2*z)+1/6+z/24+z^2/120");
+    assert_eq!(one("residue(1/(z^2+1), z, i)"), "-i/2");
+    assert_eq!(one("residue(1/sin(z)^2, z, 0)"), "0");
+    assert_eq!(one("residue(z^2*exp(1/z), z, 0)"), "1/6");
+    assert_eq!(one("residue(exp(z)/(z-1)^3, z, 1)"), "e/2");
+    assert_eq!(one("residue(cos(z)/sin(z), z, pi)"), "1");
+    assert_eq!(one("laurent(sin(z)/z, z, 0, 4)"), "1-z^2/6+z^4/120");
+    assert!(one("laurent(sqrt(z), z, 0, 2)").contains("branch point"));
+    assert_eq!(one("poles((z+1)/(z^2*(z-2)), z)"), "[0, 2, -3/4;\n 2, 1,  3/4]");
+}
+
+#[test]
+fn contour_integrals() {
+    assert_eq!(one("cint(1/z, z, exp(i*t), t, 0, 2*pi)"), "6.28318530718*i");
+    assert_eq!(one("integrate(exp(4*pi*i*s), s, 0, 1)"), "0");
+    assert_eq!(one("abs(1 + i*sqrt(3))"), "2");
+    assert!(!one("cplot(z^2, z, -1, 1, -1, 1)").starts_with("ERROR"));
+    assert!(!one("cmap(exp(z), z, -1, 1, -1, 1)").starts_with("ERROR"));
+}

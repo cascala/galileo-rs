@@ -309,7 +309,19 @@ impl Session {
         }
         let a = self.eval(&args[2])?;
         let b = self.eval(&args[3])?;
-        definite(fx, x, &a, &b, 0)
+        let r = definite(fx, x, &a, &b, 0);
+        // a complex integrand over a real interval: integrate the real and imaginary parts
+        if r.is_err() && crate::extra_cmd::has_i(fx) && !crate::extra_cmd::has_i(&a) && !crate::extra_cmd::has_i(&b) {
+            if let Ok((re, im)) = crate::extra_cmd::parts(fx) {
+                if !crate::extra_cmd::has_i(&re) && !crate::extra_cmd::has_i(&im) {
+                    let (p, q) = (definite(&re, x, &a, &b, 0), definite(&im, x, &a, &b, 0));
+                    if let (Ok(p), Ok(q)) = (p, q) {
+                        return Ok(calc::simplify(&add2(p, mul2(q, Expr::Const(crate::expr::Const::I)))));
+                    }
+                }
+            }
+        }
+        r
     }
 
     fn nintegrate(&mut self, args: &[Node]) -> R<Expr> {

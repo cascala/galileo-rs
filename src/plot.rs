@@ -157,6 +157,179 @@ pub struct Figure {
     pub equal_aspect: bool,
     /// fixed view [x0, x1] x [y0, y1], set by window(p, ...)
     pub window: Option<(f64, f64, f64, f64)>,
+    /// a picture under the curves (domain coloring)
+    pub image: Option<Raster>,
+}
+
+/// RGB pixels covering [x0, x1] x [y0, y1], top row first
+#[derive(Clone, Debug, PartialEq)]
+pub struct Raster {
+    pub w: usize,
+    pub h: usize,
+    pub rgb: Vec<u8>,
+    pub x0: f64,
+    pub x1: f64,
+    pub y0: f64,
+    pub y1: f64,
+}
+
+impl Raster {
+    /// a data: URI with the pixels as a PNG (stored, uncompressed deflate blocks)
+    pub fn png_uri(&self) -> String {
+        fn crc32(data: &[u8]) -> u32 {
+            let mut c = 0xffff_ffffu32;
+            for &b in data {
+                c ^= b as u32;
+                for _ in 0..8 {
+                    c = if c & 1 == 1 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
+                }
+            }
+            !c
+        }
+        fn chunk(out: &mut Vec<u8>, kind: &[u8], data: &[u8]) {
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            let mut body = kind.to_vec();
+            body.extend_from_slice(data);
+            out.extend_from_slice(&body);
+            out.extend_from_slice(&crc32(&body).to_be_bytes());
+        }
+        // filter each row by its difference from the row above (smooth pictures give small values)
+        let stride = self.w * 3;
+        let mut raw = Vec::with_capacity(self.h * (stride + 1));
+        for (j, row) in self.rgb.chunks(stride).enumerate() {
+            if j == 0 {
+                raw.push(0);
+                raw.extend_from_slice(row);
+            } else {
+                raw.push(2);
+                let up = &self.rgb[(j - 1) * stride..j * stride];
+                raw.extend(row.iter().zip(up).map(|(a, b)| a.wrapping_sub(*b)));
+            }
+        }
+        let mut z = vec![0x78, 0x01];
+        z.extend(deflate_fixed(&raw));
+        let (mut a, mut bb) = (1u32, 0u32);
+        for &c in &raw {
+            a = (a + c as u32) % 65521;
+            bb = (bb + a) % 65521;
+        }
+        z.extend_from_slice(&((bb << 16) | a).to_be_bytes());
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        let mut ihdr = vec![];
+        ihdr.extend_from_slice(&(self.w as u32).to_be_bytes());
+        ihdr.extend_from_slice(&(self.h as u32).to_be_bytes());
+        ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+        chunk(&mut png, b"IHDR", &ihdr);
+        chunk(&mut png, b"IDAT", &z);
+        chunk(&mut png, b"IEND", &[]);
+        format!("data:image/png;base64,{}", base64(&png))
+    }
+}
+
+/// deflate with fixed Huffman codes and greedy LZ77 matching
+fn deflate_fixed(data: &[u8]) -> Vec<u8> {
+    struct Bits {
+        out: Vec<u8>,
+        acc: u64,
+        n: u32,
+    }
+    impl Bits {
+        fn put(&mut self, v: u32, n: u32) {
+            self.acc |= (v as u64) << self.n;
+            self.n += n;
+            while self.n >= 8 {
+                self.out.push(self.acc as u8);
+                self.acc >>= 8;
+                self.n -= 8;
+            }
+        }
+        /// a Huffman code, most significant bit first
+        fn code(&mut self, c: u32, len: u32) {
+            let mut r = 0;
+            for i in 0..len {
+                r |= ((c >> i) & 1) << (len - 1 - i);
+            }
+            self.put(r, len);
+        }
+        fn lit(&mut self, v: u32) {
+            match v {
+                0..=143 => self.code(0x30 + v, 8),
+                144..=255 => self.code(0x190 + v - 144, 9),
+                256..=279 => self.code(v - 256, 7),
+                _ => self.code(0xc0 + v - 280, 8),
+            }
+        }
+    }
+    const LB: [u32; 29] = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+    const LE: [u32; 29] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+    const DB: [u32; 30] = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+    const DE: [u32; 30] = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+    let mut b = Bits { out: vec![], acc: 0, n: 0 };
+    b.put(1, 1);
+    b.put(1, 2);
+    let n = data.len();
+    let mut head = vec![usize::MAX; 1 << 15];
+    let mut prev = vec![usize::MAX; n];
+    let hash = |i: usize| ((data[i] as usize) << 10 ^ (data[i + 1] as usize) << 5 ^ data[i + 2] as usize) & 0x7fff;
+    let mut i = 0;
+    while i < n {
+        let (mut best, mut dist) = (0usize, 0usize);
+        if i + 2 < n {
+            let h = hash(i);
+            let mut j = head[h];
+            let mut tries = 0;
+            while j != usize::MAX && i - j <= 32768 && tries < 48 {
+                let mut l = 0;
+                while l < 258 && i + l < n && data[j + l] == data[i + l] {
+                    l += 1;
+                }
+                if l > best {
+                    best = l;
+                    dist = i - j;
+                }
+                j = prev[j];
+                tries += 1;
+            }
+        }
+        let step = if best >= 3 {
+            let k = LB.iter().rposition(|&x| x as usize <= best).unwrap();
+            b.lit(257 + k as u32);
+            b.put(best as u32 - LB[k], LE[k]);
+            let d = DB.iter().rposition(|&x| x as usize <= dist).unwrap();
+            b.code(d as u32, 5);
+            b.put(dist as u32 - DB[d], DE[d]);
+            best
+        } else {
+            b.lit(data[i] as u32);
+            1
+        };
+        for p in i..i + step {
+            if p + 2 < n {
+                let h = hash(p);
+                prev[p] = head[h];
+                head[h] = p;
+            }
+        }
+        i += step;
+    }
+    b.lit(256);
+    if b.n > 0 {
+        b.out.push(b.acc as u8);
+    }
+    b.out
+}
+
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len() * 4 / 3 + 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
 }
 
 struct Bounds {
@@ -175,6 +348,7 @@ impl Figure {
             title: String::new(),
             equal_aspect,
             window: None,
+            image: None,
         }
     }
 
@@ -187,6 +361,7 @@ impl Figure {
             title: pick(&self.title, &o.title),
             equal_aspect: self.equal_aspect || o.equal_aspect,
             window: self.window.or(o.window),
+            image: self.image.clone().or_else(|| o.image.clone()),
         }
     }
 
@@ -201,6 +376,9 @@ impl Figure {
             .flat_map(|s| s.points.iter().copied())
             .filter(|p| finite(p.0) && finite(p.1))
             .collect();
+        if let Some(r) = &self.image {
+            pts.extend([(r.x0, r.y0), (r.x1, r.y1)]);
+        }
         for s in &self.series {
             for (p, e) in s.points.iter().zip(&s.errors) {
                 if finite(p.0) && finite(p.1) && finite(*e) {
@@ -455,6 +633,23 @@ impl Figure {
                 )]),
             ),
         ]);
+        let layout = match &self.image {
+            Some(r) => {
+                let img = obj(&[
+                    ("source", jstr(&r.png_uri())),
+                    ("xref", jstr("x")),
+                    ("yref", jstr("y")),
+                    ("x", jnum(r.x0)),
+                    ("y", jnum(r.y1)),
+                    ("sizex", jnum(r.x1 - r.x0)),
+                    ("sizey", jnum(r.y1 - r.y0)),
+                    ("sizing", jstr("stretch")),
+                    ("layer", jstr("below")),
+                ]);
+                format!("{},\"images\":[{}]}}", &layout[..layout.len() - 1], img)
+            }
+            None => layout,
+        };
         obj(&[
             ("data", format!("[{}]", traces.join(","))),
             ("layout", layout),
@@ -565,6 +760,17 @@ impl Figure {
             r##"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="none" stroke="#6b7280"/>"##,
             ml, mt, pw, ph
         );
+        if let Some(r) = &self.image {
+            let _ = write!(
+                s,
+                r#"<image clip-path="url(#plotarea)" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" preserveAspectRatio="none" href="{}"/>"#,
+                sx(r.x0),
+                sy(r.y1),
+                sx(r.x1) - sx(r.x0),
+                sy(r.y0) - sy(r.y1),
+                r.png_uri()
+            );
+        }
         s.push_str(r#"<g clip-path="url(#plotarea)" fill="none" stroke-width="2" stroke-linejoin="round">"#);
         let span = b.y1 - b.y0;
         for (i, ser) in self.series.iter().enumerate() {

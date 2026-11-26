@@ -973,6 +973,18 @@ impl Session {
                         return Expr::float(y);
                     }
                 }
+                // |a + bi| = sqrt(a^2 + b^2) for a complex argument
+                if func == Func::Abs && crate::extra_cmd::has_i(x) {
+                    if let Ok((re, im)) = crate::extra_cmd::parts(x) {
+                        let r = calc::simplify(&build::sqrt(build::add2(
+                            build::pow(re, Expr::int(2)),
+                            build::pow(im, Expr::int(2)),
+                        )));
+                        if !crate::extra_cmd::has_i(&r) {
+                            return r;
+                        }
+                    }
+                }
                 build::func(func, x.clone())
             });
         }

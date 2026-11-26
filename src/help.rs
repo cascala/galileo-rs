@@ -1045,6 +1045,34 @@ pub const ENTRIES: &[Entry] = &[
         "show(hist(randn(1, 1000), 20, \"density\"), plot(normpdf(x), x, -4, 4))"
     ),
     e!(
+        "laurent",
+        "Complex analysis",
+        "laurent(f, z, a, n)",
+        "The Laurent series of f around z = a up to (z − a)^n, with all negative powers. The note says whether a is a regular point, a removable singularity, a pole (and its order) or an essential singularity, and gives the residue. Works for rational functions, exp, log, powers and the trigonometric and hyperbolic functions.",
+        "laurent(exp(z)/z^3, z, 0, 2)"
+    ),
+    e!(
+        "residue",
+        "Complex analysis",
+        "residue(f, z, a); poles(f, z)",
+        "residue: the coefficient of 1/(z − a) in the Laurent series of f around a, exact. poles: one row [pole, order, residue] for each pole of a rational function. By the residue theorem, the integral of f around a closed curve is 2πi times the sum of the residues inside.",
+        "poles(1/(z^4 + 1), z)"
+    ),
+    e!(
+        "cint",
+        "Complex analysis",
+        "cint(f, z, path, t, t0, t1)",
+        "The contour integral of f(z) dz along the path z = path(t), t from t0 to t1, computed numerically: the integral of f(z(t)) z'(t) dt.",
+        "cint(1/z, z, exp(i*t), t, 0, 2*pi)"
+    ),
+    e!(
+        "cplot",
+        "Complex analysis",
+        "cplot(f, z, x0, x1, y0, y1); cmap(f, z, x0, x1, y0, y1)",
+        "cplot: domain coloring of f over the rectangle x0 ≤ Re z ≤ x1, y0 ≤ Im z ≤ y1; the hue shows arg f(z), the brightness |f(z)|, so zeros are dark and poles light. cmap: the images under f of the horizontal and vertical grid lines of the rectangle.",
+        "cplot((z^2 - 1)/(z^2 + 1), z, -2, 2, -2, 2)"
+    ),
+    e!(
         "seriessolve",
         "Differential equations",
         "seriessolve(ode, y, x, n) or seriessolve(ode, y, x, n, [y(0), y'(0), ...])",
@@ -1464,6 +1492,8 @@ const ALIASES: &[(&str, &str)] = &[
     ("chi2test", "ci"),
     ("histogram", "hist"),
     ("bar", "hist"),
+    ("poles", "residue"),
+    ("cmap", "cplot"),
     ("cholesky", "chol"),
     ("isposdef", "posdef"),
     ("rank", "rref"),

@@ -107,6 +107,9 @@ impl Session {
         if let Some(r) = self.stats_call(f, args) {
             return r;
         }
+        if let Some(r) = self.cx_call(f, args) {
+            return r;
+        }
         if let Some(r) = self.la_call(f, args) {
             return r;
         }
