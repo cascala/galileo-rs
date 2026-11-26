@@ -507,3 +507,470 @@ pub fn named(s: &str) -> Result<Group, String> {
         )),
     }
 }
+
+// ---------- homomorphisms ----------
+
+/// The map G -> H sending G's generators to `images` (elements of H), when it is a
+/// homomorphism: pairs (g, f(g)) for every g, in the order of G's elements
+pub fn hom_table(g: &Group, h: &Group, images: &[Perm]) -> Result<Vec<Perm>, String> {
+    if images.len() != g.gens.len() {
+        return Err(format!(
+            "give one image for each of the {} generators of {} ({})",
+            g.gens.len(),
+            g.name,
+            g.gens.iter().map(show_perm).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    let mut map: Vec<Option<Perm>> = vec![None; g.order()];
+    let id = g.identity();
+    map[g.index[&id]] = Some(h.identity());
+    let mut todo = vec![id];
+    while let Some(x) = todo.pop() {
+        let fx = map[g.index[&x]].clone().unwrap();
+        for (s, t) in g.gens.iter().zip(images) {
+            let y = mul(s, &x);
+            let fy = mul(t, &fx);
+            let j = g.index[&y];
+            match &map[j] {
+                None => {
+                    map[j] = Some(fy);
+                    todo.push(y);
+                }
+                Some(old) if *old != fy => {
+                    return Err(format!(
+                        "this is not a homomorphism: {} would have to go to both {} and {}",
+                        show_perm(&y),
+                        show_perm(old),
+                        show_perm(&fy)
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(map.into_iter().map(|m| m.unwrap()).collect())
+}
+
+pub fn kernel(g: &Group, h: &Group, images: &[Perm]) -> Result<Group, String> {
+    let t = hom_table(g, h, images)?;
+    let hid = h.identity();
+    let k: Vec<Perm> = g
+        .elems
+        .iter()
+        .zip(&t)
+        .filter(|(_, f)| **f == hid)
+        .map(|(x, _)| x.clone())
+        .collect();
+    g.sub(k)
+}
+
+pub fn image(g: &Group, h: &Group, images: &[Perm]) -> Result<Group, String> {
+    hom_table(g, h, images)?;
+    h.sub(images.to_vec())
+}
+
+/// a generating set of at most a few elements (greedy)
+fn small_gens(g: &Group) -> Vec<Perm> {
+    if g.gens.len() <= 2 {
+        return g.gens.clone();
+    }
+    let mut gens: Vec<Perm> = vec![];
+    let mut h = g.sub(vec![]).unwrap();
+    // prefer elements of large order
+    let mut cand: Vec<&Perm> = g.elems.iter().collect();
+    cand.sort_by_key(|x| std::cmp::Reverse(order_of(x)));
+    while h.order() < g.order() {
+        let mut best: Option<(usize, Perm)> = None;
+        for x in cand.iter().take(400) {
+            if h.contains(x) {
+                continue;
+            }
+            let mut gs = gens.clone();
+            gs.push((*x).clone());
+            let k = g.sub(gs).unwrap().order();
+            if best.as_ref().is_none_or(|b| k > b.0) {
+                best = Some((k, (*x).clone()));
+            }
+        }
+        let Some((_, x)) = best else { break };
+        gens.push(x);
+        h = g.sub(gens.clone()).unwrap();
+    }
+    gens
+}
+
+/// numbers that two isomorphic groups share
+fn invariants(g: &Group) -> (usize, Vec<(usize, usize)>, Vec<usize>, bool) {
+    let mut cs: Vec<usize> = g.classes().iter().map(|c| c.len()).collect();
+    cs.sort();
+    (g.order(), g.order_counts(), cs, g.is_abelian())
+}
+
+/// an isomorphism G -> H as images of a small generating set of G, if there is one
+pub fn isomorphism(g: &Group, h: &Group) -> Option<(Vec<Perm>, Vec<Perm>)> {
+    if invariants(g) != invariants(h) {
+        return None;
+    }
+    let gg = Group::new(g.name.clone(), g.degree, small_gens(g)).ok()?;
+    let cands: Vec<Vec<&Perm>> = gg
+        .gens
+        .iter()
+        .map(|s| {
+            h.elems
+                .iter()
+                .filter(|y| order_of(y) == order_of(s))
+                .collect()
+        })
+        .collect();
+    let mut pick = vec![0usize; cands.len()];
+    let mut tries = 0u64;
+    loop {
+        let imgs: Vec<Perm> = pick
+            .iter()
+            .zip(&cands)
+            .map(|(&i, c)| c[i].clone())
+            .collect();
+        if let Ok(t) = hom_table(&gg, h, &imgs) {
+            let mut seen = std::collections::HashSet::new();
+            if t.iter().all(|y| seen.insert(y.clone())) {
+                return Some((gg.gens.clone(), imgs));
+            }
+        }
+        tries += 1;
+        if tries > 2_000_000 {
+            return None;
+        }
+        // next combination
+        let mut k = 0;
+        loop {
+            if k == pick.len() {
+                return None;
+            }
+            pick[k] += 1;
+            if pick[k] < cands[k].len() {
+                break;
+            }
+            pick[k] = 0;
+            k += 1;
+        }
+    }
+}
+
+/// invariant factors d1 | d2 | ... of a finite abelian group (from counting
+/// solutions of x^(p^k) = 1)
+pub fn abelian_invariants(a: &Group) -> Vec<u64> {
+    let n = a.order() as u64;
+    let mut factors: Vec<u64> = vec![];
+    let mut m = n;
+    let mut p = 2u64;
+    let mut parts: Vec<(u64, Vec<u32>)> = vec![];
+    while m > 1 {
+        if m % p == 0 {
+            let mut e = 0;
+            while m % p == 0 {
+                m /= p;
+                e += 1;
+            }
+            // c_k = log_p #{x : x^(p^k) = 1}; then the number of cyclic factors of
+            // order >= p^k is c_k - c_(k-1)
+            let mut c = vec![0u32];
+            let mut pk = 1u64;
+            for _ in 1..=e {
+                pk *= p;
+                let cnt = a
+                    .elems
+                    .iter()
+                    .filter(|x| pk % order_of(x) as u64 == 0)
+                    .count() as u64;
+                let mut l = 0;
+                let mut v = cnt;
+                while v > 1 {
+                    v /= p;
+                    l += 1;
+                }
+                c.push(l);
+            }
+            // exponents of the cyclic factors, largest first
+            let mut exps = vec![];
+            for k in (1..=e as usize).rev() {
+                let at_least = c[k] - c[k - 1];
+                let at_least_next = if k < e as usize { c[k + 1] - c[k] } else { 0 };
+                for _ in 0..(at_least - at_least_next) {
+                    exps.push(k as u32);
+                }
+            }
+            parts.push((p, exps));
+        }
+        p += 1;
+    }
+    let len = parts.iter().map(|(_, e)| e.len()).max().unwrap_or(0);
+    for i in 0..len {
+        let mut d = 1u64;
+        for (p, e) in &parts {
+            if let Some(&k) = e.get(i) {
+                d *= p.pow(k);
+            }
+        }
+        factors.push(d);
+    }
+    factors.reverse();
+    factors
+}
+
+// ---------- presentations ----------
+
+/// A word in the generators: (generator index, exponent ±1)
+type Word = Vec<(usize, i32)>;
+
+fn parse_word(s: &str, names: &[String]) -> Result<Word, String> {
+    // a product of factors name, name^k, (word)^k
+    fn factor(t: &[char], i: &mut usize, names: &[String]) -> Result<Word, String> {
+        while *i < t.len() && t[*i] == ' ' {
+            *i += 1;
+        }
+        let base: Word = if *i < t.len() && t[*i] == '(' {
+            *i += 1;
+            let w = product(t, i, names)?;
+            if *i >= t.len() || t[*i] != ')' {
+                return Err("missing )".into());
+            }
+            *i += 1;
+            w
+        } else {
+            let start = *i;
+            while *i < t.len() && (t[*i].is_alphanumeric() || t[*i] == '_') {
+                *i += 1;
+            }
+            let nm: String = t[start..*i].iter().collect();
+            if nm == "1" {
+                vec![]
+            } else {
+                let k = names
+                    .iter()
+                    .position(|n| *n == nm)
+                    .ok_or_else(|| format!("unknown generator '{}'", nm))?;
+                vec![(k, 1)]
+            }
+        };
+        while *i < t.len() && t[*i] == ' ' {
+            *i += 1;
+        }
+        if *i < t.len() && t[*i] == '^' {
+            *i += 1;
+            let neg = *i < t.len() && t[*i] == '-';
+            if neg {
+                *i += 1;
+            }
+            let start = *i;
+            while *i < t.len() && t[*i].is_ascii_digit() {
+                *i += 1;
+            }
+            let k: i32 = t[start..*i]
+                .iter()
+                .collect::<String>()
+                .parse()
+                .map_err(|_| "bad exponent".to_string())?;
+            let unit: Word = if neg {
+                base.iter().rev().map(|&(g, e)| (g, -e)).collect()
+            } else {
+                base
+            };
+            Ok((0..k).flat_map(|_| unit.clone()).collect())
+        } else {
+            Ok(base)
+        }
+    }
+    fn product(t: &[char], i: &mut usize, names: &[String]) -> Result<Word, String> {
+        let mut w = factor(t, i, names)?;
+        loop {
+            while *i < t.len() && t[*i] == ' ' {
+                *i += 1;
+            }
+            if *i < t.len() && t[*i] == '*' {
+                *i += 1;
+                w.extend(factor(t, i, names)?);
+            } else {
+                return Ok(w);
+            }
+        }
+    }
+    let t: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    let w = product(&t, &mut i, names)?;
+    if i != t.len() {
+        return Err(format!("could not read '{}'", s));
+    }
+    Ok(w)
+}
+
+/// The group <gens | relators> by Todd–Coxeter coset enumeration (HLT), as the
+/// permutations of the cosets of the trivial subgroup
+pub fn presentation(text: &str) -> Result<Group, String> {
+    const MAX: usize = 60_000;
+    let inner = text.trim().trim_start_matches('<').trim_end_matches('>');
+    let (g, r) = inner
+        .split_once('|')
+        .ok_or("a presentation looks like <a, b | a^4, b^2, (a*b)^2>")?;
+    let names: Vec<String> = g
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if names.is_empty() {
+        return Err("no generators".into());
+    }
+    let rels: Vec<Word> = r
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| parse_word(s, &names))
+        .collect::<Result<_, _>>()?;
+    let ng = names.len();
+    // columns: 2k = generator k, 2k+1 = its inverse
+    let col = |(g, e): (usize, i32)| if e > 0 { 2 * g } else { 2 * g + 1 };
+    let inv_col = |c: usize| c ^ 1;
+    let mut table: Vec<Vec<usize>> = vec![vec![usize::MAX; 2 * ng]];
+    let mut parent: Vec<usize> = vec![0]; // union-find for coincidences
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        let mut x = x;
+        while p[x] != r {
+            let n = p[x];
+            p[x] = r;
+            x = n;
+        }
+        r
+    }
+    let mut c = 0;
+    while c < table.len() {
+        if find(&mut parent, c) != c {
+            c += 1;
+            continue;
+        }
+        for rel in &rels {
+            if find(&mut parent, c) != c {
+                break;
+            }
+            // trace rel from c, defining new cosets as needed (HLT)
+            let mut x = c;
+            for (k, &l) in rel.iter().enumerate() {
+                let cc = col(l);
+                x = find(&mut parent, x);
+                let y = table[x][cc];
+                if y != usize::MAX && k + 1 < rel.len() {
+                    x = find(&mut parent, y);
+                    continue;
+                }
+                if k + 1 == rel.len() {
+                    // the last letter must bring x back to c
+                    let cc0 = find(&mut parent, c);
+                    if y == usize::MAX {
+                        table[x][cc] = cc0;
+                        if table[cc0][inv_col(cc)] == usize::MAX {
+                            table[cc0][inv_col(cc)] = x;
+                        } else if find(&mut parent, table[cc0][inv_col(cc)]) != x {
+                            let z = table[cc0][inv_col(cc)];
+                            coincide(&mut table, &mut parent, z, x);
+                        }
+                    } else if find(&mut parent, y) != cc0 {
+                        coincide(&mut table, &mut parent, y, cc0);
+                    }
+                    break;
+                }
+                if table.len() >= MAX {
+                    return Err(format!(
+                        "coset enumeration passed {} cosets: the group is infinite or too large",
+                        MAX
+                    ));
+                }
+                let n = table.len();
+                table.push(vec![usize::MAX; 2 * ng]);
+                parent.push(n);
+                table[x][cc] = n;
+                table[n][inv_col(cc)] = x;
+                x = n;
+            }
+        }
+        // make sure every entry of row c is defined
+        if find(&mut parent, c) == c {
+            for cc in 0..2 * ng {
+                if table[c][cc] == usize::MAX {
+                    if table.len() >= MAX {
+                        return Err(format!(
+                            "coset enumeration passed {} cosets: the group is infinite or too large",
+                            MAX
+                        ));
+                    }
+                    let n = table.len();
+                    table.push(vec![usize::MAX; 2 * ng]);
+                    parent.push(n);
+                    table[c][cc] = n;
+                    table[n][inv_col(cc)] = c;
+                }
+            }
+        }
+        c += 1;
+    }
+    // live cosets, renumbered
+    let live: Vec<usize> = (0..table.len())
+        .filter(|&x| find(&mut parent, x) == x)
+        .collect();
+    let pos: HashMap<usize, usize> = live.iter().enumerate().map(|(i, &x)| (x, i)).collect();
+    let n = live.len();
+    if n > u16::MAX as usize {
+        return Err("the group is too large".into());
+    }
+    let mut gens = vec![];
+    for k in 0..ng {
+        let mut p = vec![0u16; n];
+        for (i, &x) in live.iter().enumerate() {
+            let y = find(&mut parent, table[x][2 * k]);
+            p[i] = pos[&y] as u16;
+        }
+        gens.push(p);
+    }
+    Group::new(format!("group(\"{}\")", text.trim()), n, gens)
+}
+
+/// merge cosets a and b and everything that follows from it
+fn coincide(table: &mut [Vec<usize>], parent: &mut [usize], a: usize, b: usize) {
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        r
+    }
+    let mut queue = vec![(a, b)];
+    while let Some((a, b)) = queue.pop() {
+        let (a, b) = (find(parent, a), find(parent, b));
+        if a == b {
+            continue;
+        }
+        let (keep, gone) = if a < b { (a, b) } else { (b, a) };
+        parent[gone] = keep;
+        for cc in 0..table[gone].len() {
+            let y = table[gone][cc];
+            if y == usize::MAX {
+                continue;
+            }
+            let k = table[keep][cc];
+            if k == usize::MAX {
+                table[keep][cc] = y;
+            } else {
+                queue.push((k, y));
+            }
+            // fix the back edge
+            let yy = find(parent, y);
+            let ic = cc ^ 1;
+            if table[yy][ic] == gone || table[yy][ic] == usize::MAX {
+                table[yy][ic] = keep;
+            } else if find(parent, table[yy][ic]) != keep {
+                queue.push((table[yy][ic], keep));
+            }
+        }
+    }
+}

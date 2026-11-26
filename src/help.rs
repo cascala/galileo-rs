@@ -856,6 +856,20 @@ pub const ENTRIES: &[Entry] = &[
         "quotient(sym(4), subgroup(sym(4), [2, 1, 4, 3], [3, 4, 1, 2]))"
     ),
     e!(
+        "kernel",
+        "Groups",
+        "kernel(G, H, f1, ...), image(G, H, f1, ...), ishom(G, H, f1, ...)",
+        "A homomorphism G -> H given by the images f1, f2, ... of the generators of G (in the order of gens(G)): its kernel, its image, or whether such a homomorphism exists.",
+        "order(kernel(sym(3), cyclic(2), [2, 1], [1, 2]))"
+    ),
+    e!(
+        "isomorphic",
+        "Groups",
+        "isomorphic(G, H), abelianinv(G), cayleygraph(G)",
+        "Whether two groups (up to order 2000) are isomorphic (the note gives a map); the invariant factors [d1, d2, ...] of G/[G, G], so G/[G, G] is Z/d1 x Z/d2 x ...; and a picture of G, one color of arrows per generator. Groups can also be given by a presentation: group(\"<a, b | a^4, b^2, (a*b)^2>\") (coset enumeration).",
+        "isomorphic(group(\"<a, b | a^4, b^2, (a*b)^2>\"), dihedral(4))"
+    ),
+    e!(
         "isabelian",
         "Groups",
         "isabelian(G), issolvable(G), issimple(G), dprod(G, H)",

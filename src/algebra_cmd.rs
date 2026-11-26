@@ -103,6 +103,12 @@ impl Session {
             "orders",
             "dprod",
             "cayley",
+            "kernel",
+            "image",
+            "ishom",
+            "isomorphic",
+            "abelianinv",
+            "cayleygraph",
         ];
         if !NAMES.contains(&f) {
             return None;
@@ -145,6 +151,7 @@ impl Session {
             "group" => {
                 let g =
                     match v {
+                        [Expr::Str(s)] if s.trim_start().starts_with('<') => fg::presentation(s)?,
                         [Expr::Str(s)] => fg::named(s)?,
                         // the rows of generate(...)
                         [Expr::Matrix(m)] if m.len() > 1 => {
@@ -363,7 +370,201 @@ impl Session {
                         .collect(),
                 ))
             }
+            "kernel" | "image" | "ishom" => {
+                let [a, b, imgs @ ..] = v else {
+                    return Err(format!(
+                        "usage: {}(G, H, f1, f2, ...) where f_i is the image in H of the i-th generator of G (see gens(G))",
+                        f
+                    ));
+                };
+                let (g, h) = (group_of(a, f)?, group_of(b, f)?);
+                let imgs = imgs
+                    .iter()
+                    .map(|p| perm_in(p, h.degree, f))
+                    .collect::<R<Vec<_>>>()?;
+                if let Some(p) = imgs.iter().find(|p| !h.contains(p)) {
+                    return Err(format!("{}: {} is not in {}", f, fg::show_perm(p), h.name));
+                }
+                match f {
+                    "ishom" => Ok(Expr::Bool(fg::hom_table(&g, &h, &imgs).is_ok())),
+                    "kernel" => {
+                        let k = fg::kernel(&g, &h, &imgs)?;
+                        let im = fg::image(&g, &h, &imgs)?;
+                        self.note(format!(
+                            "The kernel (what goes to the identity) has order {}, the image order {}: |G| = {} = {} · {} (first isomorphism theorem, G/ker ≅ image).",
+                            k.order(), im.order(), g.order(), k.order(), im.order()
+                        ));
+                        Ok(gval(k))
+                    }
+                    _ => Ok(gval(fg::image(&g, &h, &imgs)?)),
+                }
+            }
+            "isomorphic" => {
+                let [a, b] = v else {
+                    return Err("usage: isomorphic(G, H)".into());
+                };
+                let (g, h) = (group_of(a, f)?, group_of(b, f)?);
+                if g.order() > 2000 || h.order() > 2000 {
+                    return Err("isomorphic: groups up to order 2000".into());
+                }
+                match fg::isomorphism(&g, &h) {
+                    Some((gs, imgs)) => {
+                        self.note(format!(
+                            "An isomorphism: {}.",
+                            gs.iter()
+                                .zip(&imgs)
+                                .map(|(x, y)| format!(
+                                    "{} ↦ {}",
+                                    fg::show_perm(x),
+                                    fg::show_perm(y)
+                                ))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                        Ok(Expr::Bool(true))
+                    }
+                    None => {
+                        self.note("No isomorphism: the orders, element orders or class sizes differ, or no assignment of generators works.");
+                        Ok(Expr::Bool(false))
+                    }
+                }
+            }
+            "abelianinv" => {
+                let g = one(f)?;
+                let d = g.derived()?;
+                let q = if d.order() == 1 {
+                    g.clone()
+                } else {
+                    g.quotient(&d)?
+                };
+                let inv = fg::abelian_invariants(&q);
+                let text = if inv.is_empty() {
+                    "the trivial group".to_string()
+                } else {
+                    inv.iter()
+                        .map(|d| format!("Z/{}", d))
+                        .collect::<Vec<_>>()
+                        .join(" × ")
+                };
+                self.note(format!(
+                    "{} ≅ {}, with each number dividing the next (invariant factors){}.",
+                    if d.order() == 1 { "G" } else { "G/[G, G]" },
+                    text,
+                    if d.order() == 1 {
+                        ""
+                    } else {
+                        "; G is not abelian, so this is its largest abelian quotient"
+                    }
+                ));
+                Ok(Expr::Matrix(vec![
+                    inv.into_iter().map(|d| Expr::int(d as i128)).collect(),
+                ]))
+            }
+            "cayleygraph" => {
+                let g = one(f)?;
+                if g.order() > 400 {
+                    return Err(format!(
+                        "cayleygraph: {} has {} elements, too many to draw",
+                        g.name,
+                        g.order()
+                    ));
+                }
+                Ok(cayley_graph(&g))
+            }
             _ => unreachable!(),
         }
     }
+}
+
+/// vertices on a circle, one colored set of arrows per generator
+fn cayley_graph(g: &Group) -> Expr {
+    use crate::plot::{Figure, Series};
+    let n = g.order();
+    // lay out the cosets x, s x, s^2 x, ... of the first generator s as polygons:
+    // concentric for up to 3 of them, otherwise around a circle
+    let els = g.elements();
+    let idx = |p: &Perm| els.iter().position(|e| e == p).unwrap();
+    let mut pos = vec![(0.0f64, 0.0f64); n];
+    let mut placed = vec![false; n];
+    let s0 = g.gens.first().cloned().unwrap_or_else(|| g.identity());
+    let m = fg::order_of(&s0);
+    let ncos = n / m;
+    // breadth-first, so neighbouring cosets come out next to each other
+    let mut order = vec![g.identity()];
+    let mut seen = vec![false; n];
+    seen[idx(&g.identity())] = true;
+    let mut k = 0;
+    while k < order.len() {
+        for s in &g.gens {
+            let y = fg::mul(s, &order[k]);
+            let j = idx(&y);
+            if !seen[j] {
+                seen[j] = true;
+                order.push(y);
+            }
+        }
+        k += 1;
+    }
+    let tau = std::f64::consts::TAU;
+    let mut c = 0;
+    for x in &order {
+        if placed[idx(x)] {
+            continue;
+        }
+        let mut y = x.clone();
+        for k in 0..m {
+            let j = idx(&y);
+            placed[j] = true;
+            let t = tau * k as f64 / m as f64 + tau / 4.0;
+            pos[j] = if ncos <= 3 {
+                let r = 1.0 - 0.4 * c as f64;
+                (r * t.cos(), r * t.sin())
+            } else {
+                let ct = tau * c as f64 / ncos as f64;
+                let r = (0.8 * std::f64::consts::PI / ncos as f64).min(0.35);
+                (ct.cos() + r * t.cos(), ct.sin() + r * t.sin())
+            };
+            y = fg::mul(&s0, &y);
+        }
+        c += 1;
+    }
+    let at = |i: usize| pos[i];
+    let mut series = vec![];
+    for s in &g.gens {
+        let mut pts = vec![];
+        for (i, x) in g.elements().iter().enumerate() {
+            let y = fg::mul(s, x);
+            let j = idx(&y);
+            if i == j {
+                continue;
+            }
+            let (a, b) = (at(i), at(j));
+            pts.push(a);
+            pts.push(b);
+            // an arrowhead
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let l = (dx * dx + dy * dy).sqrt().max(1e-9);
+            let (ux, uy) = (dx / l * 0.06, dy / l * 0.06);
+            pts.push((b.0 - ux - uy * 0.6, b.1 - uy + ux * 0.6));
+            pts.push(b);
+            pts.push((b.0 - ux + uy * 0.6, b.1 - uy - ux * 0.6));
+            pts.push((f64::NAN, f64::NAN));
+        }
+        series.push(Series {
+            label: format!("× {}", fg::cycles(s)),
+            points: pts,
+            thin: true,
+            ..Default::default()
+        });
+    }
+    series.push(Series {
+        label: "elements".into(),
+        points: (0..n).map(at).collect(),
+        markers: true,
+        color: Some("#333333".into()),
+        ..Default::default()
+    });
+    let mut fig = Figure::new(series, "", "", true);
+    fig.title = format!("Cayley graph of {}", g.name);
+    Expr::Obj(Rc::new(Obj::Figure(fig)))
 }
