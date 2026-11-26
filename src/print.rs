@@ -120,6 +120,8 @@ fn fmt(e: &Expr) -> (String, u8) {
                     | crate::expr::Obj::Group(_)
                     | crate::expr::Obj::Ring(_)
                     | crate::expr::Obj::Elem(_) | crate::expr::Obj::QRing(_) | crate::expr::Obj::QElem(_) | crate::expr::Obj::Quat(_)
+                    | crate::expr::Obj::Elem(_) | crate::expr::Obj::QRing(_) | crate::expr::Obj::QElem(_)
+                    | crate::expr::Obj::Graph(_)
             ) =>
         {
             (o.text(), P_ATOM)

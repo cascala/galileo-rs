@@ -26,6 +26,8 @@ pub mod fgroup;
 pub mod geometry;
 pub mod gnfs;
 pub mod galois;
+pub mod graph;
+pub mod graph_cmd;
 pub mod groebner;
 pub mod groups;
 pub mod groups_cmd;

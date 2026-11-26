@@ -130,6 +130,7 @@ pub enum Obj {
     QRing(std::rc::Rc<crate::qring::QRing>),
     QElem(crate::qring::QElem),
     Quat(crate::quat::Quat),
+    Graph(crate::graph::Graph),
 }
 
 impl Obj {
@@ -149,6 +150,7 @@ impl Obj {
             Obj::QRing(_) => "Ring",
             Obj::QElem(_) => "RingElement",
             Obj::Quat(_) => "Quaternion",
+            Obj::Graph(_) => "Graph",
         }
     }
     /// Plain text rendering
@@ -167,6 +169,7 @@ impl Obj {
             Obj::QRing(r) => r.name(),
             Obj::QElem(x) => x.text(),
             Obj::Quat(q) => q.text(),
+            Obj::Graph(g) => g.name.clone(),
             Obj::Report(r) => r
                 .shown_value()
                 .map(|v| crate::print::show(&v))
