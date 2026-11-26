@@ -125,6 +125,8 @@ pub enum Obj {
     List(Vec<Expr>),
     /// {name: value, ...}
     Record(Vec<(String, Expr)>),
+    Ring(std::rc::Rc<crate::ffield::Ring>),
+    Elem(crate::ffield::Elem),
 }
 
 impl Obj {
@@ -139,6 +141,8 @@ impl Obj {
             Obj::Group(_) => "Group",
             Obj::List(_) => "List",
             Obj::Record(_) => "Record",
+            Obj::Ring(_) => "Ring",
+            Obj::Elem(_) => "RingElement",
         }
     }
     /// Plain text rendering
@@ -152,6 +156,8 @@ impl Obj {
             Obj::Group(g) => g.name.clone(),
             Obj::List(v) => crate::lang::list_text(v),
             Obj::Record(v) => crate::lang::record_text(v),
+            Obj::Ring(r) => r.name(),
+            Obj::Elem(x) => x.text(),
             Obj::Report(r) => r
                 .shown_value()
                 .map(|v| crate::print::show(&v))

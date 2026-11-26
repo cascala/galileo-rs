@@ -940,6 +940,20 @@ pub const ENTRIES: &[Entry] = &[
         "issolvable(sym(5))"
     ),
     e!(
+        "gf",
+        "Rings and fields",
+        "gf(q), zmod(n), gf(q, x), zmod(n, x), F = gf(9); F(a + 1)",
+        "The finite field with q = p^k elements and the ring of integers mod n, as values. An element is made by gf(q, x), zmod(n, x) or F(x); in gf(p^k) with k > 1 elements are polynomials in a, where a is a root of modulus(F). Elements add, subtract, multiply, divide and take powers (negative powers are inverses); numbers mix in. characteristic(F), modulus(F), order(F), elements(F), isfield(F), lift(x).",
+        "F = gf(9); F(a + 1)^2"
+    ),
+    e!(
+        "generator",
+        "Rings and fields",
+        "generator(F), order(x), dlog(h, g)",
+        "A generator of the units of F (every nonzero element is a power of it), the multiplicative order of an element, and the discrete logarithm: the x with g^x = h (Pohlig–Hellman with baby-step giant-step).",
+        "F = gf(101); dlog(F(3), generator(F))"
+    ),
+    e!(
         "table",
         "Calculus",
         "table(expr, k, a, b (, step)) or table(expr, k, [v1, v2, ...])",

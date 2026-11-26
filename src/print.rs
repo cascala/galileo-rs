@@ -112,7 +112,16 @@ fn fmt(e: &Expr) -> (String, u8) {
         ),
         Bool(b) => (b.to_string(), P_ATOM),
         Str(s) => (format!("\"{}\"", s), P_ATOM),
-        Obj(o) if matches!(&**o, crate::expr::Obj::List(_) | crate::expr::Obj::Record(_)) => {
+        Obj(o)
+            if matches!(
+                &**o,
+                crate::expr::Obj::List(_)
+                    | crate::expr::Obj::Record(_)
+                    | crate::expr::Obj::Group(_)
+                    | crate::expr::Obj::Ring(_)
+                    | crate::expr::Obj::Elem(_)
+            ) =>
+        {
             (o.text(), P_ATOM)
         }
         Obj(o) => (format!("<{}>", o.kind()), P_ATOM),
