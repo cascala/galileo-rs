@@ -961,6 +961,26 @@ impl Session {
                 )),
             };
         }
+        // reciprocal functions are written with the six basic ones
+        let recip = match f {
+            "sec" => Some(Func::Cos),
+            "csc" => Some(Func::Sin),
+            "cot" => Some(Func::Tan),
+            "sech" => Some(Func::Cosh),
+            "csch" => Some(Func::Sinh),
+            "coth" => Some(Func::Tanh),
+            _ => None,
+        };
+        if let Some(func) = recip {
+            arity(1)?;
+            let a = self.eval(&args[0])?;
+            return elementwise(&a, &|x| {
+                if let Expr::Num(Number::Float(v)) = x {
+                    return Expr::float(1.0 / func.apply(*v));
+                }
+                calc::simplify(&build::div(Expr::one(), build::func(func, x.clone())))
+            });
+        }
         if let Some(func) = Func::from_name(f) {
             arity(1)?;
             let a = self.eval(&args[0])?;
@@ -1052,7 +1072,7 @@ impl Session {
                             .or_else(|| crate::cas::factor_poly(&a))
                             .unwrap_or_else(|| calc::factor(&a)),
                     },
-                    "eval" => calc::evalf(&a),
+                    "eval" => complex_evalf(&calc::evalf(&a)),
                     "complexity" => Expr::int(a.size() as i128),
                     _ => Expr::Str(structure(&a)),
                 })
@@ -2137,5 +2157,26 @@ mod tests {
             run("A = [1 2; 3 4]; A(2)").lines().last().unwrap(),
             "[3, 4]"
         );
+    }
+}
+
+/// eval of something like exp(-2*i/3) or polylog(2, i): the complex number
+fn complex_evalf(e: &Expr) -> Expr {
+    match e {
+        Expr::Matrix(m) => Expr::Matrix(m.iter().map(|r| r.iter().map(complex_evalf).collect()).collect()),
+        Expr::Num(_) => e.clone(),
+        _ if e.symbols().is_empty() => match crate::cnum::ceval(e, &[]) {
+            Some(c) if c.re.is_finite() && c.im.is_finite() => {
+                let re = Expr::float(c.re);
+                if c.im == 0.0 {
+                    re
+                } else {
+                    let im = mul2(Expr::float(c.im), Expr::Const(crate::expr::Const::I));
+                    if c.re == 0.0 { im } else { add2(re, im) }
+                }
+            }
+            _ => e.clone(),
+        },
+        _ => e.clone(),
     }
 }

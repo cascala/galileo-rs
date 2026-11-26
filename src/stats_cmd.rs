@@ -3,6 +3,8 @@
 //! histograms and bar charts. Exact data (integers, fractions) give exact
 //! answers; decimal data give decimals.
 
+use crate::{calc, cas, numeric};
+use crate::expr::Func;
 use crate::build::*;
 use crate::calc::{evalf, simplify};
 use crate::eval::{R, Session};
@@ -177,6 +179,70 @@ fn has_float(es: &[&Expr]) -> bool {
 }
 
 impl Session {
+    /// Shannon entropy of a probability list, von Neumann entropy of a density matrix
+    fn entropy_cmd(&mut self, args: &[Node]) -> R<Expr> {
+        let usage = "usage: entropy(p) for probabilities p = [p1 p2 ...], or entropy(rho) for a density matrix; entropy(p, 2) in bits";
+        let (m, base) = match args {
+            [p] => (self.eval(p)?, None),
+            [p, b] => (self.eval(p)?, Some(self.eval(b)?)),
+            _ => return Err(usage.into()),
+        };
+        let Expr::Matrix(rows) = m else { return Err(usage.into()) };
+        let (r, c) = (rows.len(), rows.first().map_or(0, |x| x.len()));
+        let matrix = r > 1 && c > 1;
+        let p: Vec<Expr> = if !matrix {
+            rows.into_iter().flatten().collect()
+        } else {
+            if r != c {
+                return Err("entropy: a density matrix must be square".into());
+            }
+            let diagonal = (0..r).all(|i| (0..c).all(|j| i == j || cas::is_zero(&rows[i][j])));
+            if diagonal {
+                (0..r).map(|i| rows[i][i].clone()).collect()
+            } else if rows.iter().flatten().all(|e| e.symbols().is_empty()) {
+                let v: Vec<Vec<f64>> = rows.iter().map(|x| x.iter().map(numeric::value).collect()).collect();
+                if (0..r).any(|i| (0..c).any(|j| (v[i][j] - v[j][i]).abs() > 1e-9)) {
+                    return Err("entropy: a density matrix must be symmetric (Hermitian)".into());
+                }
+                crate::vcalc::sym_eigenvalues(&v).into_iter().map(|x| Expr::float(if x.abs() < 1e-13 { 0.0 } else { x })).collect()
+            } else {
+                crate::decomp::exact_eigenvalues(&rows, "entropy")?
+            }
+        };
+        let vals: Vec<f64> = p.iter().map(numeric::value).collect();
+        if vals.iter().all(|v| v.is_finite()) {
+            if vals.iter().any(|v| *v < -1e-12) {
+                return Err("entropy: probabilities can't be negative".into());
+            }
+            let t: f64 = vals.iter().sum();
+            if (t - 1.0).abs() > 1e-9 {
+                return Err(format!("entropy: the probabilities add up to {}, not 1; divide by their sum", t));
+            }
+        }
+        let terms: Vec<Expr> = p
+            .iter()
+            .filter(|q| !q.is_zero() && numeric::value(q) != 0.0)
+            .map(|q| neg(mul2(q.clone(), func(Func::Log, q.clone()))))
+            .collect();
+        let mut h = calc::simplify(&add(terms));
+        if matches!(&h, Expr::Num(n) if !n.is_exact() && n.to_f64().abs() < 1e-12) {
+            h = Expr::zero();
+        }
+        let unit = match &base {
+            Some(b) => {
+                h = calc::simplify(&div(h, func(Func::Log, b.clone())));
+                if b.num().is_some_and(|n| n.to_f64() == 2.0) { "bits" } else { "units of log base" }
+            }
+            None => "nats (natural log)",
+        };
+        self.note(if matrix {
+            format!("von Neumann entropy −tr(ρ log ρ) = −Σ λ log λ over the eigenvalues λ of ρ, in {}. 0 for a pure state, log n for the maximally mixed state of n levels.", unit)
+        } else {
+            format!("Shannon entropy −Σ p log p, in {}. 0 when one outcome is certain, log n for n equally likely outcomes.", unit)
+        });
+        Ok(h)
+    }
+
     pub(crate) fn stats_call(&mut self, f: &str, args: &[Node]) -> Option<R<Expr>> {
         let r = match f {
             "mean" | "median" | "mode" | "var" | "std" | "summary" | "sort" | "numel" | "tally" | "cumsum" => {
@@ -194,6 +260,7 @@ impl Session {
             "linfit" => self.linfit_cmd(args),
             "hist" | "histogram" => self.hist_cmd(args),
             "bar" => self.bar_cmd(args),
+            "entropy" => self.entropy_cmd(args),
             _ => return None,
         };
         Some(r)

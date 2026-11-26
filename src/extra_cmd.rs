@@ -911,6 +911,12 @@ pub fn symbolic_sum(f: &Expr, k: &str, a: &Expr, b: &Expr, b_inf: bool) -> R<Exp
             sub(ratio, Expr::one()),
         )));
     }
+    // k^p r^k: a polylogarithm, rational in r for whole p >= 0
+    if b_inf {
+        if let Some(r) = poly_geo_sum(f, k, a0)? {
+            return Ok(r);
+        }
+    }
     // p-series 1/k^p with p <= 1 diverge
     if b_inf {
         if let Some(c) = cas::poly_coeffs(&simplify(&div(Expr::one(), f.clone())), k) {
@@ -931,7 +937,51 @@ pub fn symbolic_sum(f: &Expr, k: &str, a: &Expr, b: &Expr, b_inf: bool) -> R<Exp
             }
         }
     }
-    Err("sum: no closed form found for this sum (polynomials, geometric series and 1/k^2, 1/k^4, 1/k^6 are known)".into())
+    Err("sum: no closed form found for this sum (polynomials, geometric series, k^p x^k and x^k/k^p, and 1/k^2, 1/k^4, 1/k^6 are known)".into())
+}
+
+/// sum over k >= a0 of c k^p r^k (p a whole number, r and c free of k)
+fn poly_geo_sum(f: &Expr, k: &str, a0: i128) -> R<Option<Expr>> {
+    use crate::cnum::{ceval, C};
+    let a1 = a0.max(1);
+    let at = |j: i128| simplify(&subst(f, k, &Expr::int(j)));
+    let (f1, f2) = (at(a1), at(a1 + 1));
+    if f1.is_zero() {
+        return Ok(None);
+    }
+    // numeric check of f(k) = f(a1) (k/a1)^p r^(k - a1) at a few k
+    let syms: Vec<String> = f.symbols().into_iter().filter(|s| s != k).collect();
+    let env: Vec<(&str, C)> = syms.iter().enumerate().map(|(j, s)| (s.as_str(), C::new(0.31 + 0.17 * j as f64, 0.0))).collect();
+    for p in (-8i128..=8).filter(|p| *p != 0) {
+        let r = simplify(&mul2(div(f2.clone(), f1.clone()), pow(rat(a1, a1 + 1), Expr::int(p))));
+        let fits = [a1 + 2, a1 + 3, a1 + 6].iter().all(|&j| {
+            let lhs = ceval(&at(j), &env);
+            let rhs = ceval(&mul(vec![f1.clone(), pow(rat(j, a1), Expr::int(p)), pow(r.clone(), Expr::int(j - a1))]), &env);
+            match (lhs, rhs) {
+                (Some(u), Some(v)) => u.sub(v).abs() <= 1e-9 * u.abs().max(1e-300),
+                _ => false,
+            }
+        });
+        if !fits {
+            continue;
+        }
+        let rv = numeric::value(&r);
+        if rv.is_finite() && (rv.abs() > 1.0 || rv.abs() == 1.0 && p >= -1) {
+            return Err("sum: the series diverges (its terms do not shrink fast enough)".into());
+        }
+        if a0 <= 0 && p < 0 {
+            return Err("sum: the term is infinite at k = 0".into());
+        }
+        let c = simplify(&div(f1.clone(), mul2(pow(Expr::int(a1), Expr::int(p)), pow(r.clone(), Expr::int(a1)))));
+        let mut li = crate::special::apply("polylog", vec![Expr::int(-p), r.clone()]);
+        for j in 1..a0 {
+            li = sub(li, mul2(pow(Expr::int(j), Expr::int(p)), pow(r.clone(), Expr::int(j))));
+        }
+        let out = simplify(&mul2(c, li));
+        let fct = calc::factor(&out);
+        return Ok(Some(if fct.size() < out.size() { fct } else { out }));
+    }
+    Ok(None)
 }
 
 // ---------- dsolve ----------

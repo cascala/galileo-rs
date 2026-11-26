@@ -140,6 +140,26 @@ pub fn ceval(e: &Expr, env: &[(&str, C)]) -> Option<C> {
                 Func::Atanh => ONE.add(z).ln().sub(ONE.sub(z).ln()).scale(0.5),
             }
         }
+        Expr::Apply(f, v) if f == "polylog" && v.len() == 2 => {
+            let s = ceval(&v[0], env)?;
+            let z = ceval(&v[1], env)?;
+            if s.im != 0.0 {
+                return None;
+            }
+            let (re, im) = crate::special::polylog_c(s.re, (z.re, z.im));
+            C::new(re, im)
+        }
+        Expr::Apply(f, v) if crate::special::is_special(f, v.len()) => {
+            let mut a = vec![];
+            for x in v {
+                let c = ceval(x, env)?;
+                if c.im.abs() > 1e-14 * c.re.abs().max(1.0) {
+                    return None;
+                }
+                a.push(c.re);
+            }
+            C::new(crate::special::value(f, &a), 0.0)
+        }
         _ => return None,
     })
 }

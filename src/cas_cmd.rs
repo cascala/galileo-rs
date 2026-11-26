@@ -960,6 +960,73 @@ fn charpoly(m: &[Vec<Expr>], x: &str) -> R<Expr> {
 
 /// definite integral; splits at singular points inside the interval
 /// c x^p e^(-k x) integrated from 0 to inf = c gamma(p+1) / k^(p+1)
+/// The integral over the whole line of P(x) e^(Q(x)), P a polynomial and Q
+/// quadratic with negative leading coefficient (symbolic leading coefficients
+/// are taken to make it so): with Q = -a x^2 + b x + c, it is
+/// e^(c + b^2/(4a)) sqrt(pi/a) E[P(m + Z)], m = b/(2a), Z normal with variance 1/(2a).
+fn gaussian_integral(fx: &Expr, x: &str, a: &Expr, b: &Expr) -> Option<Expr> {
+    if is_inf(a) != -1 || is_inf(b) != 1 {
+        return None;
+    }
+    let fs = match fx {
+        Expr::Mul(v) => v.clone(),
+        o => vec![o.clone()],
+    };
+    let mut q = vec![];
+    let mut rest = vec![];
+    for f in fs {
+        match &f {
+            Expr::Pow(base, e) if **base == Expr::Const(crate::expr::Const::E) && e.contains_sym(x) => q.push((**e).clone()),
+            _ => rest.push(f),
+        }
+    }
+    if q.is_empty() {
+        return None;
+    }
+    let co = cas::poly_coeffs(&calc::expand(&add(q)), x)?;
+    if co.len() != 3 {
+        return None;
+    }
+    let aa = calc::simplify(&neg(co[2].clone()));
+    let av = numeric::value(&aa);
+    if av.is_finite() && av <= 0.0 || crate::assume::sign(&aa) == Some(-1) {
+        return None;
+    }
+    let pc = cas::poly_coeffs(&calc::expand(&mul(rest)), x)?;
+    let m = div(co[1].clone(), mul2(Expr::int(2), aa.clone()));
+    let var = div(Expr::one(), mul2(Expr::int(2), aa.clone()));
+    // E[(m + Z)^n] = sum_j C(n, j) m^(n-j) E[Z^j], E[Z^(2i)] = (2i-1)!! var^i
+    let mut terms = vec![];
+    for (n, c) in pc.iter().enumerate() {
+        if cas::is_zero(c) {
+            continue;
+        }
+        let mut binom: i128 = 1;
+        for j in 0..=n {
+            if j > 0 {
+                binom = binom * (n + 1 - j) as i128 / j as i128;
+            }
+            if j % 2 == 1 {
+                continue;
+            }
+            let dfact: i128 = (1..j as i128).step_by(2).product();
+            terms.push(mul(vec![
+                c.clone(),
+                Expr::int(binom * dfact.max(1)),
+                pow(m.clone(), Expr::int((n - j) as i128)),
+                pow(var.clone(), Expr::int(j as i128 / 2)),
+            ]));
+        }
+    }
+    let front = mul2(
+        exp(add2(co[0].clone(), div(pow(co[1].clone(), Expr::int(2)), mul2(Expr::int(4), aa.clone())))),
+        sqrt(div(Expr::Const(crate::expr::Const::Pi), aa)),
+    );
+    let r = calc::simplify(&calc::expand(&mul2(front, add(terms))));
+    let f = calc::factor(&r);
+    Some(if f.size() < r.size() { f } else { r })
+}
+
 fn gamma_integral(fx: &Expr, x: &str, a: &Expr, b: &Expr) -> Option<Expr> {
     if !a.is_zero() || is_inf(b) != 1 {
         return None;
@@ -1143,6 +1210,9 @@ fn replace_apply(e: &Expr, name: &str, arg: &Expr, by: &Expr) -> Expr {
 
 pub(crate) fn definite(fx: &Expr, x: &str, a: &Expr, b: &Expr, depth: usize) -> R<Expr> {
     if let Some(g) = gamma_integral(fx, x, a, b) {
+        return Ok(g);
+    }
+    if let Some(g) = gaussian_integral(fx, x, a, b) {
         return Ok(g);
     }
     if let Some(r) = piecewise_definite(fx, x, a, b, depth) {

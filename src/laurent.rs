@@ -467,6 +467,50 @@ fn color(w: C) -> [u8; 3] {
     [hue(h + 1.0 / 3.0), hue(h), hue(h - 1.0 / 3.0)]
 }
 
+/// f as a numeric function of z; non-analytic f (conj, abs, real, imag, arg)
+/// is built from z = zre_ + i zim_ with real parts.
+pub(crate) struct CFn {
+    e: Expr,
+    x: String,
+    split: bool,
+}
+
+impl CFn {
+    pub(crate) fn at(&self, z: C) -> Option<C> {
+        if self.split {
+            ceval(&self.e, &[("zre_", C::new(z.re, 0.0)), ("zim_", C::new(z.im, 0.0))])
+        } else {
+            ceval(&self.e, &[(self.x.as_str(), z)])
+        }
+    }
+}
+
+fn uses_parts(n: &Node) -> bool {
+    match n {
+        Node::Call(f, a) => matches!(f.as_str(), "conj" | "abs" | "real" | "imag" | "arg") || a.iter().any(uses_parts),
+        Node::Neg(a) | Node::Transpose(a) => uses_parts(a),
+        Node::Bin(_, a, b) => uses_parts(a) || uses_parts(b),
+        _ => false,
+    }
+}
+
+impl Session {
+    pub(crate) fn cfn(&mut self, f: &Node, x: &str) -> R<CFn> {
+        if !uses_parts(f) {
+            let e = self.eval_hidden(f, &[x.to_string()])?;
+            return Ok(CFn { e, x: x.into(), split: false });
+        }
+        let z = add2(Expr::Sym("zre_".into()), mul2(Expr::Const(Const::I), Expr::Sym("zim_".into())));
+        let old = self.vars.insert(x.to_string(), z);
+        let r = self.eval(f);
+        match old {
+            Some(v) => self.vars.insert(x.to_string(), v),
+            None => self.vars.remove(x),
+        };
+        Ok(CFn { e: r?, x: x.into(), split: true })
+    }
+}
+
 impl Session {
     pub(crate) fn cx_call(&mut self, f: &str, args: &[Node]) -> Option<R<Expr>> {
         let r = match f {
@@ -574,7 +618,7 @@ impl Session {
         let (Node::Ident(x), Node::Ident(t)) = (x, t) else {
             return Err("cint: give the variable z and the path parameter t as names".into());
         };
-        let fx = self.eval_hidden(f, std::slice::from_ref(x))?;
+        let fx = self.cfn(f, x)?;
         let gt = self.eval_hidden(g, std::slice::from_ref(t))?;
         let dg = simplify(&deriv(&gt, t));
         let (ea, eb) = (self.eval(t0)?, self.eval(t1)?);
@@ -586,7 +630,7 @@ impl Session {
             let tv = C::new(a + h * k as f64, 0.0);
             let z = ceval(&gt, &[(t.as_str(), tv)]).ok_or("cint: can't evaluate the path numerically")?;
             let dz = ceval(&dg, &[(t.as_str(), tv)]).ok_or("cint: can't evaluate the path's derivative")?;
-            let w = ceval(&fx, &[(x.as_str(), z)]).ok_or("cint: can't evaluate f numerically")?;
+            let w = fx.at(z).ok_or("cint: can't evaluate f numerically")?;
             let v = w.mul(dz);
             if !v.is_finite() {
                 return Err(format!("cint: f is infinite on the path (at t = {:.6}); move the path off the singularity", tv.re));
@@ -605,24 +649,24 @@ impl Session {
         Ok(cnum_expr(r))
     }
 
-    fn region(&mut self, args: &[Node], cmd: &str) -> R<(Expr, String, f64, f64, f64, f64)> {
+    fn region(&mut self, args: &[Node], cmd: &str) -> R<(CFn, f64, f64, f64, f64)> {
         let [f, x, x0, x1, y0, y1] = args else {
             return Err(format!("usage: {}(f, z, x0, x1, y0, y1) over the rectangle x0 ≤ Re z ≤ x1, y0 ≤ Im z ≤ y1", cmd));
         };
         let Node::Ident(x) = x else {
             return Err(format!("{}: the second argument must be the variable", cmd));
         };
-        let fx = self.eval_hidden(f, std::slice::from_ref(x))?;
+        let fx = self.cfn(f, x)?;
         let r = (self.number(x0, "x0")?, self.number(x1, "x1")?, self.number(y0, "y0")?, self.number(y1, "y1")?);
         if r.0 >= r.1 || r.2 >= r.3 {
             return Err(format!("{}: need x0 < x1 and y0 < y1", cmd));
         }
-        Ok((fx, x.clone(), r.0, r.1, r.2, r.3))
+        Ok((fx, r.0, r.1, r.2, r.3))
     }
 
     /// domain coloring: hue = arg f, brightness = |f|
     fn cplot_cmd(&mut self, args: &[Node]) -> R<Expr> {
-        let (fx, x, x0, x1, y0, y1) = self.region(args, "cplot")?;
+        let (fx, x0, x1, y0, y1) = self.region(args, "cplot")?;
         let w = 280usize;
         let h = ((w as f64) * (y1 - y0) / (x1 - x0)).round().clamp(20.0, 400.0) as usize;
         let mut px = Vec::with_capacity(w * h * 3);
@@ -630,7 +674,7 @@ impl Session {
             let y = y1 - (j as f64 + 0.5) / h as f64 * (y1 - y0);
             for k in 0..w {
                 let xv = x0 + (k as f64 + 0.5) / w as f64 * (x1 - x0);
-                let v = ceval(&fx, &[(x.as_str(), C::new(xv, y))]).ok_or("cplot: can't evaluate f numerically")?;
+                let v = fx.at(C::new(xv, y)).ok_or("cplot: can't evaluate f numerically")?;
                 px.extend_from_slice(&color(v));
             }
         }
@@ -642,13 +686,13 @@ impl Session {
 
     /// the images of the grid lines Re z = const and Im z = const under f
     fn cmap_cmd(&mut self, args: &[Node]) -> R<Expr> {
-        let (fx, x, x0, x1, y0, y1) = self.region(args, "cmap")?;
+        let (fx, x0, x1, y0, y1) = self.region(args, "cmap")?;
         let lines = 11;
         let steps = 240;
         let mut horiz = vec![];
         let mut vert = vec![];
         let at = |re: f64, im: f64| -> (f64, f64) {
-            match ceval(&fx, &[(x.as_str(), C::new(re, im))]) {
+            match fx.at(C::new(re, im)) {
                 Some(v) if v.is_finite() && v.abs() < 1e6 => (v.re, v.im),
                 _ => (f64::NAN, f64::NAN),
             }

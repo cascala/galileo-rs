@@ -1437,6 +1437,13 @@ pub const ENTRIES: &[Entry] = &[
         "zeta(4)"
     ),
     e!(
+        "polylog",
+        "Special functions",
+        "polylog(s, z)",
+        "Polylogarithm Li_s(z), the sum of z^k/k^s over k = 1, 2, 3, ... for |z| <= 1, continued to the rest of the plane. Li_1(z) = -log(1 - z); for whole s <= 0 a rational function of z; Li_s(1) = zeta(s). Numeric for complex z (whole s >= 1; s = 2 everywhere). sum turns series like x^k/k^2 and k^2 x^k into it; polylog(2, z) is the dilogarithm.",
+        "polylog(2, 1/2)"
+    ),
+    e!(
         "besselj",
         "Special functions",
         "besselj(n, x), bessely(n, x), besseli(n, x)",

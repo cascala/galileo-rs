@@ -61,7 +61,7 @@ impl Session {
             return Some(self.special_fn(f, args));
         }
         let r = match f {
-            "gamma" | "digamma" | "polygamma" | "erf" | "erfc" | "erfi" | "zeta" | "besselj"
+            "gamma" | "digamma" | "polygamma" | "erf" | "erfc" | "erfi" | "zeta" | "polylog" | "besselj"
             | "bessely" | "besseli" => Err(format!("{} takes {} argument(s); see help({})", f,
                 special::NAMES.iter().find(|p| p.0 == f).unwrap().1, f)),
             "beta" => self.beta(args),
@@ -1000,6 +1000,7 @@ fn special_teach(f: &str, args: &[Expr], r: &Expr) -> Option<String> {
         "gamma" => format!("gamma(x) = ∫₀^∞ t^(x−1) e^(−t) dt extends the factorial: gamma(n) = (n − 1)! for whole n, and gamma(x + 1) = x·gamma(x) for all x. Here gamma({}) = {}.", a0, show(r)),
         "erf" => format!("erf(x) = (2/√π) ∫₀^x e^(−t²) dt, the area under the bell curve from 0 to x, scaled so erf(∞) = 1. e^(−t²) has no antiderivative made of elementary functions, which is why erf is a function of its own. Here erf({}) = {}.", a0, show(r)),
         "zeta" => format!("zeta(s) = 1 + 1/2^s + 1/3^s + ... for s > 1, continued to other s. Euler found zeta(2) = π²/6; every even value is a rational multiple of π^s. Here zeta({}) = {}.", a0, show(r)),
+        "polylog" => format!("polylog(s, z) = Li_s(z) = z + z²/2^s + z³/3^s + ... for |z| ≤ 1, continued to the rest of the plane. Li_1(z) = −log(1 − z), Li_s(1) = zeta(s), and for whole s ≤ 0 it is a rational function of z. Here polylog({}, {}) = {}.", a0, show(&args[1]), show(r)),
         "besselj" => format!("J_n(x) solves Bessel's equation x²y'' + xy' + (x² − n²)y = 0 and stays finite at x = 0: it describes the vibrating drum and waves in a cylinder. Here besselj({}, {}) = {}.", a0, show(&args[1]), show(r)),
         _ => return None,
     })

@@ -38,3 +38,10 @@ fn contour_integrals() {
     assert!(!one("cplot(z^2, z, -1, 1, -1, 1)").starts_with("ERROR"));
     assert!(!one("cmap(exp(z), z, -1, 1, -1, 1)").starts_with("ERROR"));
 }
+
+#[test]
+fn non_analytic_integrands() {
+    assert_eq!(one("cint(conj(z), z, t + i*t, t, 0, 1)"), "1.0");
+    assert_eq!(one("cint(conj(z), z, t + i*t^2, t, 0, 1)"), "1.0+0.333333333333*i");
+    assert_eq!(one("cint(real(z), z, t + i*t, t, 0, 1)"), "0.5+0.5*i");
+}

@@ -335,6 +335,7 @@ fn special_latex(f: &str, v: &[Expr]) -> Option<String> {
         "digamma" => format!("\\psi\\left({}\\right)", a(0)),
         "polygamma" => format!("\\psi^{{({})}}\\left({}\\right)", a(0), a(1)),
         "zeta" => format!("\\zeta\\left({}\\right)", a(0)),
+        "polylog" => format!("\\operatorname{{Li}}_{{{}}}\\left({}\\right)", a(0), a(1)),
         "heaviside" => format!("H\\left({}\\right)", a(0)),
         "dirac" => format!("\\delta\\left({}\\right)", a(0)),
         "sign" => format!("\\operatorname{{sgn}}\\left({}\\right)", a(0)),

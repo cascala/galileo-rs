@@ -26,6 +26,7 @@ pub const NAMES: &[(&str, usize)] = &[
     ("erfc", 1),
     ("erfi", 1),
     ("zeta", 1),
+    ("polylog", 2),
     ("besselj", 2),
     ("bessely", 2),
     ("besseli", 2),
@@ -135,6 +136,7 @@ pub fn apply(f: &str, args: Vec<Expr>) -> Expr {
             }
         }
         "zeta" => zeta_exact(&args[0]).unwrap_or_else(|| app(f, args)),
+        "polylog" => polylog_exact(&args[0], &args[1]).unwrap_or_else(|| app(f, args)),
         "besselj" | "bessely" | "besseli" => {
             let (n, x) = (&args[0], &args[1]);
             if let Some(k) = int_of(n) {
@@ -247,6 +249,158 @@ fn zeta_exact(s: &Expr) -> Option<Expr> {
     None
 }
 
+/// Li_s(z): exact for s = 1 and whole s <= 0 (rational functions of z), at
+/// z = 0, 1, -1 and Li_2(1/2)
+fn polylog_exact(s: &Expr, z: &Expr) -> Option<Expr> {
+    if z.is_zero() {
+        return Some(Expr::zero());
+    }
+    let k = int_of(s)?;
+    if k == 1 {
+        return Some(neg(func(crate::expr::Func::Log, sub(Expr::one(), z.clone()))));
+    }
+    if k <= 0 {
+        if k < -40 {
+            return None;
+        }
+        // Li_0 = z/(1 - z), Li_(n-1) = z d/dz Li_n
+        let w = "z__";
+        let mut l = div(Expr::sym(w), sub(Expr::one(), Expr::sym(w)));
+        for _ in 0..(-k) {
+            l = crate::calc::together(&mul2(Expr::sym(w), crate::calc::deriv(&l, w)));
+        }
+        let (n, d) = crate::calc::num_den(&l);
+        let n = crate::cas::factor_poly(&crate::calc::expand(&n)).unwrap_or(n);
+        let l = div(n, d);
+        return Some(crate::calc::simplify(&crate::calc::subst(&l, w, z)));
+    }
+    if z.is_one() && k > 1 {
+        return Some(apply("zeta", vec![s.clone()]));
+    }
+    if z.num().is_some_and(|n| n.is_exact() && n.to_f64() == -1.0) && k > 1 {
+        // Li_s(-1) = -(1 - 2^(1-s)) zeta(s)
+        let c = sub(Expr::one(), pow(int(2), int(1 - k)));
+        return Some(crate::calc::simplify(&neg(mul2(c, apply("zeta", vec![s.clone()])))));
+    }
+    if k == 2 && z.num().is_some_and(|n| n.is_exact() && n.to_f64() == 0.5) {
+        let pi2 = pow(Expr::Const(Const::Pi), int(2));
+        return Some(sub(div(pi2, int(12)), div(pow(func(crate::expr::Func::Log, int(2)), int(2)), int(2))));
+    }
+    None
+}
+
+/// Li_s(z) for complex z and whole s >= 1 (s = 1 and 2 everywhere, s >= 3
+/// for |z| <= 1); other real s only for |z| <= 1/2. (re, im), NaN if unknown.
+pub fn polylog_c(s: f64, z: (f64, f64)) -> (f64, f64) {
+    use crate::cnum::C;
+    let z = C::new(z.0, z.1);
+    let nan = (f64::NAN, f64::NAN);
+    let r = z.abs();
+    let si = (s.fract() == 0.0).then_some(s as i64);
+    if r == 0.0 {
+        return (0.0, 0.0);
+    }
+    if si == Some(1) {
+        let v = C::new(1.0, 0.0).sub(z).ln().scale(-1.0);
+        return (v.re, v.im);
+    }
+    if si.is_some_and(|k| k <= 0) {
+        // z d/dz on the series is not needed: sum the rational function
+        let k = -si.unwrap();
+        let mut l: Vec<f64> = vec![0.0, 1.0]; // numerator coefficients of Li_0 = z/(1-z): z
+        // Li_-n = A_n(z)/(1-z)^(n+1) with Eulerian polynomials A_n
+        for n in 1..=k {
+            let mut nl = vec![0.0; l.len() + 1];
+            for (j, c) in l.iter().enumerate() {
+                // z d/dz [c z^j (1-z)^-(n)] = c (j z^j (1-z) + n z^(j+1)) / (1-z)^(n+1)
+                nl[j] += c * j as f64;
+                nl[j + 1] += c * (n as f64 - j as f64);
+            }
+            l = nl;
+        }
+        let mut num = C::new(0.0, 0.0);
+        let mut zp = C::new(1.0, 0.0);
+        for c in &l {
+            num = num.add(zp.scale(*c));
+            zp = zp.mul(z);
+        }
+        let v = num.div(C::new(1.0, 0.0).sub(z).powi(k + 1));
+        return (v.re, v.im);
+    }
+    if r <= 0.5 {
+        let mut acc = C::new(0.0, 0.0);
+        let mut zp = z;
+        for k in 1..400 {
+            let t = zp.scale(1.0 / (k as f64).powf(s));
+            acc = acc.add(t);
+            if t.abs() < 1e-18 * acc.abs().max(1e-300) {
+                break;
+            }
+            zp = zp.mul(z);
+        }
+        return (acc.re, acc.im);
+    }
+    let Some(n) = si else { return nan };
+    if r > 1.0 + 1e-12 {
+        if n == 2 {
+            // Li_2(z) = -pi^2/6 - log(-z)^2/2 - Li_2(1/z)
+            let w = C::new(1.0, 0.0).div(z);
+            let (a, b) = polylog_c(2.0, (w.re, w.im));
+            let mut l = z.scale(-1.0).ln();
+            if z.im == 0.0 {
+                // on the cut z > 1: the value of -integral of log(1 - t)/t with the principal log
+                l.im = PI;
+            }
+            let v = C::new(-PI * PI / 6.0 - a, -b).sub(l.mul(l).scale(0.5));
+            return (v.re, v.im);
+        }
+        return nan;
+    }
+    // |log z| < 2 pi: Li_n(e^mu) = mu^(n-1)/(n-1)! (H_(n-1) - log(-mu)) + sum_(k != n-1) zeta(n-k) mu^k/k!
+    let mu = z.ln();
+    if mu.abs() < 1e-15 {
+        return (zeta(n as f64), 0.0);
+    }
+    let zeta_at = |m: i64| -> f64 {
+        if m == 1 {
+            f64::NAN
+        } else if m == 0 {
+            -0.5
+        } else if m > 1 {
+            zeta(m as f64)
+        } else if (-m) % 2 == 0 {
+            0.0
+        } else {
+            // zeta(1 - 2j) = (-1)^j 2 (2j-1)! zeta(2j) / (2 pi)^(2j)
+            let j = (1 - m) / 2;
+            let mut v = 2.0 * zeta(2.0 * j as f64);
+            for t in 1..2 * j {
+                v *= t as f64 / (2.0 * PI);
+            }
+            v /= 2.0 * PI;
+            if j % 2 == 1 { -v } else { v }
+        }
+    };
+    let mut acc = C::new(0.0, 0.0);
+    let mut mk = C::new(1.0, 0.0); // mu^k / k!
+    for k in 0..200i64 {
+        if k == n - 1 {
+            let h: f64 = (1..n).map(|j| 1.0 / j as f64).sum();
+            let t = mk.mul(C::new(h, 0.0).sub(mu.scale(-1.0).ln()));
+            acc = acc.add(t);
+        } else {
+            let zk = zeta_at(n - k);
+            let t = mk.scale(zk);
+            acc = acc.add(t);
+            if k > n + 2 && zk != 0.0 && t.abs() < 1e-18 {
+                break;
+            }
+        }
+        mk = mk.mul(mu).scale(1.0 / (k + 1) as f64);
+    }
+    (acc.re, acc.im)
+}
+
 // ---------- derivatives ----------
 
 /// d/dx of f(args), with the chain rule; None when there is no rule (zeta)
@@ -270,6 +424,13 @@ pub fn deriv(f: &str, args: &[Expr], x: &str) -> Option<Expr> {
         "heaviside" => mul2(apply("dirac", args.to_vec()), d(&args[0], x)),
         "sign" => mul(vec![int(2), apply("dirac", args.to_vec()), d(&args[0], x)]),
         "dirac" => return None,
+        "polylog" => {
+            if args[0].contains_sym(x) {
+                return None;
+            }
+            let lower = apply("polylog", vec![sub(args[0].clone(), Expr::one()), args[1].clone()]);
+            mul2(div(lower, args[1].clone()), d(&args[1], x))
+        }
         "erf" | "erfc" | "erfi" => {
             let u2 = pow(args[0].clone(), int(2));
             let g = if f == "erfi" { exp(u2) } else { exp(neg(u2)) };
@@ -334,6 +495,10 @@ pub fn value(f: &str, a: &[f64]) -> f64 {
         "erfc" => erfc(a[0]),
         "erfi" => erfi(a[0]),
         "zeta" => zeta(a[0]),
+        "polylog" => {
+            let (re, im) = polylog_c(a[0], (a[1], 0.0));
+            if im.abs() <= 1e-14 * re.abs().max(1.0) { re } else { f64::NAN }
+        }
         "besselj" | "bessely" | "besseli" => {
             if a[0].fract() != 0.0 || a[0].abs() > 1000.0 {
                 return f64::NAN;
