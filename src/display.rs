@@ -51,6 +51,7 @@ pub fn bundle(e: &Expr) -> Option<Bundle> {
                 ("text/latex", q.latex()),
                 ("text/markdown", q.markdown()),
             ],
+            Obj::Group(g) => vec![("text/plain", g.name.clone())],
             // the text of a report is its explanation (a note); it shows its value
             Obj::Report(r) => {
                 let v = r.shown_value()?;

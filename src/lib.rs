@@ -5,6 +5,7 @@
     clippy::collapsible_if
 )]
 
+pub mod algebra_cmd;
 pub mod algext;
 pub mod algfactor;
 pub mod auri_families;
@@ -20,6 +21,7 @@ pub mod expr;
 pub mod extra_cmd;
 pub mod factor_cmd;
 pub mod factorlab;
+pub mod fgroup;
 pub mod geometry;
 pub mod gnfs;
 pub mod groups;
