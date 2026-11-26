@@ -1,4 +1,4 @@
-<!-- syntax stamp: 5b1849a2ff1af3e3 -->
+<!-- syntax stamp: 1b6bb720f9d2fe3a -->
 
 # The Galileo language
 
@@ -284,6 +284,59 @@ galileo> map(sq, {1, 2, 3})
 
 `append`, `concat`, `reverse`, `map(f, L)` and `filter(f, L)` work on lists (`f` is the
 name of a function), and `fields` and `has` on records.
+
+## Units
+
+A number followed by a unit is a quantity: `3 m/s`, `9.81 m/s^2`, `2 kg*m/s^2`,
+`1.5 kW*h`. A unit can also follow a matrix or parentheses: `[1 2 3] m`, `(a + b) kg`.
+Compound units are written without spaces around `*` and `/` (`kg*m/s^2`); with spaces,
+`3 m * g` multiplies `3 m` by the variable `g`. Unit names mean units only right after a
+number, a matrix or `)`, so `m` and `s` stay free as variable names. Inside `[ ]`, where a
+space separates entries, put quantities in parentheses: `[(1 m) (2 s)]`.
+
+Quantities multiply and divide like any product, and units that cancel give a number.
+A sum converts to the units of its first term, and adding different dimensions is an
+error. `convert(q, km/h)` changes units, and `convert(q)` gives SI base units.
+
+```galileo
+galileo> v = 3 m/s;
+galileo> v*(2 s)
+6 m
+galileo> 1 km + 300 m
+1.3 km
+galileo> convert(2 kg*3 m/s^2, N)
+6 N
+galileo> convert(100 km/h, m/s)
+27.7777777777778 m/s
+galileo> (3 km)/(1500 m)
+2
+galileo> sin(30 deg)
+1/2
+galileo> sqrt(16 m^2)
+4 m
+galileo> 3 m > 200 cm
+true
+galileo> [1 2 3] m
+[1, 2, 3] m
+```
+
+The units are the SI ones, with the prefixes G, M, k, m, u (micro), n and p (and c for
+cm): m, g, s, A, K, mol, N, J, W, Wh, Pa, Hz, C, V, ohm, F, H, T, Wb, eV, L, cal and bar;
+also min, h, day, yr, atm, lb, ft, inch, mi, mph, AU, ly, and the angles rad and deg.
+`const.c`, `const.G`, `const.g`, `const.h`, `const.hbar`, `const.k`, `const.NA`, `const.R`,
+`const.e`, `const.me`, `const.mp`, `const.eps0`, `const.mu0`, `const.sigma`, `const.Mearth`,
+`const.Rearth`, `const.Msun`, `const.Rsun` and `const.Mmoon` are physical constants with
+their units, and `dimension(q)` names the dimension of a quantity.
+
+```galileo
+galileo> const.c
+299792458 m/s
+galileo> dimension(const.G)
+"length^3/(mass*time^2)"
+galileo> h = 10 m;
+galileo> convert(sqrt(2*h/const.g))
+1.4280869812290344 s
+```
 
 ## Control flow
 

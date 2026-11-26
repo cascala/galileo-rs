@@ -730,7 +730,104 @@ impl P {
                 break;
             }
         }
+        // 3 m/s, [1 2 3] m, (a + b) kg: a unit after a number, a matrix or
+        // parentheses (outside [ ], where whitespace separates elements)
+        if self.in_matrix == 0
+            && self.i > 0
+            && matches!(self.t[self.i - 1].tok, Tok::Num(_) | Tok::Sym(")") | Tok::Sym("]"))
+            && self.unit_ahead()
+        {
+            let u = self.unit_text()?;
+            e = Node::Call("unit".into(), vec![e, Node::Str(u)]);
+        }
         Ok(e)
+    }
+
+    /// the next token is a unit name used as a unit (not assigned or called)
+    fn unit_ahead(&self) -> bool {
+        let Some(Tok::Ident(u)) = self.peek() else { return false };
+        if !crate::units::is_unit(u) {
+            return false;
+        }
+        match self.t.get(self.i + 1) {
+            Some(t) if matches!(t.tok, Tok::Sym("=") | Tok::Sym(":=")) => false,
+            Some(t) if matches!(t.tok, Tok::Sym("(") | Tok::Sym("[")) && !t.space_before => false,
+            _ => true,
+        }
+    }
+
+    /// a unit expression such as kg*m/s^2 or J/(kg*K), as text; compound
+    /// units are written without spaces around * and /
+    fn unit_text(&mut self) -> R<String> {
+        let mut s = self.unit_factor()?;
+        loop {
+            let op = match self.peek() {
+                Some(Tok::Sym(o)) if (*o == "*" || *o == "/") && !self.space_before() => *o,
+                _ => break,
+            };
+            let next = self.t.get(self.i + 1);
+            let ok = next.is_some_and(|t| {
+                !t.space_before
+                    && match &t.tok {
+                        Tok::Ident(u) => crate::units::is_unit(u),
+                        Tok::Sym("(") => matches!(self.t.get(self.i + 2).map(|t| &t.tok), Some(Tok::Ident(u)) if crate::units::is_unit(u)),
+                        _ => false,
+                    }
+            });
+            if !ok {
+                break;
+            }
+            self.i += 1;
+            s.push_str(op);
+            s.push_str(&self.unit_factor()?);
+        }
+        Ok(s)
+    }
+
+    fn unit_factor(&mut self) -> R<String> {
+        let mut s = match self.peek().cloned() {
+            Some(Tok::Ident(u)) if crate::units::is_unit(&u) => {
+                self.i += 1;
+                u
+            }
+            Some(Tok::Sym("(")) => {
+                self.i += 1;
+                let inner = self.unit_text()?;
+                self.expect(")")?;
+                format!("({})", inner)
+            }
+            _ => return Err(format!("expected a unit {}", self.here())),
+        };
+        if self.is("^") && !self.space_before() {
+            let save = self.i;
+            self.i += 1;
+            let neg = self.eat("-");
+            match self.peek().cloned() {
+                Some(Tok::Num(n)) if n.chars().all(|c| c.is_ascii_digit()) => {
+                    self.i += 1;
+                    s = format!("{}^{}{}", s, if neg { "-" } else { "" }, n);
+                }
+                _ => self.i = save,
+            }
+        }
+        Ok(s)
+    }
+
+    /// the second argument of convert(q, km/h) when it is a unit expression
+    fn unit_target(&mut self) -> Option<Node> {
+        let save = self.i;
+        if !self.unit_ahead() && !self.is("(") {
+            return None;
+        }
+        match self.unit_text() {
+            Ok(u) if self.is(")") || self.is(",") => {
+                Some(Node::Call("unit".into(), vec![Node::Num("1".into()), Node::Str(u)]))
+            }
+            _ => {
+                self.i = save;
+                None
+            }
+        }
     }
 
     fn primary(&mut self) -> R<Node> {
@@ -752,6 +849,13 @@ impl P {
                     if !self.is(")") {
                         args.push(self.expr()?);
                         while self.eat(",") {
+                            // convert(q, km/h): the target is read as units
+                            if name == "convert" && args.len() == 1 {
+                                if let Some(u) = self.unit_target() {
+                                    args.push(u);
+                                    continue;
+                                }
+                            }
                             args.push(self.expr()?);
                         }
                     }
@@ -1101,6 +1205,10 @@ fn src_prec(n: &Node) -> (String, u8) {
                 t = format!("{}:{}", t, source(s));
             }
             (format!("{}:{}", t, source(b)), 0)
+        }
+        Node::Call(f, args) if f == "unit" && args.len() == 2 && matches!(args[1], Node::Str(_)) => {
+            let Node::Str(u) = &args[1] else { unreachable!() };
+            (format!("{} {}", wrap(src_prec(&args[0]), 9), u), 6)
         }
         Node::Call(f, args) => (
             format!(

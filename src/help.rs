@@ -1458,6 +1458,34 @@ pub const ENTRIES: &[Entry] = &[
         "zeta(4)"
     ),
     e!(
+        "convert",
+        "Units",
+        "convert(q, unit), convert(q)",
+        "Converts a quantity to other units of the same dimension: convert(100 km/h, m/s), convert(2 kg*3 m/s^2, N). The target is written as units (km/h, J/(kg*K)) or as a string. Without a target, SI base units (m, kg, s, A, K, mol). An exact value that is not a whole number comes out as a decimal.",
+        "convert(60 mph, km/h)"
+    ),
+    e!(
+        "unit",
+        "Units",
+        "unit(x, \"m/s\")",
+        "x with units: unit(3, \"m/s\") is 3 m/s. A number, a matrix or parentheses followed by a unit name (3 m/s, [1 2] m, (a + b) kg) means the same; quantities multiply, divide, add (in the units of the first term) and compare, and adding different dimensions is an error.",
+        "unit(5, \"J/(kg*K)\")"
+    ),
+    e!(
+        "dimension",
+        "Units",
+        "dimension(q)",
+        "The dimension of a quantity in words: dimension(3 m/s) is \"length/time\".",
+        "dimension(const.G)"
+    ),
+    e!(
+        "const",
+        "Units",
+        "const.c, const.G, ...",
+        "Physical constants with units (CODATA 2018): c (speed of light), G (gravitation), g (standard gravity), h, hbar (Planck), k (Boltzmann), NA (Avogadro), R (gas constant), e (elementary charge), me, mp (electron and proton mass), eps0, mu0 (vacuum), sigma (Stefan-Boltzmann), Mearth, Rearth, Msun, Rsun, Mmoon.",
+        "const.hbar*const.c"
+    ),
+    e!(
         "polylog",
         "Special functions",
         "polylog(s, z)",

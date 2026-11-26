@@ -79,6 +79,7 @@ pub fn sign(e: &Expr) -> Option<i32> {
                 Some(1)
             }
         }
+        Expr::Sym(s) if s.starts_with('`') => Some(1),
         Expr::Sym(s) => facts(s).sign,
         Expr::Const(Const::Pi) | Expr::Const(Const::E) => Some(1),
         Expr::Mul(v) => {

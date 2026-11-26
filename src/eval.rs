@@ -727,6 +727,18 @@ impl Session {
         let v = match n {
             Node::Num(s) => Expr::Num(Number::parse(s).ok_or_else(|| format!("bad number {}", s))?),
             Node::Str(s) => Expr::Str(s.clone()),
+            Node::Ident(name)
+                if name.split_once('.').is_some_and(|(b, _)| b == "const") && !self.vars.contains_key("const") =>
+            {
+                let key = name.split_once('.').map(|(_, k)| k).unwrap_or_default();
+                crate::units::constant(key).ok_or_else(|| {
+                    format!(
+                        "{} is not a constant; the constants are {}",
+                        name,
+                        crate::units::CONSTANTS.iter().map(|c| c.0).collect::<Vec<_>>().join(", ")
+                    )
+                })?
+            }
             Node::Ident(name) if name.contains('.') && !self.vars.contains_key(name) => {
                 match self.get_field(name) {
                     Some(r) => r?,
@@ -985,6 +997,11 @@ impl Session {
         if let Some(func) = Func::from_name(f) {
             arity(1)?;
             let a = self.eval(&args[0])?;
+            let a = if func == Func::Abs || !crate::units::has_units(&a) {
+                a
+            } else {
+                crate::units::plain_arg(f, &a)?
+            };
             return elementwise(&a, &|x| {
                 // decimals directly (fast for large arrays); outside the real domain
                 // (log(-1.0)) the symbolic rules give the complex value
@@ -1013,6 +1030,13 @@ impl Session {
             "exp" | "sqrt" => {
                 arity(1)?;
                 let a = self.eval(&args[0])?;
+                if crate::units::has_units(&a) && !matches!(a, Expr::Matrix(_)) {
+                    if f == "sqrt" {
+                        return arith(Op::Pow, a, Expr::Num(Number::rat(1, 2).unwrap()));
+                    }
+                    let a = crate::units::plain_arg(f, &a)?;
+                    return Ok(build::exp(a));
+                }
                 let g = if f == "exp" { build::exp } else { build::sqrt };
                 elementwise(&a, &|x| {
                     if let Expr::Num(Number::Float(v)) = x {
@@ -1654,6 +1678,27 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
             return Err(format!("can't do arithmetic with {}", show(v)));
         }
     }
+    // quantities with units: dimension checks, conversions, cancelling
+    if !matches!(&a, M(_)) && !matches!(&b, M(_)) && (crate::units::has_units(&a) || crate::units::has_units(&b)) {
+        match op {
+            Op::Add | Op::Sub => {
+                if let Some(r) = crate::units::add(&a, &b, op == Op::Sub)? {
+                    return Ok(r);
+                }
+            }
+            Op::Pow => {
+                if let Some(r) = crate::units::pow(&a, &b) {
+                    return Ok(crate::units::tidy(r));
+                }
+                if crate::units::has_units(&b) {
+                    return Err(format!("{}^{}: an exponent can't have units", show(&a), show(&b)));
+                }
+            }
+            Op::Mul => return Ok(crate::units::tidy(mul2(a, b))),
+            Op::Div => return Ok(crate::units::tidy(div(a, b))),
+            _ => {}
+        }
+    }
     Ok(match (op, a, b) {
         (Op::Add, M(x), M(y)) => M(linalg::zip(&x, &y, "sum", |p, q| {
             add2(p.clone(), q.clone())
@@ -1740,6 +1785,17 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
 /// a == b, a < b, ...: true or false when that can be decided; a symbolic
 /// a == b stays an equation (for solve, dsolve and implicitplot)
 pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
+    // 3 m > 200 cm: compare the difference with 0
+    if !matches!(a, Expr::Matrix(_)) && !matches!(b, Expr::Matrix(_))
+        && (crate::units::has_units(&a) || crate::units::has_units(&b))
+    {
+        let d = arith(Op::Sub, a, b)?;
+        let c = match crate::units::split(&d) {
+            Some((c, _)) if !crate::units::has_units(&c) => c,
+            _ => return Err(format!("can't compare quantities with units {}", show(&d))),
+        };
+        return compare(op, c, Expr::int(0));
+    }
     if crate::ffield::as_elem(&a).is_some() || crate::ffield::as_elem(&b).is_some() {
         let eq = crate::ffield::equal(&a, &b)?;
         return match op {

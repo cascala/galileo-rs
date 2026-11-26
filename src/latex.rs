@@ -148,6 +148,17 @@ fn func_name(f: Func) -> &'static str {
 }
 
 fn fmt(e: &Expr) -> (String, u8) {
+    if let Some((c, u)) = crate::units::printable(e).or_else(|| {
+        if matches!(e, Add(_)) && crate::units::has_units(e) {
+            crate::units::split(e).filter(|(c, u)| !u.is_empty() && !crate::units::has_units(c))
+        } else {
+            None
+        }
+    }) {
+        let (cs, cp) = fmt(&c);
+        let cs = if matches!(c, Add(_)) { format!("\\left({}\\right)", cs) } else { cs };
+        return (format!("{}\\,{}", cs, crate::units::latex(&u)), cp.min(P_MUL));
+    }
     match e {
         Num(n) => (
             number(n.clone()),

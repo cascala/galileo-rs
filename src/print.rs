@@ -11,7 +11,10 @@ const P_ATOM: u8 = 4;
 
 pub fn show(e: &Expr) -> String {
     match e {
-        Matrix(rows) => show_matrix(rows),
+        Matrix(rows) => match crate::units::matrix_units(rows) {
+            Some((m, u)) => format!("{} {}", show_matrix(&m), crate::units::text(&u)),
+            None => show_matrix(rows),
+        },
         Str(s) => s.clone(),
         Obj(o) => o.text(),
         _ => fmt(e).0,
@@ -33,9 +36,13 @@ pub fn show_value(e: &Expr) -> String {
 ///  3, 2;
 ///  5, 1]
 fn show_matrix(rows: &[Vec<Expr>]) -> String {
+    // inside [ ] a space separates entries, so quantities go in parentheses
+    let cell = |x: &Expr| {
+        if crate::units::has_units(x) { format!("({})", fmt(x).0) } else { fmt(x).0 }
+    };
     let cells: Vec<Vec<String>> = rows
         .iter()
-        .map(|r| r.iter().map(|x| fmt(x).0).collect())
+        .map(|r| r.iter().map(cell).collect())
         .collect();
     if cells.len() <= 1 {
         return format!(
@@ -98,6 +105,19 @@ fn num_prec(n: &Number) -> u8 {
 
 /// (text, precedence of the outermost operator)
 fn fmt(e: &Expr) -> (String, u8) {
+    if let Some((c, u)) = crate::units::printable(e) {
+        return fmt_quantity(&c, &crate::units::text(&u));
+    }
+    // a sum with the same units in every term: (2*t+3) m
+    if let Add(_) = e {
+        if crate::units::has_units(e) {
+            if let Some((c, u)) = crate::units::split(e) {
+                if !u.is_empty() && !crate::units::has_units(&c) {
+                    return fmt_quantity(&c, &crate::units::text(&u));
+                }
+            }
+        }
+    }
     match e {
         Num(n) => (n.to_string(), num_prec(n)),
         Sym(s) => (s.clone(), P_ATOM),
@@ -127,11 +147,15 @@ fn fmt(e: &Expr) -> (String, u8) {
             (o.text(), P_ATOM)
         }
         Obj(o) => (format!("<{}>", o.kind()), P_ATOM),
+        Matrix(rows) if crate::units::matrix_units(rows).is_some() => {
+            let (m, u) = crate::units::matrix_units(rows).unwrap();
+            (format!("{} {}", fmt(&Matrix(m)).0, crate::units::text(&u)), P_MUL)
+        }
         Matrix(rows) => (
             format!(
                 "[{}]",
                 rows.iter()
-                    .map(|r| r.iter().map(|x| fmt(x).0).collect::<Vec<_>>().join(", "))
+                    .map(|r| r.iter().map(|x| if crate::units::has_units(x) { format!("({})", fmt(x).0) } else { fmt(x).0 }).collect::<Vec<_>>().join(", "))
                     .collect::<Vec<_>>()
                     .join("; ")
             ),
@@ -204,6 +228,19 @@ fn fmt(e: &Expr) -> (String, u8) {
                 P_POW,
             )
         }
+    }
+}
+
+/// A quantity: 3 m/s, -2.5 kg, (3/2) m, (2*t) m/s^2 (read back the same way)
+fn fmt_quantity(c: &Expr, units: &str) -> (String, u8) {
+    let (cs, cp) = fmt(c);
+    match c {
+        Num(n) if n.is_negative() && (n.is_integer() || !n.is_exact()) => {
+            (format!("{} {}", cs, units), P_ADD)
+        }
+        Num(n) if n.is_integer() || !n.is_exact() => (format!("{} {}", cs, units), P_MUL),
+        _ if cp >= P_ATOM && cs.ends_with(')') => (format!("{} {}", cs, units), P_MUL),
+        _ => (format!("({}) {}", cs, units), P_MUL),
     }
 }
 
