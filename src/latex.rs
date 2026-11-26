@@ -176,7 +176,8 @@ fn fmt(e: &Expr) -> (String, u8) {
         Const(Const::I) => ("i".into(), P_ATOM),
         Bool(b) => (format!("\\mathrm{{{}}}", b), P_ATOM),
         Str(s) => (format!("\\text{{{}}}", s), P_ATOM),
-        Obj(_) | Matrix(_) => (latex(e), P_ATOM),
+        Obj(o) => (format!("\\text{{{}}}", o.text().replace(['{', '}'], "")), P_ATOM),
+        Matrix(_) => (latex(e), P_ATOM),
         Func(Func::Abs, a) => (format!("\\left|{}\\right|", fmt(a).0), P_ATOM),
         Func(f, a) => (
             format!("{}\\left({}\\right)", func_name(*f), fmt(a).0),
