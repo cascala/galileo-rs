@@ -1956,7 +1956,33 @@ impl Session {
         let g = simplify(&neg(g));
         let xs = Expr::sym(&x);
         let constant = a.iter().all(|c| !c.contains_sym(&x));
-        let (sol, consts) = if constant {
+        // y^(n) = f(x) alone: integrate n times (v' = -u/m for a rocket)
+        let direct = a[..order].iter().all(|c| c.is_zero()) && !a[order].is_zero();
+        let integrated = if direct {
+            let mut f = simplify(&div(g.clone(), a[order].clone()));
+            let mut cs = vec![];
+            let mut ok = true;
+            for k in 0..order {
+                match cas::antiderivative(&f, &x) {
+                    Some(i) => {
+                        let c = Expr::sym(&format!("C{}", order - k));
+                        f = simplify(&add2(i, c.clone()));
+                        cs.push(c);
+                    }
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            cs.reverse();
+            if ok { Some((f, cs)) } else { None }
+        } else {
+            None
+        };
+        let (sol, consts) = if let Some(r) = integrated {
+            r
+        } else if constant {
             self.dsolve_constant(&a, &g, &x)?
         } else if order == 1 {
             // y' + p y = q: integrating factor

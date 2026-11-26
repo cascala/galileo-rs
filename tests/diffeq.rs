@@ -55,6 +55,8 @@ fn dsolve_more() {
     assert_eq!(one("dsolve(y' == y^2, y, x, 0, 1)"), "1/(1-x)");
     assert_eq!(one("dsolve(x^2*y'' + x*y' - 4*y == 0, y, x)"), "C1*x^2+C2/x^2");
     assert_eq!(one("dsolve([x' == -x + y, y' == -x - y], [x, y], t, 0, [1, 0])"), "[exp(-t)*cos(t), -exp(-t)*sin(t)]");
+    assert_eq!(one("dsolve(y'' == 1/x, y, x)"), "C1+C2*x+x*log(x)-x");
+    assert_eq!(one("dsolve(v' == -u/M, v, M, M0, 0)"), "u*log(M0)-u*log(M)");
 }
 
 #[test]
