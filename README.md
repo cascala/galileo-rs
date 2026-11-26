@@ -141,6 +141,12 @@ galileo> kretschmann(S)
 `fieldplot`, `odeplot`, `odesolve` and `geodesic`. In the terminal a plot is drawn in text; in a notebook it is an interactive
 Plotly chart with an SVG fallback. `odesolve` uses fixed-step RK4.
 
+## VS Code
+
+[editors/vscode](editors/vscode) is a VS Code extension: syntax colors for `.gg` files, a
+Run File button, and Shift+Enter to send the statement under the cursor to a Galileo prompt.
+Build it with `npm install && npx vsce package` there and install the `.vsix`.
+
 ## Jupyter
 
 `galileo --kernel` serves a simple line protocol on stdin/stdout (see `src/kernel.rs`):
