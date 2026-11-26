@@ -50,6 +50,10 @@ pub mod special;
 pub mod vcalc;
 pub mod mv_cmd;
 pub mod decomp;
+pub mod assume;
+pub mod laplace;
+pub mod de_cmd;
+pub mod ode2;
 pub mod la_cmd;
 pub mod teach;
 #[cfg(target_arch = "wasm32")]

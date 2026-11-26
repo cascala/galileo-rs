@@ -1153,6 +1153,7 @@ impl Session {
             "perm" | "compose" | "pinverse" | "porder" | "psign" | "cycles" | "generate"
             | "cayley" => self.perms(f, args),
             "dsolve" => self.dsolve(args),
+            "seriessolve" => self.seriessolve(args),
             "letters" | "word" | "encode" | "decode" => self.text_cmd(f, args),
             "orbitdata" => self.orbitdata(args),
             "mandelbrot" | "julia" => self.escape_set(f, args),
@@ -1867,6 +1868,9 @@ impl Session {
 
     fn dsolve(&mut self, args: &[Node]) -> R<Expr> {
         let usage = "usage: dsolve(ode, y, x) or dsolve(ode, y, x, x0, [y(x0), y'(x0), ...]); write the equation with y, y', y'' (e.g. y'' + y == 0)";
+        if matches!(args.first(), Some(Node::Matrix(_))) {
+            return self.dsolve_system(args);
+        }
         if args.len() != 3 && args.len() != 5 {
             return Err(usage.into());
         }
@@ -1888,7 +1892,10 @@ impl Session {
         for k in 0..=order {
             let c = simplify(&deriv(&e, &format!("{}__{}", y, k)));
             if ys.iter().any(|s| c.contains_sym(&show(s))) {
-                return Err("dsolve: only linear equations (no y^2, y*y', sin(y), ...) can be solved exactly; use odeplot for a numeric solution".into());
+                if order == 1 {
+                    return self.dsolve_separable(&e, &y, &x, args);
+                }
+                return Err("dsolve: only linear equations (no y^2, y*y', sin(y), ...) of order 2 and higher can be solved exactly; use odeplot for a numeric solution".into());
             }
             a.push(c);
         }
@@ -1912,9 +1919,27 @@ impl Session {
                 .ok_or("dsolve: can't do the integral for this right-hand side")?;
             let c1 = Expr::sym("C1");
             (simplify(&div(add2(iq, c1.clone()), mu)), vec![c1])
+        } else if let Some(b) = euler_coeffs(&a, &x) {
+            // Cauchy-Euler: x = e^u turns it into constant coefficients in u
+            let alpha = euler_to_constant(&b);
+            let u = "u__";
+            let eu = exp(Expr::sym(u));
+            let an = a[order].clone();
+            let gu = simplify(&subst(
+                &div(mul2(g.clone(), pow(xs.clone(), Expr::int(order as i128))), an),
+                &x,
+                &eu,
+            ));
+            let (su, cs) = self.dsolve_constant(&alpha, &gu, u)?;
+            let back = crate::ode2::prefer_expanded(&subst(&su, u, &func(Func::Log, xs.clone())));
+            self.note(format!(
+                "Cauchy–Euler equation (the coefficient of y^(k) is a multiple of x^k): try y = x^r, or substitute x = e^u to get constant coefficients. Characteristic polynomial in r: {}.",
+                show(&simplify(&add(alpha.iter().enumerate().map(|(k, c)| mul2(c.clone(), pow(Expr::sym("r"), Expr::int(k as i128)))).collect())))
+            ));
+            (back, cs)
         } else {
             return Err(
-                "dsolve: equations of order 2 and higher need constant coefficients".into(),
+                "dsolve: equations of order 2 and higher need constant coefficients, or Cauchy–Euler form (x^2 y'' + b x y' + c y)".into(),
             );
         };
         let _ = xs;
@@ -1948,6 +1973,253 @@ impl Session {
             r = subst(&r, n, &v);
         }
         Ok(simplify(&r))
+    }
+
+    /// power series solution about x = 0 of a linear equation
+    fn seriessolve(&mut self, args: &[Node]) -> R<Expr> {
+        let usage = "usage: seriessolve(ode, y, x, n) or seriessolve(ode, y, x, n, [y(0), y'(0), ...]): the power series of y up to x^n";
+        if args.len() != 4 && args.len() != 5 {
+            return Err(usage.into());
+        }
+        let y = name(&args[1], "seriessolve: y")?;
+        let x = name(&args[2], "seriessolve: x")?;
+        let n = match self.eval(&args[3])?.num().and_then(|k| k.as_int()) {
+            Some(k) if (1..=40).contains(&k) => k as usize,
+            _ => return Err("seriessolve: n must be a whole number from 1 to 40".into()),
+        };
+        let mut order = 0;
+        let node = ode_node(&args[0], &y, &x, &mut order)?;
+        if order == 0 {
+            return Err(format!("seriessolve: the equation has no derivative of {}", y));
+        }
+        if n < order {
+            return Err(format!("seriessolve: n must be at least the order {}", order));
+        }
+        let mut hid: Vec<String> = (0..=order).map(|k| format!("{}__{}", y, k)).collect();
+        hid.push(x.clone());
+        let e = equation_lhs(&self.eval_hidden(&node, &hid)?);
+        let mut a = vec![];
+        for k in 0..=order {
+            let c = simplify(&deriv(&e, &format!("{}__{}", y, k)));
+            if hid[..=order].iter().any(|h| c.contains_sym(h)) {
+                return Err("seriessolve: only linear equations can be solved with a power series".into());
+            }
+            a.push(c);
+        }
+        let mut g = e.clone();
+        for k in 0..=order {
+            g = subst(&g, &format!("{}__{}", y, k), &Expr::zero());
+        }
+        let g = simplify(&neg(g));
+        if cas::is_zero(&subst(&a[order], &x, &Expr::zero())) {
+            return Err(format!(
+                "seriessolve: x = 0 is a singular point (the coefficient of the highest derivative, {}, vanishes there); a plain power series need not exist (Frobenius method)",
+                show(&a[order])
+            ));
+        }
+        // the coefficients as polynomials up to degree n
+        let trunc = |f: &Expr| -> R<Expr> {
+            if cas::poly_coeffs(f, &x).is_some() || !f.contains_sym(&x) {
+                Ok(f.clone())
+            } else {
+                cas::taylor(f, &x, &Expr::zero(), n)
+            }
+        };
+        let xs = Expr::sym(&x);
+        let cs: Vec<Expr> = (0..=n).map(|k| Expr::sym(&format!("a{}", k))).collect();
+        let yser = add((0..=n).map(|k| mul2(cs[k].clone(), pow(xs.clone(), Expr::int(k as i128)))).collect());
+        let mut acc = vec![];
+        let mut d = yser.clone();
+        for ak in a.iter() {
+            acc.push(mul2(trunc(ak)?, d.clone()));
+            d = deriv(&d, &x);
+        }
+        acc.push(neg(trunc(&g)?));
+        let resid = cas::poly_coeffs(&add(acc), &x).ok_or("seriessolve: the coefficients must have power series at 0")?;
+        let eqs: Vec<Expr> = (0..=n - order).map(|k| resid.get(k).cloned().unwrap_or(Expr::zero())).collect();
+        let unknowns: Vec<String> = (order..=n).map(|k| format!("a{}", k)).collect();
+        let vals = cas::solve_linear(&eqs, &unknowns)?;
+        let mut coef: Vec<Expr> = cs[..order].to_vec();
+        coef.extend(vals.iter().map(simplify));
+        // start values y^(k)(0) = k! a_k
+        if args.len() == 5 {
+            let ics: Vec<Expr> = match self.eval(&args[4])? {
+                Expr::Matrix(m) => m.into_iter().flatten().collect(),
+                v => vec![v],
+            };
+            if ics.len() != order {
+                return Err(format!("seriessolve: an order-{} equation needs {} start values", order, order));
+            }
+            let mut f = 1i128;
+            for (k, v) in ics.iter().enumerate() {
+                if k > 0 {
+                    f *= k as i128;
+                }
+                let ak = simplify(&div(v.clone(), Expr::int(f)));
+                coef = coef.iter().map(|c| simplify(&subst(c, &format!("a{}", k), &ak))).collect();
+            }
+        }
+        // the answer grouped by the free coefficients a0, a1, ...
+        let free: Vec<String> = (0..order).map(|k| format!("a{}", k)).filter(|_| args.len() == 4).collect();
+        let mut parts = vec![];
+        let term = |c: &Expr, k: usize| mul2(c.clone(), pow(xs.clone(), Expr::int(k as i128)));
+        for f in &free {
+            let mut ser = vec![];
+            for (k, c) in coef.iter().enumerate() {
+                let ck = simplify(&deriv(c, f));
+                if !cas::is_zero(&ck) {
+                    ser.push(term(&ck, k));
+                }
+            }
+            parts.push(mul2(Expr::sym(f), add(ser)));
+        }
+        let mut rest = vec![];
+        for (k, c) in coef.iter().enumerate() {
+            let mut r = c.clone();
+            for f in &free {
+                r = subst(&r, f, &Expr::zero());
+            }
+            let r = simplify(&r);
+            if !cas::is_zero(&r) {
+                rest.push(term(&r, k));
+            }
+        }
+        if !rest.is_empty() {
+            parts.push(add(rest));
+        }
+        let recur = (order..=n.min(order + 3))
+            .map(|k| format!("a{} = {}", k, show(&coef[k])))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.note(format!(
+            "Power series y = a0 + a1 x + a2 x^2 + ... about x = 0: substitute it, collect powers of x and set each coefficient to zero. That gives {}, and so on. {}The answer is exact up to x^{}; the next terms are left out.",
+            recur,
+            if args.len() == 4 { "a0 = y(0) and a1 = y'(0) stay free. " } else { "" },
+            n
+        ));
+        Ok(add(parts))
+    }
+
+    /// dsolve for y' = f(x) g(y); e is the equation with y__0, y__1
+    fn dsolve_separable(&mut self, e: &Expr, y: &str, x: &str, args: &[Node]) -> R<Expr> {
+        let (y0n, y1n) = (format!("{}__0", y), format!("{}__1", y));
+        let c = simplify(&deriv(e, &y1n));
+        if c.contains_sym(&y1n) {
+            return Err("dsolve: write the first-order equation so it can be solved for y' (y' = f(x, y))".into());
+        }
+        let r = simplify(&div(neg(subst(e, &y1n, &Expr::zero())), c));
+        let r = subst(&r, &y0n, &Expr::sym(y));
+        // decimals: solve with exact fractions, report decimals
+        let floats = crate::vcalc::has_float(&r);
+        let r = if floats { crate::vcalc::exactify(&r) } else { r };
+        let ic = if args.len() == 5 {
+            let x0 = self.eval(&args[3])?;
+            let v = match self.eval(&args[4])? {
+                Expr::Matrix(m) => m.into_iter().flatten().collect::<Vec<_>>(),
+                v => vec![v],
+            };
+            if v.len() != 1 {
+                return Err("dsolve: a first-order equation needs one start value y(x0)".into());
+            }
+            Some((x0, v[0].clone()))
+        } else {
+            None
+        };
+        let ic = ic.map(|(a, b)| if floats { (crate::vcalc::exactify(&a), crate::vcalc::exactify(&b)) } else { (a, b) });
+        let (sol, notes) = crate::ode2::separable(&r, y, x, ic.as_ref().map(|(a, b)| (a, b)))?;
+        self.note(notes.join(" "));
+        let back = |e: Expr| if floats { crate::calc::evalf(&e) } else { e };
+        Ok(match sol {
+            crate::ode2::Separable::Explicit(s) => back(s),
+            crate::ode2::Separable::Implicit(l, r) => Expr::Apply("==".into(), vec![back(l), back(r)]),
+        })
+    }
+
+    /// dsolve([x' == a x + b y, y' == c x + d y], [x, y], t[, t0, [x0, y0]])
+    fn dsolve_system(&mut self, args: &[Node]) -> R<Expr> {
+        let usage = "usage: dsolve([x' == ..., y' == ...], [x, y], t) or dsolve([...], [x, y], t, t0, [x(t0), y(t0)])";
+        if args.len() != 3 && args.len() != 5 {
+            return Err(usage.into());
+        }
+        let Node::Matrix(rows) = &args[0] else { return Err(usage.into()) };
+        let eqs: Vec<Node> = rows.iter().flatten().cloned().collect();
+        let Node::Matrix(vr) = &args[1] else { return Err(usage.into()) };
+        let vars: Vec<String> = vr.iter().flatten().map(|v| name(v, "dsolve: unknown")).collect::<R<_>>()?;
+        let t = name(&args[2], "dsolve: t")?;
+        if eqs.len() != vars.len() {
+            return Err(format!("dsolve: {} equations for {} unknowns", eqs.len(), vars.len()));
+        }
+        let mut hid = vec![t.clone()];
+        for v in &vars {
+            hid.push(format!("{}__0", v));
+            hid.push(format!("{}__1", v));
+        }
+        let n = vars.len();
+        let mut m: Vec<Vec<Expr>> = vec![];
+        let mut a: Vec<Vec<Expr>> = vec![];
+        let mut b = vec![];
+        for q in &eqs {
+            let mut node = q.clone();
+            for v in &vars {
+                let mut order = 0;
+                node = ode_node(&node, v, &t, &mut order)?;
+                if order > 1 {
+                    return Err("dsolve: a system must be first order (x', y'); write y'' = ... as y' = v, v' = ...".into());
+                }
+            }
+            let e = equation_lhs(&self.eval_hidden(&node, &hid)?);
+            let mut mr = vec![];
+            let mut ar = vec![];
+            for v in &vars {
+                let d1 = simplify(&deriv(&e, &format!("{}__1", v)));
+                let d0 = simplify(&deriv(&e, &format!("{}__0", v)));
+                for c in [&d1, &d0] {
+                    if hid.iter().any(|h| c.contains_sym(h)) {
+                        return Err("dsolve: only linear systems with constant coefficients can be solved exactly; use odeplot for a numeric solution".into());
+                    }
+                }
+                mr.push(d1);
+                ar.push(neg(d0));
+            }
+            let mut g = e.clone();
+            for h in &hid[1..] {
+                g = subst(&g, h, &Expr::zero());
+            }
+            let g = simplify(&neg(g));
+            if g.contains_sym(&t) {
+                return Err("dsolve: forcing that depends on t is not supported in systems; use laplace on each equation".into());
+            }
+            m.push(mr);
+            a.push(ar);
+            b.push(g);
+        }
+        // M X' = A X + b  ->  X' = M^-1 A X + M^-1 b
+        let bm: Vec<Vec<Expr>> = b.iter().map(|v| vec![v.clone()]).collect();
+        let a2 = crate::linalg::solve(&m, &a).map_err(|_| "dsolve: the equations don't determine every derivative")?;
+        let b2: Vec<Expr> = crate::linalg::solve(&m, &bm).map_err(|_| "dsolve: the equations don't determine every derivative")?.into_iter().map(|r| r[0].clone()).collect();
+        let a2: Vec<Vec<Expr>> = a2.iter().map(|r| r.iter().map(simplify).collect()).collect();
+        let ic = if args.len() == 5 {
+            let t0 = self.eval(&args[3])?;
+            let v = match self.eval(&args[4])? {
+                Expr::Matrix(m) => m.into_iter().flatten().collect::<Vec<_>>(),
+                v => vec![v],
+            };
+            Some((t0, v))
+        } else {
+            None
+        };
+        let (sol, notes) = crate::ode2::linear_system(&a2, &b2, &t, ic.as_ref().map(|(a, b)| (a, b.as_slice())))?;
+        let am = Expr::Matrix(a2.clone());
+        let mut msg = format!(
+            "Linear system X' = A X + b with X = [{}] and A = {}. ",
+            vars.join(", "),
+            show(&am)
+        );
+        msg.push_str(&notes.join(" "));
+        msg.push_str(&format!(" The answer lists {} in that order.", vars.join(", ")));
+        self.note(msg);
+        let _ = n;
+        Ok(Expr::Matrix(vec![sol]))
     }
 
     /// constant coefficients: characteristic roots + undetermined coefficients
@@ -2185,6 +2457,45 @@ fn value_pos(e: &Expr) -> f64 {
 
 /// square roots, assuming that every variable is positive:
 /// sqrt(-4*w^2) = 2*w*i
+/// a_k = c a_k' x^k for every k: the normalised Euler coefficients b_k
+fn euler_coeffs(a: &[Expr], x: &str) -> Option<Vec<Expr>> {
+    let n = a.len() - 1;
+    let xs = Expr::sym(x);
+    let an = a[n].clone();
+    let mut b = vec![];
+    for (k, c) in a.iter().enumerate() {
+        let bk = simplify(&div(mul2(c.clone(), pow(xs.clone(), Expr::int((n - k) as i128))), an.clone()));
+        if bk.contains_sym(x) {
+            return None;
+        }
+        b.push(bk);
+    }
+    Some(b)
+}
+
+/// sum b_k x^k D^k (D = d/dx) = sum b_k T(T-1)...(T-k+1) with T = d/du:
+/// the constant coefficients in u
+fn euler_to_constant(b: &[Expr]) -> Vec<Expr> {
+    let n = b.len() - 1;
+    let mut out = vec![Expr::zero(); n + 1];
+    for (k, bk) in b.iter().enumerate() {
+        // falling factorial T(T-1)...(T-k+1) as coefficients
+        let mut p: Vec<i128> = vec![1];
+        for j in 0..k {
+            let mut q = vec![0; p.len() + 1];
+            for (i, c) in p.iter().enumerate() {
+                q[i + 1] += c;
+                q[i] -= c * j as i128;
+            }
+            p = q;
+        }
+        for (i, c) in p.iter().enumerate() {
+            out[i] = add2(out[i].clone(), mul2(Expr::int(*c), bk.clone()));
+        }
+    }
+    out.iter().map(simplify).collect()
+}
+
 fn sqrt_assume(e: &Expr) -> Expr {
     let e = e.map_children(&mut |c| sqrt_assume(c));
     let Expr::Pow(b, h) = &e else { return e };

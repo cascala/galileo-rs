@@ -29,6 +29,9 @@ pub const NAMES: &[(&str, usize)] = &[
     ("besselj", 2),
     ("bessely", 2),
     ("besseli", 2),
+    ("heaviside", 1),
+    ("dirac", 1),
+    ("sign", 1),
 ];
 
 pub fn is_special(f: &str, n: usize) -> bool {
@@ -111,6 +114,26 @@ pub fn apply(f: &str, args: Vec<Expr>) -> Expr {
             }
         }
         "erfc" if args[0].is_zero() => Expr::one(),
+        "heaviside" | "sign" | "dirac" => {
+            let x = &args[0];
+            let s = crate::assume::sign(x).or_else(|| {
+                // numbers like sqrt(2) - 1 and pi - 3
+                if x.symbols().is_empty() {
+                    let v = crate::numeric::value(x);
+                    v.is_finite().then_some(if v > 0.0 { 1 } else if v < 0.0 { -1 } else { 0 })
+                } else {
+                    None
+                }
+            });
+            match (f, s) {
+                ("heaviside", Some(1)) => Expr::one(),
+                ("heaviside", Some(0)) => crate::build::rat(1, 2),
+                ("heaviside", Some(_)) => Expr::zero(),
+                ("sign", Some(k)) => Expr::int(k as i128),
+                ("dirac", Some(k)) if k != 0 => Expr::zero(),
+                _ => app(f, args),
+            }
+        }
         "zeta" => zeta_exact(&args[0]).unwrap_or_else(|| app(f, args)),
         "besselj" | "bessely" | "besseli" => {
             let (n, x) = (&args[0], &args[1]);
@@ -244,6 +267,9 @@ pub fn deriv(f: &str, args: &[Expr], x: &str) -> Option<Expr> {
             apply("polygamma", vec![add2(args[0].clone(), Expr::one()), args[1].clone()]),
             d(&args[1], x),
         ),
+        "heaviside" => mul2(apply("dirac", args.to_vec()), d(&args[0], x)),
+        "sign" => mul(vec![int(2), apply("dirac", args.to_vec()), d(&args[0], x)]),
+        "dirac" => return None,
         "erf" | "erfc" | "erfi" => {
             let u2 = pow(args[0].clone(), int(2));
             let g = if f == "erfi" { exp(u2) } else { exp(neg(u2)) };
@@ -275,6 +301,10 @@ pub fn at_infinity(f: &str, sign: i32) -> Option<Option<Expr>> {
         ("erfc", 1) => Some(Expr::zero()),
         ("erfc", _) => Some(Expr::int(2)),
         ("zeta", 1) => Some(Expr::one()),
+        ("heaviside", 1) => Some(Expr::one()),
+        ("heaviside", _) => Some(Expr::zero()),
+        ("sign", k) => Some(Expr::int(k as i128)),
+        ("dirac", _) => Some(Expr::zero()),
         ("besselj" | "bessely", 1) => Some(Expr::zero()),
         ("gamma" | "digamma" | "erfi" | "besseli", 1) => None,
         _ => return None,
@@ -297,6 +327,9 @@ pub fn value(f: &str, a: &[f64]) -> f64 {
                 f64::NAN
             }
         }
+        "heaviside" => if a[0] > 0.0 { 1.0 } else if a[0] < 0.0 { 0.0 } else { 0.5 },
+        "sign" => if a[0] > 0.0 { 1.0 } else if a[0] < 0.0 { -1.0 } else { 0.0 },
+        "dirac" => if a[0] != 0.0 { 0.0 } else { f64::NAN },
         "erf" => erf(a[0]),
         "erfc" => erfc(a[0]),
         "erfi" => erfi(a[0]),

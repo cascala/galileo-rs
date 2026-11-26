@@ -887,8 +887,57 @@ pub const ENTRIES: &[Entry] = &[
         "dsolve",
         "Calculus",
         "dsolve(ode, y, x) or dsolve(ode, y, x, x0, [y(x0), y'(x0), ...])",
-        "Exact solution of a linear differential equation written with y, y', y'', ...: constant coefficients of any order (forcing by polynomials, exponentials, sines and cosines), and first-order equations y' + p(x) y = q(x). Without start values the answer has constants C1, C2, ....",
-        "dsolve(y'' + y == 0, y, x, 0, [1, 0])"
+        "Exact solution of a differential equation written with y, y', y'', ...: linear with constant coefficients of any order (forcing by polynomials, exponentials, sines and cosines), first-order linear y' + p(x) y = q(x), separable y' = f(x) g(y) (logistic, y' = x/y, ...), and Cauchy–Euler x^2 y'' + b x y' + c y = 0. A list of first-order equations with a list of unknowns solves a linear system: dsolve([x' == y, y' == -x], [x, y], t, 0, [1, 0]). Without start values the answer has constants C1, C2, ....",
+        "dsolve(y' == y*(1 - y/10), y, x, 0, 1)"
+    ),
+    e!(
+        "seriessolve",
+        "Differential equations",
+        "seriessolve(ode, y, x, n) or seriessolve(ode, y, x, n, [y(0), y'(0), ...])",
+        "Power series solution y = a0 + a1 x + ... + an x^n about the ordinary point x = 0 of a linear equation (polynomial coefficients, or any with a Taylor series). Without start values a0 = y(0) and a1 = y'(0) stay free.",
+        "seriessolve(y'' == x*y, y, x, 8)"
+    ),
+    e!(
+        "laplace",
+        "Differential equations",
+        "laplace(f, t, s) or laplace(f)",
+        "Laplace transform F(s) = ∫₀^∞ f(t) e^(-s t) dt from the table and its rules: powers, exponentials, sines and cosines, sinh, cosh, shifts by e^(a t), products with t^n, heaviside(t - a) and dirac(t - a), and derivatives y(t), y'(t), y''(t) with y(0), y'(0).",
+        "laplace(exp(-t)*cos(2*t), t, s)"
+    ),
+    e!(
+        "ilaplace",
+        "Differential equations",
+        "ilaplace(F, s, t) or ilaplace(F)",
+        "Inverse Laplace transform of a rational function of s, by partial fractions, with delays e^(-a s) turned into heaviside(t - a).",
+        "ilaplace(1/(s*(s + 1)), s, t)"
+    ),
+    e!(
+        "partfrac",
+        "Differential equations",
+        "partfrac(f, x)",
+        "Partial fraction decomposition of a rational function over the rationals.",
+        "partfrac((x + 3)/(x^2 - 1), x)"
+    ),
+    e!(
+        "fourier",
+        "Differential equations",
+        "fourier(f, x, L, N) or fourier(f, x, L, N, \"sine\") or fourier(f, x, L, N, \"cosine\")",
+        "Fourier series of f on [-L, L] up to the N-th harmonic: a0/2 + Σ a_n cos(nπx/L) + b_n sin(nπx/L). With \"sine\" or \"cosine\", the half-range series on [0, L]. f may be piecewise with heaviside, sign and abs; the note gives the general a_n and b_n.",
+        "fourier(sign(x), x, pi, 5)"
+    ),
+    e!(
+        "heaviside",
+        "Differential equations",
+        "heaviside(x), dirac(x), sign(x)",
+        "The unit step (0 for x < 0, 1 for x > 0, 1/2 at 0), the Dirac delta (for integrals and Laplace transforms: ∫ h(x) dirac(x - a) dx = h(a)), and the sign function. Definite integrals split at their jumps.",
+        "int(heaviside(x - 1)*x, x, 0, 3)"
+    ),
+    e!(
+        "assume",
+        "Differential equations",
+        "assume(a > 0), assume(a < 0), assume(n, integer), assume(n, integer, positive); forget(a); assumptions",
+        "Facts about symbols that limits, integrals and simplification use: e^(-a t) -> 0 as t -> inf when a > 0, sqrt(a^2) = a, sin(n pi) = 0 and cos(n pi) = (-1)^n for an integer n. forget(a) removes them, forget() removes all, assumptions lists them.",
+        "assume(a > 0); int(exp(-a*x), x, 0, inf)"
     ),
     e!(
         "implicitplot",
@@ -1224,6 +1273,12 @@ pub const ENTRIES: &[Entry] = &[
 const ALIASES: &[(&str, &str)] = &[
     ("julia", "mandelbrot"),
     ("orth", "gramschmidt"),
+    ("dirac", "heaviside"),
+    ("sign", "heaviside"),
+    ("forget", "assume"),
+    ("unassume", "assume"),
+    ("assumptions", "assume"),
+    ("apart", "partfrac"),
     ("cholesky", "chol"),
     ("isposdef", "posdef"),
     ("rank", "rref"),

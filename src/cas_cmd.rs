@@ -958,9 +958,150 @@ fn gamma_integral(fx: &Expr, x: &str, a: &Expr, b: &Expr) -> Option<Expr> {
     ])))
 }
 
+/// u = p x + q with numbers p != 0, q: the root -q/p
+fn linear_root(u: &Expr, x: &str) -> Option<(f64, Expr, Expr)> {
+    let c = cas::poly_coeffs(u, x)?;
+    if c.len() != 2 || !c[0].symbols().is_empty() || !c[1].symbols().is_empty() || c[1].is_zero() {
+        return None;
+    }
+    let r = simplify(&neg(div(c[0].clone(), c[1].clone())));
+    Some((numeric::value(&r), r, c[1].clone()))
+}
+
+/// arguments of heaviside, sign and abs (kinks) and of dirac (spikes)
+fn kinks(e: &Expr, x: &str, out: &mut Vec<Expr>, spikes: &mut Vec<Expr>) {
+    match e {
+        Expr::Apply(f, a) if a.len() == 1 && (f == "heaviside" || f == "sign") && a[0].contains_sym(x) => {
+            out.push(a[0].clone())
+        }
+        Expr::Apply(f, a) if a.len() == 1 && f == "dirac" && a[0].contains_sym(x) => spikes.push(a[0].clone()),
+        Expr::Func(crate::expr::Func::Abs, a) if a.contains_sym(x) => {
+            out.push((**a).clone());
+            kinks(a, x, out, spikes)
+        }
+        Expr::Add(v) | Expr::Mul(v) | Expr::Apply(_, v) => v.iter().for_each(|t| kinks(t, x, out, spikes)),
+        Expr::Pow(p, q) => {
+            kinks(p, x, out, spikes);
+            kinks(q, x, out, spikes)
+        }
+        Expr::Func(_, a) => kinks(a, x, out, spikes),
+        _ => {}
+    }
+}
+
+/// replace heaviside(u), sign(u), abs(u) by their values where u has sign sg
+fn fix_signs(e: &Expr, x: &str, at: f64) -> Expr {
+    let sg = |u: &Expr| -> f64 {
+        let v = numeric::value(&calc::subst(u, x, &Expr::float(at)));
+        if v > 0.0 { 1.0 } else { -1.0 }
+    };
+    match e {
+        Expr::Apply(f, a) if a.len() == 1 && (f == "heaviside" || f == "sign") && a[0].contains_sym(x) => {
+            let s = sg(&a[0]);
+            match (f.as_str(), s > 0.0) {
+                ("heaviside", true) => Expr::one(),
+                ("heaviside", false) => Expr::zero(),
+                (_, true) => Expr::one(),
+                _ => Expr::int(-1),
+            }
+        }
+        Expr::Func(crate::expr::Func::Abs, a) if a.contains_sym(x) => {
+            let inner = fix_signs(a, x, at);
+            if sg(a) > 0.0 { inner } else { neg(inner) }
+        }
+        Expr::Add(v) => add(v.iter().map(|t| fix_signs(t, x, at)).collect()),
+        Expr::Mul(v) => mul(v.iter().map(|t| fix_signs(t, x, at)).collect()),
+        Expr::Pow(p, q) => pow(fix_signs(p, x, at), fix_signs(q, x, at)),
+        Expr::Func(f, a) => func(*f, fix_signs(a, x, at)),
+        Expr::Apply(f, v) => Expr::Apply(f.clone(), v.iter().map(|t| fix_signs(t, x, at)).collect()),
+        o => o.clone(),
+    }
+}
+
+/// piecewise integrands: split at the kinks of heaviside, sign and abs, and
+/// sift out dirac(u): the integral of h(x) dirac(p x + q) is h(x0) / |p|
+fn piecewise_definite(fx: &Expr, x: &str, a: &Expr, b: &Expr, depth: usize) -> Option<R<Expr>> {
+    let (mut ks, mut spikes) = (vec![], vec![]);
+    kinks(fx, x, &mut ks, &mut spikes);
+    if ks.is_empty() && spikes.is_empty() {
+        return None;
+    }
+    let (lo, hi) = (real(a, "integrate").ok()?, real(b, "integrate").ok()?);
+    if lo > hi {
+        return Some(definite(fx, x, b, a, depth).map(neg));
+    }
+    if let Some(u) = spikes.first() {
+        let (x0, r, p) = linear_root(u, x)?;
+        let d = Expr::sym("dirac__");
+        let marked = replace_apply(fx, "dirac", u, &d);
+        let h = simplify(&calc::deriv(&marked, "dirac__"));
+        if h.contains_sym("dirac__") {
+            return Some(Err("integrate: dirac must appear linearly (h(x) dirac(x - a))".into()));
+        }
+        let rest = simplify(&calc::subst(&marked, "dirac__", &Expr::zero()));
+        let w = if x0 > lo && x0 < hi {
+            Expr::one()
+        } else if x0 == lo || x0 == hi {
+            Expr::Num(Number::rat(1, 2).unwrap())
+        } else {
+            Expr::zero()
+        };
+        let pick = simplify(&mul(vec![w, calc::subst(&h, x, &r), pow(func(crate::expr::Func::Abs, p), Expr::int(-1))]));
+        let base = if cas::is_zero(&rest) { Ok(Expr::zero()) } else { definite(&rest, x, a, b, depth + 1) };
+        return Some(base.map(|v| simplify(&add2(v, pick))));
+    }
+    let mut cuts: Vec<(f64, Expr)> = ks
+        .iter()
+        .filter_map(|u| linear_root(u, x))
+        .filter(|(v, _, _)| *v > lo && *v < hi)
+        .map(|(v, r, _)| (v, r))
+        .collect();
+    if cuts.len() < ks.len() && ks.iter().any(|u| linear_root(u, x).is_none()) {
+        return None;
+    }
+    cuts.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap());
+    cuts.dedup_by(|p, q| (p.0 - q.0).abs() < 1e-12);
+    if depth > 6 {
+        return None;
+    }
+    let mut pts = vec![(lo, a.clone())];
+    pts.extend(cuts);
+    pts.push((hi, b.clone()));
+    let mut parts = vec![];
+    for w in pts.windows(2) {
+        let (l, h) = (w[0].0, w[1].0);
+        let mid = match (l.is_finite(), h.is_finite()) {
+            (true, true) => (l + h) / 2.0,
+            (true, false) => l + 1.0,
+            (false, true) => h - 1.0,
+            _ => 0.0,
+        };
+        let piece = simplify(&fix_signs(fx, x, mid));
+        match definite(&piece, x, &w[0].1, &w[1].1, depth + 1) {
+            Ok(v) => parts.push(v),
+            Err(e) => return Some(Err(e)),
+        }
+    }
+    Some(Ok(simplify(&add(parts))))
+}
+
+fn replace_apply(e: &Expr, name: &str, arg: &Expr, by: &Expr) -> Expr {
+    match e {
+        Expr::Apply(f, a) if f == name && a.len() == 1 && a[0] == *arg => by.clone(),
+        Expr::Add(v) => add(v.iter().map(|t| replace_apply(t, name, arg, by)).collect()),
+        Expr::Mul(v) => mul(v.iter().map(|t| replace_apply(t, name, arg, by)).collect()),
+        Expr::Pow(p, q) => pow(replace_apply(p, name, arg, by), replace_apply(q, name, arg, by)),
+        Expr::Func(f, a) => func(*f, replace_apply(a, name, arg, by)),
+        o => o.clone(),
+    }
+}
+
 pub(crate) fn definite(fx: &Expr, x: &str, a: &Expr, b: &Expr, depth: usize) -> R<Expr> {
     if let Some(g) = gamma_integral(fx, x, a, b) {
         return Ok(g);
+    }
+    if let Some(r) = piecewise_definite(fx, x, a, b, depth) {
+        return r;
     }
     let free = numeric::free(fx, &[x]);
     let (an, bn) = (real(a, "integrate").ok(), real(b, "integrate").ok());

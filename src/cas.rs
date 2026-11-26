@@ -1074,9 +1074,118 @@ pub fn limit(e: &Expr, x: &str, p: &Point) -> R<Expr> {
                     ));
                 }
             }
+            if let Some(v) = assumed_limit(e, x, p) {
+                return Ok(v);
+            }
             Err("limit: can't find the limit".into())
         }
     }
+}
+
+fn is_inf_expr(e: &Expr) -> i32 {
+    if *e == infinity(1) {
+        1
+    } else if *e == infinity(-1) {
+        -1
+    } else {
+        0
+    }
+}
+
+/// Limits at infinity that depend only on the signs of the parameters:
+/// exp(-s t) -> 0 for s > 0. Tried with sample values that obey the
+/// assumptions; used only when every sample gives 0, or every one the same infinity.
+/// polynomial in x, or bounded (sin, cos of anything), or free of x
+fn tame(f: &Expr, x: &str) -> bool {
+    if !f.contains_sym(x) || is_poly(f, x) {
+        return true;
+    }
+    match f {
+        Func(Func::Sin | Func::Cos, _) => true,
+        Add(v) | Mul(v) => v.iter().all(|g| tame(g, x)),
+        Pow(b, k) => tame(b, x) && k.num().is_some_and(|n| n.is_integer() && !n.is_negative()),
+        _ => false,
+    }
+}
+
+fn assumed_limit(e: &Expr, x: &str, p: &Point) -> Option<Expr> {
+    if !matches!(p, Point::PosInf | Point::NegInf) {
+        return None;
+    }
+    // a decaying exponential times polynomial or bounded factors -> 0
+    if let Mul(v) = e {
+        let (ex, rest): (Vec<Expr>, Vec<Expr>) =
+            v.iter().cloned().partition(|f| matches!(f, Pow(b, _) if **b == Expr::Const(Const::E)));
+        if !ex.is_empty() && rest.iter().all(|f| tame(f, x)) {
+            let u = add(ex.iter().map(|f| match f {
+                Pow(_, u) => (**u).clone(),
+                _ => unreachable!(),
+            }).collect());
+            if let Ok(l) = limit(&u, x, p) {
+                if is_inf_expr(&l) < 0 {
+                    return Some(Expr::zero());
+                }
+            }
+        }
+    }
+    // constant factors and sums first: the limit of c*g is c times that of g
+    match e {
+        Mul(v) => {
+            let (c, rest): (Vec<Expr>, Vec<Expr>) = v.iter().cloned().partition(|f| !f.contains_sym(x));
+            if !c.is_empty() && !rest.is_empty() {
+                let c = mul(c);
+                let l = limit(&mul(rest), x, p).ok()?;
+                return match is_inf_expr(&l) {
+                    0 => Some(simplify(&mul2(c, l))),
+                    k => crate::assume::sign(&c).filter(|s| *s != 0).map(|s| infinity(s * k)),
+                };
+            }
+        }
+        Add(v) => {
+            let mut out = vec![];
+            for t in v {
+                let l = limit(t, x, p).ok()?;
+                if is_inf_expr(&l) != 0 {
+                    return None;
+                }
+                out.push(l);
+            }
+            return Some(simplify(&add(out)));
+        }
+        _ => {}
+    }
+    let mut seen: Option<i32> = None;
+    let mut finite: Option<Expr> = None;
+    for sample in crate::assume::samples(e, x)? {
+        let mut f = e.clone();
+        for (n, v) in &sample {
+            f = subst(&f, n, v);
+        }
+        let k = match lim_top(&simplify(&f), x, p)? {
+            L::F(v) if is_zero(&v) => 0,
+            L::Inf => 1,
+            L::NInf => -1,
+            // the same number for every sample: erf(sqrt(a) x) -> 1
+            L::F(v) if v.symbols().is_empty() => {
+                let v = tidy(&v);
+                if finite.as_ref().is_some_and(|f| !is_zero(&sub(f.clone(), v.clone()))) {
+                    return None;
+                }
+                finite = Some(v);
+                2
+            }
+            _ => return None,
+        };
+        if seen.is_some_and(|s| s != k) {
+            return None;
+        }
+        seen = Some(k);
+    }
+    Some(match seen? {
+        0 => Expr::zero(),
+        2 => finite?,
+        k => infinity(k),
+    })
 }
 
 // ---------- Taylor series ----------

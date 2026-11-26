@@ -236,6 +236,25 @@ pub fn pow(b: Expr, e: Expr) -> Expr {
         Num(Number::Float(f)) if f.fract() == 0.0 && f.abs() < 9.0e15 => Expr::int(f as i128),
         other => other,
     };
+    if crate::assume::any() {
+        // (a^2)^(1/2) = a for a > 0
+        if let Pow(bb, e1) = &b {
+            if crate::assume::sign(bb) == Some(1) {
+                return pow((**bb).clone(), mul2((**e1).clone(), e.clone()));
+            }
+        }
+        // (-1)^(2n) = 1 and (-1)^(3n) = (-1)^n for an integer n
+        if b == Expr::int(-1) {
+            if let Mul(v) = &e {
+                if let Some(c) = v[0].num().filter(|c| c.is_integer()).and_then(|c| c.as_int()) {
+                    let rest = mul(v[1..].to_vec());
+                    if c.abs() > 1 && crate::assume::is_integer(&rest) {
+                        return if c % 2 == 0 { Expr::one() } else { pow(b, rest) };
+                    }
+                }
+            }
+        }
+    }
     if let Num(en) = &e {
         let en = en.clone();
         if en.is_zero() {
@@ -547,6 +566,21 @@ pub fn func(f: Func, x: Expr) -> Expr {
         }
         Cos | Abs | Cosh if negated => return func(f, neg(x)),
         _ => {}
+    }
+    if let Some(k) = crate::assume::integer_pi_multiple(&x) {
+        // n an integer: sin(n pi) = 0, cos(n pi) = (-1)^n
+        match f {
+            Sin | Tan => return Expr::zero(),
+            Cos => return crate::assume::minus_one_power(&k),
+            _ => {}
+        }
+    }
+    if f == Abs && crate::assume::any() {
+        match crate::assume::sign(&x) {
+            Some(s) if s >= 0 => return x,
+            Some(_) => return neg(x),
+            None => {}
+        }
     }
     match f {
         Sin => {
