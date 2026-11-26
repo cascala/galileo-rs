@@ -828,7 +828,7 @@ impl Session {
             ("modulus", [r]) => {
                 let r = ring(r)?;
                 Ok(if r.k > 1 {
-                    ff::poly_expr(&r.m, "x")
+                    ff::poly_expr(&r.m, "a")
                 } else {
                     num(r.n.clone())
                 })

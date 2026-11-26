@@ -1594,7 +1594,13 @@ impl Session {
         }
         if out
             .iter()
-            .any(|v| !v.is_scalar() && !matches!(v, Expr::Bool(_) | Expr::Str(_)))
+            .any(|v| {
+                !v.is_scalar()
+                    && !matches!(v, Expr::Bool(_) | Expr::Str(_))
+                    && crate::ffield::as_elem(v).is_none()
+                    && crate::qring::as_elem(v).is_none()
+                    && crate::quat::as_quat(v).is_none()
+            })
         {
             return Err("table: each entry must be a number, an expression or a row".into());
         }

@@ -23,8 +23,8 @@ fn one(code: &str) -> String {
 fn commands() {
     for (code, want) in [
         ("gf(9)", "gf(9)"),
-        ("modulus(gf(9))", "x^2+x+2"),
-        ("modulus(gf(16))", "x^4+x+1"),
+        ("modulus(gf(9))", "a^2+a+2"),
+        ("modulus(gf(16))", "a^4+a+1"),
         ("F = gf(9); F(a + 1)^2", "gf(9, a+2)"),
         ("F = gf(9); x = F(2*a); x * x^-1", "gf(9, 1)"),
         ("order(gf(9, a + 1))", "8"),
