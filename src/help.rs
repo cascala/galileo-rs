@@ -1604,6 +1604,41 @@ pub const ENTRIES: &[Entry] = &[
         "A drawing of G with something marked: a path or cycle such as shortest(G, s, t) or hamiltonian(G), a graph on the same vertices such as mst(G), edge rows such as matching(G) or mincut(G, s, t), or a coloring from coloring(G). Graphs that come from cycle, grid, petersen and the like keep their own layout; others are drawn as trees, circles or with a spring layout.",
         "G = grid(3, 4); draw(G, shortest(G, 1, 12))"
     ),
+    e!(
+        "stationary",
+        "Random processes",
+        "stationary(P), absorption(P), hitting(P, targets)",
+        "Markov chains with transition matrix P (P(i, j) is the chance of going from state i to state j; rows add up to 1), exactly in fractions. stationary(P) is the long-run share of time in each state (pi P = pi; one row per closed class when there are several). absorption(P): for chains with absorbing states (P(i, i) = 1), row i holds the chances of ending in each absorbing state from state i, and the note gives the expected number of steps. hitting(P, targets): the expected number of steps to first reach one of the target states, from each state (inf where it may never happen). Powers P^n give the n-step chances.",
+        "stationary([1/2, 1/2, 0; 1/4, 1/2, 1/4; 0, 1/3, 2/3])"
+    ),
+    e!(
+        "randchain",
+        "Random processes",
+        "randchain(P, start, n), randwalk(n), randwalk(n, d), arrivals(rate, T), brownian(T, n), brownian(T, n, paths)",
+        "Random paths (seed(k) first to repeat them): n steps of a Markov chain from a start state; a walk of n steps of +1 or -1 from 0 (or on the d-dimensional grid, one row per position, d up to 3); the arrival times of a Poisson process up to time T; and Brownian motion at the times 0, T/n, ..., T (several paths: one per row).",
+        "seed(1); randwalk(10)"
+    ),
+    e!(
+        "sde",
+        "Random processes",
+        "sde(f, g, x0, T, n), sde(f, g, x0, T, n, paths)",
+        "Solves the stochastic differential equation dx = f(x, t) dt + g(x, t) dW from x(0) = x0 up to time T in n steps (the Euler-Maruyama method): a row of n + 1 values at the times linspace(0, T, n + 1), or one row per path. f and g are expressions in x and t, for example sde(0.1*x, 0.2*x, 100, 1, 250) for a stock price (geometric Brownian motion).",
+        "seed(1); sde(-x, 1, 2, 1, 10)"
+    ),
+    e!(
+        "ising",
+        "Random processes",
+        "ising(n, T, sweeps)",
+        "The Ising model of a magnet: spins +1 or -1 on an n by n grid that wraps around, each wanting to agree with its four neighbours, at temperature T, simulated by the Metropolis method for the given number of sweeps (n^2 flip attempts each). The result is a record: m (the average |magnetization| per spin), e (the average energy per spin), both over the second half of the sweeps, and spins (the final grid). Below Onsager's critical temperature 2.269 the spins line up.",
+        "seed(1); r = ising(10, 1.5, 100); r.m"
+    ),
+    e!(
+        "bscall",
+        "Random processes",
+        "bscall(S, K, r, sigma, T), bsput(S, K, r, sigma, T)",
+        "Black-Scholes prices of a European call and put option: stock price S, strike price K, interest rate r, volatility sigma (per year) and T years to expiry. The note gives d1, d2 and put-call parity.",
+        "bscall(100, 100, 0.05, 0.2, 1)"
+    ),
 ];
 
 /// other names for a command: (alias, the entry it is described under)
@@ -1802,6 +1837,12 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("chromaticpoly", "matching"),
     ("hamiltonian", "eulerian"),
     ("pagerank", "centrality"),
+    ("absorption", "stationary"),
+    ("hitting", "stationary"),
+    ("randwalk", "randchain"),
+    ("arrivals", "randchain"),
+    ("brownian", "randchain"),
+    ("bsput", "bscall"),
 ];
 
 /// all names help knows about, for completion
