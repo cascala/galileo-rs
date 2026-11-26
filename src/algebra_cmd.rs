@@ -130,6 +130,13 @@ impl Session {
             "rotmatrix",
             "su2",
             "parts",
+            "su",
+            "so",
+            "sl",
+            "bracket",
+            "coords",
+            "adjoint",
+            "killing",
         ];
         if !NAMES.contains(&f) {
             return None;
@@ -175,6 +182,12 @@ impl Session {
         }
         if f == "conj" {
             return None;
+        }
+        if matches!(
+            f,
+            "su" | "so" | "sl" | "bracket" | "coords" | "adjoint" | "killing"
+        ) {
+            return Some(self.lie_cmd(f, &v));
         }
         if f == "galois" {
             return Some(self.galois_cmd(&v));
@@ -547,6 +560,77 @@ impl Session {
             }
             _ => Err(format!(
                 "{}: usage quat(a, b, c, d), quat(angle, [x, y, z]), conj(q), norm(q), parts(q), rotate(q, [x, y, z]), rotmatrix(q), su2(q)",
+                f
+            )),
+        }
+    }
+
+    fn lie_cmd(&mut self, f: &str, v: &[Expr]) -> R<Expr> {
+        use crate::lie;
+        let mat = |e: &Expr| -> R<crate::linalg::Mat> {
+            match e {
+                Expr::Matrix(m) if !m.is_empty() && m.len() == m[0].len() => Ok(m.clone()),
+                _ => Err(format!(
+                    "{}: expected a square matrix, got {}",
+                    f,
+                    crate::print::show(e)
+                )),
+            }
+        };
+        let basis = |e: &Expr| -> R<Vec<crate::linalg::Mat>> {
+            match e {
+                Expr::Obj(o) => match &**o {
+                    Obj::List(l) => l.iter().map(mat).collect(),
+                    _ => Err(format!("{}: expected a list of matrices such as su(2)", f)),
+                },
+                _ => Err(format!("{}: expected a list of matrices such as su(2)", f)),
+            }
+        };
+        let list = |ms: Vec<crate::linalg::Mat>| {
+            crate::lang::list(ms.into_iter().map(Expr::Matrix).collect())
+        };
+        match (f, v) {
+            ("su" | "so" | "sl", [n]) => {
+                let n = small(n, f, 2, lie::MAX_N as i128)?;
+                let (b, what, dim) = match f {
+                    "su" => (lie::su(n), "traceless anti-Hermitian", n * n - 1),
+                    "so" => (lie::so(n), "antisymmetric", n * (n - 1) / 2),
+                    _ => (lie::sl(n), "traceless", n * n - 1),
+                };
+                let extra = match (f, n) {
+                    ("su", 2) => {
+                        " Here e_k = -i sigma_k / 2, so [e1, e2] = e3 and cyclically, exactly like so(3): the two algebras are isomorphic."
+                    }
+                    ("so", 3) => {
+                        " Here Lx, Ly, Lz generate rotations about the axes, with [Lx, Ly] = Lz and cyclically."
+                    }
+                    ("sl", 2) => " Here h, e, f with [h, e] = 2e, [h, f] = -2f, [e, f] = h.",
+                    _ => "",
+                };
+                self.note(&format!(
+                    "A basis of {}({}), the {} {}x{} matrices: dimension {}. bracket(A, B) = A B - B A stays inside.{}",
+                    f, n, what, n, n, dim, extra
+                ));
+                Ok(list(b))
+            }
+            ("bracket", [a, b]) => {
+                if let (Some(p), Some(q)) = (crate::quat::as_quat(a), crate::quat::as_quat(b)) {
+                    return Ok(crate::quat::value(p.mul(q).add(&q.mul(p).neg())));
+                }
+                Ok(Expr::Matrix(lie::bracket(&mat(a)?, &mat(b)?)?))
+            }
+            ("coords", [x, b]) => Ok(Expr::Matrix(vec![lie::coords(&mat(x)?, &basis(b)?)?])),
+            ("adjoint", [x, b]) => {
+                self.note("The matrix of ad(X) = [X, .] in the basis: column j holds the coordinates of [X, e_j].");
+                Ok(Expr::Matrix(lie::adjoint(&mat(x)?, &basis(b)?)?))
+            }
+            ("killing", [b]) => {
+                let k = lie::killing(&basis(b)?)?;
+                self.note("The Killing form B(x, y) = trace(ad x ad y) on the basis. By Cartan's criterion it is nondegenerate (det != 0) exactly when the algebra is semisimple; for a compact algebra like su(n) or so(n) it is negative definite.");
+                Ok(Expr::Matrix(k))
+            }
+            _ => Err(format!(
+                "{}: usage su(n), so(n), sl(n), bracket(A, B), coords(X, basis), adjoint(X, basis), killing(basis)",
                 f
             )),
         }

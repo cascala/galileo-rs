@@ -982,6 +982,13 @@ pub const ENTRIES: &[Entry] = &[
         "rotate(quat(pi/2, [0, 0, 1]), [1, 0, 0])"
     ),
     e!(
+        "su",
+        "Rings and fields",
+        "su(n), so(n), sl(n), bracket(A, B), coords(X, basis), adjoint(X, basis), killing(basis)",
+        "Bases of the Lie algebras su(n), so(n) and sl(n) (n up to 6) as lists of matrices; the bracket A B - B A (also for quaternions); the coordinates of a matrix in a basis; the matrix of ad(X) = [X, .]; and the Killing form trace(ad x ad y), nondegenerate exactly for semisimple algebras.",
+        "B = su(2); bracket(B(1), B(2)) == B(3)"
+    ),
+    e!(
         "table",
         "Calculus",
         "table(expr, k, a, b (, step)) or table(expr, k, [v1, v2, ...])",

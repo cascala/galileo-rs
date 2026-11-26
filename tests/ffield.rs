@@ -269,3 +269,34 @@ fn quaternions() {
         assert_eq!(one(code), want, "{}", code);
     }
 }
+
+#[test]
+fn lie_algebras() {
+    for (code, want) in [
+        ("B = su(2); bracket(B(1), B(2)) == B(3)", "true"),
+        ("L = so(3); bracket(L(1), L(2)) == L(3)", "true"),
+        ("killing(so(3))", "[-2, 0, 0; 0, -2, 0; 0, 0, -2]"),
+        ("killing(su(2))", "[-2, 0, 0; 0, -2, 0; 0, 0, -2]"),
+        ("killing(sl(2))", "[8, 0, 0; 0, 0, 4; 0, 4, 0]"),
+        (
+            "S = sl(2); adjoint(S(1), S)",
+            "[0, 0, 0; 0, 2, 0; 0, 0, -2]",
+        ),
+        ("coords([1, 2; 3, -1], sl(2))", "[1, 2, 3]"),
+        ("det(killing(so(4))) == 0", "false"),
+        (
+            "bracket(quat(0, 1, 0, 0), quat(0, 0, 1, 0))",
+            "quat(0, 0, 0, 2)",
+        ),
+    ] {
+        let got = one(code)
+            .replace('\n', "")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if want == "ERROR" {
+            continue;
+        }
+        assert_eq!(got, want, "{}", code);
+    }
+}

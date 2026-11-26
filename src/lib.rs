@@ -37,6 +37,7 @@ pub mod lang;
 pub mod lableak;
 pub mod labsearch;
 pub mod latex;
+pub mod lie;
 pub mod linalg;
 pub mod modsolve;
 pub mod num;
