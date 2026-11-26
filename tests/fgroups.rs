@@ -58,3 +58,35 @@ fn quotients_and_names() {
         "dprod(cyclic(2), cyclic(3))"
     );
 }
+
+#[test]
+fn presentations_homs_invariants() {
+    for (p, want) in [
+        ("<a | a^5>", "5"),
+        ("<a, b | a^4, b^2, (a*b)^2>", "8"),
+        ("<a, b | a^2, b^3, (a*b)^5>", "60"),
+        ("<a, b | a^4, a^2*b^-2, b^-1*a*b*a>", "8"),
+        ("<a, b | a*b*a^-1*b^-2, b*a*b^-1*a^-2>", "1"),
+        ("<a, b, c | a^2, b^2, c^2, (a*b)^3, (b*c)^3, (a*c)^2>", "24"),
+    ] {
+        assert_eq!(one(&format!("order(group(\"{}\"))", p)), want, "{}", p);
+    }
+    assert_eq!(
+        one("isomorphic(group(\"<a, b | a^4, a^2*b^-2, b^-1*a*b*a>\"), group(\"Q8\"))"),
+        "true"
+    );
+    assert_eq!(
+        one("isomorphic(group(\"<a, b | a^4, b^2, (a*b)^2>\"), dihedral(4))"),
+        "true"
+    );
+    assert_eq!(one("isomorphic(group(\"Q8\"), dihedral(4))"), "false");
+    assert_eq!(one("isomorphic(units(5), cyclic(4))"), "true");
+    assert_eq!(one("isomorphic(sym(3), dihedral(3))"), "true");
+    assert_eq!(one("abelianinv(units(20))"), "[2, 4]");
+    assert_eq!(one("abelianinv(dprod(cyclic(4), cyclic(6)))"), "[2, 12]");
+    assert_eq!(one("abelianinv(sym(4))"), "[2]");
+    // sign: sym(3) -> cyclic(2); the kernel is alt(3)
+    assert_eq!(one("order(kernel(sym(3), cyclic(2), [2, 1], [1, 2]))"), "3");
+    assert_eq!(one("ishom(cyclic(4), cyclic(2), [1, 2])"), "true");
+    assert_eq!(one("ishom(cyclic(3), cyclic(2), [2, 1])"), "false");
+}
