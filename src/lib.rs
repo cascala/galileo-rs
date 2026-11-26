@@ -68,6 +68,7 @@ pub mod laplace;
 pub mod de_cmd;
 pub mod ode2;
 pub mod stats;
+pub mod stoch_cmd;
 pub mod stats_cmd;
 pub mod cnum;
 pub mod laurent;
