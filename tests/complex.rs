@@ -55,3 +55,12 @@ fn real_integrals_by_residues() {
     assert_eq!(one("integrate(sin(x)/(x*(x^2+1)), x, -inf, inf)"), "pi*(e-1)/e");
     assert!(one("integrate(cos(x)/x, x, -inf, inf)").starts_with("ERROR"));
 }
+
+#[test]
+fn rational_and_period_integrals() {
+    assert_eq!(one("integrate(1/(1 + x^4), x, -inf, inf)"), "sqrt(2)*pi/2");
+    assert_eq!(one("integrate(1/(2 + cos(t)), t, 0, 2*pi)"), "2*pi/sqrt(3)");
+    assert_eq!(one("integrate(cos(t)^2/(2 + sin(t)), t, 0, 2*pi)"), "4*pi-2*sqrt(3)*pi");
+    assert_eq!(one("integrate(sin(t)^2/(5 + 4*cos(t)), t, 0, 2*pi)"), "pi/4");
+    assert_eq!(one("solve(z^2*(z^2+4*i*z-1), z)"), "[0, -i*(sqrt(3)+2), i*(sqrt(3)-2)]");
+}

@@ -744,7 +744,10 @@ pub fn fourier_integral(fx: &Expr, x: &str, half: bool) -> Option<Expr> {
             _ => rest.push(f),
         }
     }
-    let (g, k) = trig?;
+    let (g, k) = match trig {
+        Some(t) => t,
+        None => return rational_line_integral(fx, x, half),
+    };
     let kv = crate::numeric::value(&k);
     if !kv.is_finite() || kv == 0.0 {
         return None;
@@ -792,4 +795,104 @@ pub fn fourier_integral(fx: &Expr, x: &str, half: bool) -> Option<Expr> {
         v = div(v, Expr::int(2));
     }
     Some(simplify(&v))
+}
+
+/// The integral over the real line of a rational function with numeric
+/// coefficients, no real poles and deg den >= deg num + 2: 2 pi i times the
+/// residues in the upper half plane. half: [0, inf) of an even function.
+fn rational_line_integral(fx: &Expr, x: &str, half: bool) -> Option<Expr> {
+    use crate::calc::{num_den, together};
+    let r = together(fx);
+    let (n, d) = num_den(&r);
+    let (pn, pd) = (crate::cas::poly_coeffs(&crate::calc::expand(&n), x)?, crate::cas::poly_coeffs(&crate::calc::expand(&d), x)?);
+    if pd.len() < pn.len() + 2 {
+        return None;
+    }
+    if half {
+        let m = crate::calc::subst(fx, x, &neg(Expr::sym(x)));
+        if !crate::cas::is_zero(&simplify(&sub(m, fx.clone()))) {
+            return None;
+        }
+    }
+    let mut acc = vec![];
+    for p in crate::cas::solve(&d, x).ok()? {
+        let pv = ceval(&p, &[])?;
+        if pv.im.abs() <= 1e-12 {
+            return None;
+        }
+        if pv.im > 0.0 {
+            let l = laurent(&r, x, &p, 0, 6).ok()?;
+            acc.push(mul(vec![Expr::int(2), Expr::Const(Const::Pi), Expr::Const(Const::I), l.residue]));
+        }
+    }
+    let (re, _) = crate::extra_cmd::parts(&simplify(&add(acc))).ok()?;
+    let v = if half { div(re, Expr::int(2)) } else { re };
+    let v = tidy_radicals(&simplify(&v));
+    // sanity: a real, finite number
+    ceval(&v, &[]).filter(|c| c.re.is_finite() && c.im.abs() < 1e-9 * c.re.abs().max(1.0))?;
+    Some(v)
+}
+
+/// The integral over a full period [a, a + 2 pi] of a rational function of
+/// cos t and sin t: with z = e^(it), cos t = (z + 1/z)/2, sin t = (z - 1/z)/(2i),
+/// dt = dz/(iz), it is 2 pi i times the residues inside the unit circle.
+pub fn period_integral(fx: &Expr, t: &str) -> Option<Expr> {
+    if fx.symbols().iter().any(|s| s != t) {
+        return None;
+    }
+    let z = "z__";
+    let zz = Expr::sym(z);
+    fn swap(e: &Expr, t: &str, zz: &Expr) -> Expr {
+        match e {
+            Expr::Func(Func::Cos, a) if matches!(&**a, Expr::Sym(s) if s == t) => {
+                div(add2(zz.clone(), div(Expr::one(), zz.clone())), Expr::int(2))
+            }
+            Expr::Func(Func::Sin, a) if matches!(&**a, Expr::Sym(s) if s == t) => div(
+                sub(zz.clone(), div(Expr::one(), zz.clone())),
+                mul2(Expr::int(2), Expr::Const(Const::I)),
+            ),
+            _ => e.map_children(&mut |c| swap(c, t, zz)),
+        }
+    }
+    let g = swap(fx, t, &zz);
+    if g.contains_sym(t) {
+        return None;
+    }
+    let g = crate::calc::together(&crate::calc::rationalize(&div(g, mul2(Expr::Const(Const::I), zz.clone()))));
+    let (_, d) = crate::calc::num_den(&g);
+    crate::cas::poly_coeffs(&crate::calc::expand(&d), z)?;
+    let mut acc = vec![];
+    for p in crate::cas::solve(&d, z).ok()? {
+        let pv = ceval(&p, &[])?;
+        let r = pv.abs();
+        if (r - 1.0).abs() < 1e-12 {
+            return None;
+        }
+        if r < 1.0 {
+            let l = laurent(&g, z, &p, 0, 6).ok()?;
+            acc.push(l.residue);
+        }
+    }
+    let total = simplify(&mul(vec![Expr::int(2), Expr::Const(Const::Pi), Expr::Const(Const::I), add(acc)]));
+    let (re, _) = crate::extra_cmd::parts(&total).ok()?;
+    let v = tidy_radicals(&simplify(&re));
+    ceval(&v, &[]).filter(|c| c.re.is_finite())?;
+    Some(v)
+}
+
+/// shortest of a few rewritings that clear square roots from denominators
+fn tidy_radicals(v: &Expr) -> Expr {
+    let mut best = v.clone();
+    let t = simplify(&crate::calc::rationalize(v));
+    let (n, d) = crate::calc::num_den(&t);
+    let e = div(crate::calc::expand(&n), crate::calc::expand(&d));
+    let r = crate::cas_cmd::rationalize_root(&e);
+    for c in [t.clone(), crate::cas_cmd::rationalize_root(&t), simplify(&crate::cas_cmd::rationalize_root(&t)), r.clone(), simplify(&r), crate::calc::factor(&simplify(&r))] {
+        let c = simplify(&crate::calc::expand(&c));
+        let ok = matches!((ceval(&c, &[]), ceval(v, &[])), (Some(a), Some(b)) if (a.re - b.re).abs() <= 1e-9 * b.re.abs().max(1.0));
+        if ok && c.size() < best.size() {
+            best = c;
+        }
+    }
+    best
 }

@@ -166,7 +166,10 @@ fn normalize(p: &Poly) -> (Number, Poly) {
         let mut l = 1i128;
         let mut ok = true;
         for v in p.values() {
-            let (n, d) = (v.numer().unwrap(), v.denom().unwrap());
+            let (Some(n), Some(d)) = (v.numer(), v.denom()) else {
+                ok = false;
+                break;
+            };
             g = igcd(g, n);
             match (l / igcd(l, d)).checked_mul(d) {
                 Some(x) => l = x,

@@ -366,6 +366,19 @@ pub fn poly_roots(c: &[Expr]) -> R<Vec<Expr>> {
             "no solution".into()
         });
     }
+    // x = 0 as a root: divide out the power of x first
+    if n > 1 && is_zero(&c[0]) {
+        let k = c.iter().take_while(|e| is_zero(e)).count();
+        let mut out = vec![Expr::zero()];
+        if k <= n {
+            if let Ok(rest) = poly_roots(&c[k..]) {
+                out.extend(rest.into_iter().filter(|r| !is_zero(r)));
+            } else if c.len() - k > 1 {
+                return poly_roots(&c[k..]).map(|_| out);
+            }
+        }
+        return Ok(out);
+    }
     // degree 1 and 2 are explained as such (the quadratic by completing the square,
     // even when its roots are rational)
     match n {

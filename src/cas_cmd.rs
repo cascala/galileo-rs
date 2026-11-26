@@ -115,7 +115,7 @@ fn modulo(va: &Expr, vb: &Expr) -> R<Expr> {
 }
 
 /// c/(a + b*sqrt(k)) -> c*(a - b*sqrt(k))/(a^2 - b^2*k), when that is simpler
-fn rationalize_root(e: &Expr) -> Expr {
+pub(crate) fn rationalize_root(e: &Expr) -> Expr {
     let (n, d) = calc::num_den(e);
     let Expr::Add(terms) = &d else {
         return e.clone();
@@ -1214,6 +1214,14 @@ pub(crate) fn definite(fx: &Expr, x: &str, a: &Expr, b: &Expr, depth: usize) -> 
     }
     if let Some(g) = gaussian_integral(fx, x, a, b) {
         return Ok(g);
+    }
+    // a full period of a rational function of cos and sin
+    if let (Ok(lo), Ok(hi)) = (real(a, "integrate"), real(b, "integrate")) {
+        if (hi - lo - 2.0 * std::f64::consts::PI).abs() < 1e-12 {
+            if let Some(g) = crate::laurent::period_integral(fx, x) {
+                return Ok(g);
+            }
+        }
     }
     if is_inf(b) == 1 && (is_inf(a) == -1 || a.is_zero()) {
         if let Some(g) = crate::laurent::fourier_integral(fx, x, a.is_zero()) {
