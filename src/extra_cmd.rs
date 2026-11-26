@@ -28,7 +28,7 @@ fn row(v: Vec<Expr>) -> Expr {
     Expr::Matrix(vec![v])
 }
 
-fn int_of(e: &Expr, f: &str) -> R<i128> {
+pub(crate) fn int_of(e: &Expr, f: &str) -> R<i128> {
     let v = match e {
         Expr::Num(n) if !n.is_exact() && n.is_integer() && n.to_f64().abs() < 1e15 => {
             return Ok(n.to_f64() as i128);
@@ -726,7 +726,7 @@ fn contour(
 
 // ---------- permutations ----------
 
-fn perm_of(e: &Expr, f: &str) -> R<Vec<usize>> {
+pub(crate) fn perm_of(e: &Expr, f: &str) -> R<Vec<usize>> {
     let v: Vec<Expr> = match e {
         Expr::Matrix(m) if m.len() == 1 => m[0].clone(),
         Expr::Matrix(m) if m.iter().all(|r| r.len() == 1) => {
@@ -1132,6 +1132,9 @@ impl Session {
     /// Some(result) if f is one of the commands here
     pub(crate) fn extra_call(&mut self, f: &str, args: &[Node]) -> Option<R<Expr>> {
         if let Some(r) = self.lab_call(f, args) {
+            return Some(r);
+        }
+        if let Some(r) = self.algebra_call(f, args) {
             return Some(r);
         }
         let r = match f {

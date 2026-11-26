@@ -120,6 +120,7 @@ pub enum Obj {
     Components(crate::geometry::Components),
     Equations(crate::geometry::Equations),
     Report(crate::discover::Report),
+    Group(crate::fgroup::Group),
 }
 
 impl Obj {
@@ -131,6 +132,7 @@ impl Obj {
             Obj::Components(_) => "Components",
             Obj::Equations(_) => "Equations",
             Obj::Report(r) => r.kind,
+            Obj::Group(_) => "Group",
         }
     }
     /// Plain text rendering
@@ -141,6 +143,7 @@ impl Obj {
             Obj::Metric(m) => m.text(),
             Obj::Components(c) => c.text(),
             Obj::Equations(e) => e.text(),
+            Obj::Group(g) => g.name.clone(),
             Obj::Report(r) => r
                 .shown_value()
                 .map(|v| crate::print::show(&v))

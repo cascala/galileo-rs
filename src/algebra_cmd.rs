@@ -1,0 +1,369 @@
+//! Commands for groups as values ([`crate::fgroup`]): constructors, subgroups,
+//! cosets, quotients, conjugacy classes, Sylow subgroups.
+
+use crate::eval::{R, Session};
+use crate::expr::{Expr, Obj};
+use crate::fgroup::{self as fg, Group, Perm};
+use crate::parser::Node;
+use std::rc::Rc;
+
+fn gval(g: Group) -> Expr {
+    Expr::Obj(Rc::new(Obj::Group(g)))
+}
+
+fn group_of(e: &Expr, f: &str) -> R<Group> {
+    match e {
+        Expr::Obj(o) => match &**o {
+            Obj::Group(g) => Ok(g.clone()),
+            _ => Err(format!(
+                "{}: expected a group such as sym(4), got {}",
+                f,
+                o.kind()
+            )),
+        },
+        _ => Err(format!(
+            "{}: expected a group such as sym(4) or group([2, 1, 3], [2, 3, 1])",
+            f
+        )),
+    }
+}
+
+fn perm_in(e: &Expr, n: usize, f: &str) -> R<Perm> {
+    let p = crate::extra_cmd::perm_of(e, f)?;
+    if p.len() > n {
+        return Err(format!(
+            "{}: {} moves more than {} points",
+            f,
+            crate::print::show(e),
+            n
+        ));
+    }
+    let mut seen = vec![false; p.len()];
+    for &k in &p {
+        if k == 0 || k > p.len() || seen[k - 1] {
+            return Err(format!(
+                "{}: {} is not a permutation",
+                f,
+                crate::print::show(e)
+            ));
+        }
+        seen[k - 1] = true;
+    }
+    Ok((0..n)
+        .map(|i| {
+            if i < p.len() {
+                (p[i] - 1) as u16
+            } else {
+                i as u16
+            }
+        })
+        .collect())
+}
+
+fn perm_expr(p: &Perm) -> Vec<Expr> {
+    p.iter().map(|&k| Expr::int(k as i128 + 1)).collect()
+}
+
+fn rows(ps: &[Perm]) -> Expr {
+    Expr::Matrix(ps.iter().map(perm_expr).collect())
+}
+
+fn small(e: &Expr, f: &str, lo: i128, hi: i128) -> R<usize> {
+    let n = crate::extra_cmd::int_of(e, f)?;
+    if n < lo || n > hi {
+        return Err(format!("{}: n from {} to {}", f, lo, hi));
+    }
+    Ok(n as usize)
+}
+
+impl Session {
+    /// Some(result) if f is a group command and the arguments fit it
+    pub(crate) fn algebra_call(&mut self, f: &str, args: &[Node]) -> Option<R<Expr>> {
+        const NAMES: &[&str] = &[
+            "sym",
+            "alt",
+            "cyclic",
+            "dihedral",
+            "units",
+            "group",
+            "order",
+            "elements",
+            "gens",
+            "isabelian",
+            "center",
+            "subgroup",
+            "cosets",
+            "isnormal",
+            "quotient",
+            "classes",
+            "derived",
+            "issolvable",
+            "issimple",
+            "sylow",
+            "orders",
+            "dprod",
+            "cayley",
+        ];
+        if !NAMES.contains(&f) {
+            return None;
+        }
+        let v = match args.iter().map(|a| self.eval(a)).collect::<R<Vec<Expr>>>() {
+            Ok(v) => v,
+            Err(e) => return Some(Err(e)),
+        };
+        let is_group = |e: &Expr| matches!(e, Expr::Obj(o) if matches!(&**o, Obj::Group(_)));
+        // cayley of a list of permutations is the older command
+        if f == "cayley" && !v.first().is_some_and(is_group) {
+            return None;
+        }
+        Some(self.algebra(f, &v))
+    }
+
+    fn algebra(&mut self, f: &str, v: &[Expr]) -> R<Expr> {
+        let one = |f: &str| -> R<Group> {
+            match v {
+                [g] => group_of(g, f),
+                _ => Err(format!("usage: {}(G) for a group G", f)),
+            }
+        };
+        match f {
+            "sym" | "alt" | "cyclic" | "dihedral" | "units" => {
+                let [n] = v else {
+                    return Err(format!("usage: {}(n)", f));
+                };
+                let n = small(n, f, 1, 1000)?;
+                let g = match f {
+                    "sym" => fg::sym(n),
+                    "alt" => fg::alt(n),
+                    "cyclic" => fg::cyclic(n),
+                    "dihedral" => fg::dihedral(n),
+                    _ => fg::units(n),
+                }?;
+                self.note(format!("`{}`: a group of order {}.", g.name, g.order()));
+                Ok(gval(g))
+            }
+            "group" => {
+                let g =
+                    match v {
+                        [Expr::Str(s)] => fg::named(s)?,
+                        // the rows of generate(...)
+                        [Expr::Matrix(m)] if m.len() > 1 => {
+                            let n = m.iter().map(|r| r.len()).max().unwrap_or(1);
+                            let ps = m
+                                .iter()
+                                .map(|r| perm_in(&Expr::Matrix(vec![r.clone()]), n, "group"))
+                                .collect::<R<Vec<_>>>()?;
+                            Group::from_gens(n, ps)?
+                        }
+                        [] => return Err(
+                            "usage: group(p1, p2, ...) generated by permutations, or group(\"Q8\")"
+                                .into(),
+                        ),
+                        ps => {
+                            let n = ps
+                                .iter()
+                                .map(|p| crate::extra_cmd::perm_of(p, "group").map(|q| q.len()))
+                                .collect::<R<Vec<_>>>()?
+                                .into_iter()
+                                .max()
+                                .unwrap();
+                            let ps = ps
+                                .iter()
+                                .map(|p| perm_in(p, n, "group"))
+                                .collect::<R<Vec<_>>>()?;
+                            Group::from_gens(n, ps)?
+                        }
+                    };
+                self.note(format!("A group of order {}.", g.order()));
+                Ok(gval(g))
+            }
+            "order" => Ok(Expr::int(one(f)?.order() as i128)),
+            "elements" => {
+                let g = one(f)?;
+                if g.order() > 5040 {
+                    return Err(format!(
+                        "elements: {} has {} elements, too many to show",
+                        g.name,
+                        g.order()
+                    ));
+                }
+                Ok(rows(g.elements()))
+            }
+            "gens" => Ok(rows(&one(f)?.gens)),
+            "isabelian" => Ok(Expr::Bool(one(f)?.is_abelian())),
+            "issolvable" => {
+                let g = one(f)?;
+                let s = g.derived_series()?;
+                let ok = s.last().unwrap().order() == 1;
+                self.note(format!(
+                    "Derived series G ⊇ G' ⊇ G'' ⊇ …, orders {}: {}.",
+                    s.iter()
+                        .map(|h| h.order().to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ⊇ "),
+                    if ok {
+                        "it reaches the trivial group, so G is solvable"
+                    } else {
+                        "it stops before the trivial group, so G is not solvable"
+                    }
+                ));
+                Ok(Expr::Bool(ok))
+            }
+            "issimple" => Ok(Expr::Bool(one(f)?.is_simple()?)),
+            "center" => {
+                let g = one(f)?;
+                let z = g.center()?;
+                self.note(format!(
+                    "The center (elements that commute with everything) has order {}.",
+                    z.order()
+                ));
+                Ok(gval(z))
+            }
+            "derived" => {
+                let g = one(f)?;
+                let d = g.derived()?;
+                self.note(format!(
+                    "The commutator subgroup [G, G], generated by all a⁻¹b⁻¹ab, has order {} (index {}); G/[G, G] is the largest abelian quotient.",
+                    d.order(),
+                    g.order() / d.order()
+                ));
+                Ok(gval(d))
+            }
+            "subgroup" => {
+                let [g, ps @ ..] = v else {
+                    return Err("usage: subgroup(G, p1, p2, ...)".into());
+                };
+                let g = group_of(g, f)?;
+                let ps = ps
+                    .iter()
+                    .map(|p| perm_in(p, g.degree, f))
+                    .collect::<R<Vec<_>>>()?;
+                if let Some(p) = ps.iter().find(|p| !g.contains(p)) {
+                    return Err(format!(
+                        "subgroup: {} is not in {}",
+                        fg::show_perm(p),
+                        g.name
+                    ));
+                }
+                let h = g.sub(ps)?;
+                self.note(format!(
+                    "A subgroup of order {}; by Lagrange's theorem it divides {} = |G| (index {}).",
+                    h.order(),
+                    g.order(),
+                    g.order() / h.order()
+                ));
+                Ok(gval(h))
+            }
+            "cosets" | "isnormal" | "quotient" => {
+                let [a, b] = v else {
+                    return Err(format!("usage: {}(G, H) for a subgroup H of G", f));
+                };
+                let (mut g, mut h) = (group_of(a, f)?, group_of(b, f)?);
+                if f == "isnormal" && g.is_subgroup_of(&h) && !h.is_subgroup_of(&g) {
+                    std::mem::swap(&mut g, &mut h);
+                }
+                if !h.is_subgroup_of(&g) {
+                    return Err(format!("{}: {} is not a subgroup of {}", f, h.name, g.name));
+                }
+                match f {
+                    "cosets" => {
+                        let c = g.cosets(&h);
+                        self.note(format!(
+                            "{} left cosets gH of {} elements each: {} = {} · {} (Lagrange). One representative per row.",
+                            c.len(),
+                            h.order(),
+                            g.order(),
+                            c.len(),
+                            h.order()
+                        ));
+                        Ok(rows(&c.iter().map(|c| c[0].clone()).collect::<Vec<_>>()))
+                    }
+                    "isnormal" => Ok(Expr::Bool(g.is_normal(&h))),
+                    _ => {
+                        if !g.is_normal(&h) {
+                            return Err(format!(
+                                "quotient: {} is not normal in {} (g H g⁻¹ ≠ H for some g), so the cosets do not form a group",
+                                h.name, g.name
+                            ));
+                        }
+                        let q = g.quotient(&h)?;
+                        self.note(format!(
+                            "G/N has order {} / {} = {}; its elements are the cosets of N, acting here as permutations of the cosets.",
+                            g.order(),
+                            h.order(),
+                            q.order()
+                        ));
+                        Ok(gval(q))
+                    }
+                }
+            }
+            "classes" => {
+                let g = one(f)?;
+                let cls = g.classes();
+                let sizes: Vec<String> = cls.iter().map(|c| c.len().to_string()).collect();
+                self.note(format!(
+                    "{} conjugacy classes (one representative per row, in cycle notation {}). Class equation: {} = {}.",
+                    cls.len(),
+                    cls.iter().map(|c| fg::cycles(&c[0])).collect::<Vec<_>>().join(", "),
+                    g.order(),
+                    sizes.join(" + ")
+                ));
+                Ok(rows(&cls.iter().map(|c| c[0].clone()).collect::<Vec<_>>()))
+            }
+            "orders" => {
+                let g = one(f)?;
+                Ok(Expr::Matrix(
+                    g.order_counts()
+                        .into_iter()
+                        .map(|(o, c)| vec![Expr::int(o as i128), Expr::int(c as i128)])
+                        .collect(),
+                ))
+            }
+            "sylow" => {
+                let [a, p] = v else {
+                    return Err("usage: sylow(G, p) for a prime p".into());
+                };
+                let g = group_of(a, f)?;
+                let p = small(p, f, 2, 1_000_000)?;
+                if !crate::numtheory::is_prime(&num_bigint::BigInt::from(p)) {
+                    return Err(format!("sylow: {} is not prime", p));
+                }
+                let s = g.sylow(p)?;
+                let m = g.order() / s.order();
+                let np: Vec<String> = (1..=m)
+                    .filter(|d| m % d == 0 && d % p == 1 % p)
+                    .map(|d| d.to_string())
+                    .collect();
+                self.note(format!(
+                    "A Sylow {}-subgroup, of order {} (the largest power of {} dividing {}). Sylow's theorems: they are all conjugate, and their number divides {} and is 1 mod {}, so it is one of {}.",
+                    p, s.order(), p, g.order(), m, p, np.join(", ")
+                ));
+                Ok(gval(s))
+            }
+            "dprod" => {
+                let [a, b] = v else {
+                    return Err("usage: dprod(G, H), the direct product".into());
+                };
+                Ok(gval(group_of(a, f)?.product(&group_of(b, f)?)?))
+            }
+            "cayley" => {
+                let g = one(f)?;
+                if g.order() > 200 {
+                    return Err(format!(
+                        "cayley: {} has {} elements, too many for a table",
+                        g.name,
+                        g.order()
+                    ));
+                }
+                self.note("Entry (i, j) is the number of the element e_i·e_j, numbering as in elements(G).");
+                Ok(Expr::Matrix(
+                    g.table()
+                        .into_iter()
+                        .map(|r| r.into_iter().map(|k| Expr::int(k as i128)).collect())
+                        .collect(),
+                ))
+            }
+            _ => unreachable!(),
+        }
+    }
+}
