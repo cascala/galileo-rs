@@ -410,13 +410,13 @@ impl Session {
                 match fg::isomorphism(&g, &h) {
                     Some((gs, imgs)) => {
                         self.note(format!(
-                            "An isomorphism: {}.",
+                            "An isomorphism, sending generators (in cycle notation) to: {}.",
                             gs.iter()
                                 .zip(&imgs)
                                 .map(|(x, y)| format!(
                                     "{} ↦ {}",
-                                    fg::show_perm(x),
-                                    fg::show_perm(y)
+                                    fg::cycles(x),
+                                    fg::cycles(y)
                                 ))
                                 .collect::<Vec<_>>()
                                 .join(", ")

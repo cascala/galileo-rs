@@ -831,7 +831,7 @@ pub const ENTRIES: &[Entry] = &[
         "order",
         "Groups",
         "order(G), elements(G), gens(G), orders(G), cayley(G)",
-        "The number of elements, the elements themselves (one permutation per row), the generators, [order, count] for the orders of elements, and the group table.",
+        "order(G) is the number of elements of G. elements(G) lists them (one permutation per row), gens(G) its generators, orders(G) gives [order, count] for the orders of its elements, and cayley(G) its group table.",
         "orders(group(\"Q8\"))"
     ),
     e!(
