@@ -92,6 +92,9 @@ pub struct Session {
     /// the outermost call explains itself (table(factor(n), ...) explains the
     /// table, not each factorization)
     pub(crate) calls: usize,
+    /// the files being loaded, innermost last (relative paths also resolve
+    /// against the loading file's folder; guards against a file loading itself)
+    pub(crate) loading: Vec<std::path::PathBuf>,
 }
 
 impl Default for Session {
@@ -146,6 +149,7 @@ impl Session {
             depth: 0,
             notes: vec![],
             calls: 0,
+            loading: vec![],
         }
     }
 
@@ -254,6 +258,18 @@ impl Session {
             Ok(stmts) => {
                 let mut out = vec![];
                 for (s, quiet) in stmts {
+                    if let Some(file) = script_file(&s) {
+                        // a script's statements show their results as if typed here
+                        let res = self.load_file(file);
+                        let stop = res.last().is_some_and(|(r, _, _)| {
+                            matches!(r, Ok(Output::Exit)) || (stop_on_error && r.is_err())
+                        });
+                        out.extend(res.into_iter().map(|(r, q, n)| (r, q || quiet, n)));
+                        if stop {
+                            break;
+                        }
+                        continue;
+                    }
                     let (r, notes) = self.exec_notes(&s);
                     let stop = matches!(r, Ok(Output::Exit)) || (stop_on_error && r.is_err());
                     out.push((r, quiet, notes));
@@ -264,6 +280,99 @@ impl Session {
                 out
             }
         }
+    }
+
+    /// Run a script file, statement by statement, as if its lines were typed in:
+    /// (result, hidden by `;`, explanations) per statement. Stops at the first
+    /// error, which names the file and line (`file.gg:12: ...`). The name may be
+    /// quoted, and `.gg` is added when the name has no extension and no such file
+    /// exists. Relative names are tried against the current folder, then against
+    /// the folder of the file doing the loading.
+    pub fn load_file(&mut self, name: &str) -> Vec<(R<Output>, bool, Vec<Note>)> {
+        let err = |e: String| vec![(Err(e), false, vec![])];
+        if cfg!(target_arch = "wasm32") {
+            return err(format!(
+                "load({}): the browser version has no files to load; load(RSA) loads the RSA challenge numbers",
+                name
+            ));
+        }
+        let path = match self.find_script(name) {
+            Some(p) => p,
+            None => return err(format!("load {}: no such file", unquote(name))),
+        };
+        if self.loading.len() >= 32 || self.loading.contains(&path) {
+            return err(format!("load {}: the file loads itself", path.display()));
+        }
+        let src = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => return err(format!("load {}: {}", path.display(), e)),
+        };
+        let shown = unquote(name).to_string();
+        self.loading.push(path);
+        let mut out = vec![];
+        'chunks: for (line, chunk) in crate::parser::statement_chunks(&src) {
+            let at = |e: String| {
+                // a nested file's error already says where it happened
+                if e.starts_with("load ") || e.contains(".gg:") {
+                    e
+                } else {
+                    format!("{}:{}: {}", shown, line, e)
+                }
+            };
+            let stmts = match crate::parser::parse_quiet(&chunk) {
+                Ok(s) => s,
+                Err(e) => {
+                    out.push((Err(at(format!("parse error: {}", e))), false, vec![]));
+                    break;
+                }
+            };
+            for (s, quiet) in stmts {
+                let res = match script_file(&s) {
+                    Some(f) => self.load_file(f),
+                    None => {
+                        let (r, n) = self.exec_notes(&s);
+                        vec![(r, quiet, n)]
+                    }
+                };
+                for (r, q, n) in res {
+                    let stop = matches!(r, Ok(Output::Exit)) || r.is_err();
+                    out.push((r.map_err(at), q || quiet, n));
+                    if stop {
+                        break 'chunks;
+                    }
+                }
+            }
+        }
+        self.loading.pop();
+        out
+    }
+
+    /// Where a script name points: the name as given, then with `.gg` added,
+    /// each against the current folder and then the loading file's folder
+    fn find_script(&self, name: &str) -> Option<std::path::PathBuf> {
+        use std::path::{Path, PathBuf};
+        let name = unquote(name);
+        let mut names = vec![PathBuf::from(name)];
+        if Path::new(name).extension().is_none() {
+            names.push(PathBuf::from(format!("{}.gg", name)));
+        }
+        let mut bases: Vec<Option<PathBuf>> = vec![None];
+        if let Some(dir) = self.loading.last().and_then(|f| f.parent()) {
+            bases.push(Some(dir.to_path_buf()));
+        }
+        for b in &bases {
+            for n in &names {
+                let p = match b {
+                    Some(d) if n.is_relative() => d.join(n),
+                    Some(_) => continue,
+                    None => n.clone(),
+                };
+                if p.is_file() {
+                    return Some(p.canonicalize().unwrap_or(p));
+                }
+            }
+        }
+        None
     }
 
     /// Run source text and render it like the REPL does: results, then their
@@ -348,7 +457,9 @@ impl Session {
                     Node::Call(f, args) if crate::la_cmd::is_multi(f) => {
                         self.la_multi(f, args, names.len()).unwrap()?
                     }
-                    _ => return Err("only lu, eig, qr, svd and jordan return several values".into()),
+                    _ => {
+                        return Err("only lu, eig, qr, svd and jordan return several values".into());
+                    }
                 };
                 let pairs: Vec<(String, Expr)> = names.iter().cloned().zip(vals).collect();
                 for (n, v) in &pairs {
@@ -444,21 +555,13 @@ impl Session {
             }
             "load" => {
                 let file = arg.ok_or("load needs a file name")?;
-                if file.trim().eq_ignore_ascii_case("rsa") {
+                if unquote(file).eq_ignore_ascii_case("rsa") {
                     let (plain, md) = self.load_rsa();
                     self.note2(plain, md);
                     return Ok(Output::Nothing);
                 }
-                if cfg!(target_arch = "wasm32") {
-                    return Err(format!(
-                        "load({}): the browser version has no files to load; load(RSA) loads the RSA challenge numbers",
-                        file
-                    ));
-                }
-                let src =
-                    std::fs::read_to_string(file).map_err(|e| format!("load {}: {}", file, e))?;
                 let mut last = Output::Nothing;
-                for r in self.run(&src) {
+                for (r, _, _) in self.load_file(file) {
                     last = r?;
                 }
                 Ok(last)
@@ -1464,6 +1567,27 @@ fn structure(e: &Expr) -> String {
         Apply(f, v) => format!("Function {}({})", f, list(v)),
         Obj(o) => o.kind().to_string(),
     }
+}
+
+/// The script a statement loads: load(file), but not load(RSA)
+fn script_file(s: &Stmt) -> Option<&str> {
+    match s {
+        Stmt::Command(c, Some(f)) if c == "load" && !unquote(f).eq_ignore_ascii_case("rsa") => {
+            Some(f.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// A file name without surrounding quotes: load("my file.gg")
+fn unquote(s: &str) -> &str {
+    let t = s.trim();
+    for q in ['"', '\''] {
+        if t.len() >= 2 && t.starts_with(q) && t.ends_with(q) {
+            return &t[1..t.len() - 1];
+        }
+    }
+    t
 }
 
 #[cfg(test)]

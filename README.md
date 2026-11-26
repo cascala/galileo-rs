@@ -31,8 +31,9 @@ underneath is new:
 ## Try it
 
 ```
-cargo run --bin galileo            # interactive prompt
-cargo run --bin galileo file.gg    # run a file
+cargo run --bin galileo               # interactive prompt
+cargo run --bin galileo file.gg       # run a file
+cargo run --bin galileo -- -i file.gg # run a file, then keep the prompt open
 ```
 
 ```
@@ -52,7 +53,11 @@ Or with Docker, on Intel or Apple Silicon:
 ```
 docker run -it --rm cascala/galileo                          # interactive prompt
 docker run --rm -v "$PWD:/work" cascala/galileo file.gg      # run a file
+docker run -it --rm -v "$PWD:/work" cascala/galileo -i file.gg  # run it, then the prompt
 ```
+
+The container sees only the folders you mount: `-v "$PWD:/work"` makes your current
+folder its working folder, so `file.gg` and `load(file.gg)` at the prompt find your files.
 
 The `-it` matters for the prompt: without it Docker gives Galileo no terminal, so the
 arrow keys and backspace cannot work. At the prompt, left and right move through the
@@ -68,11 +73,34 @@ docker run -it --rm -v galileo-home:/home/galileo cascala/galileo
 To publish the image for both architectures:
 
 ```
-docker buildx build --platform linux/amd64,linux/arm64 -t cascala/galileo:0.3.2 -t cascala/galileo:latest --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t cascala/galileo:0.3.3 -t cascala/galileo:latest --push .
 ```
 
 Type `help` for the list of commands, and `help(name)` for one of them. A statement ending
 in `;` runs without printing its result.
+
+## Scripts
+
+A script is a text file of Galileo statements, one per line, usually named `*.gg`:
+
+```
+// orbit.gg
+G = 1; M = 1;
+v(r) = sqrt(G*M/r)
+plot(v(r), \
+     r, 0.5, 5)
+```
+
+* `galileo orbit.gg` runs it and prints each result; a statement ending in `;` stays quiet.
+* `galileo -i orbit.gg` runs it and then opens the prompt, with everything it defined.
+* `load(orbit)` runs it from the prompt or a notebook (`.gg` may be left off; quote names
+  with spaces: `load("my orbit.gg")`). A script can load others; names are looked up in
+  the current folder, then next to the loading script.
+* An error stops the script and says where: `orbit.gg:4: unknown function plt`.
+  `galileo file.gg` then exits with status 1.
+* A statement can span lines: inside `( )` a new line is just space, inside `[ ]` it starts
+  a new matrix row, and a line ending in `\` continues on the next one. The prompt waits
+  for the rest (`...>`), and pasting a block of lines runs each statement in turn.
 
 ## Differential geometry
 

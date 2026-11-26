@@ -1,51 +1,37 @@
 //! Galileo: `galileo` for an interactive prompt, `galileo file.gg` to run a file,
+//! `galileo -i file.gg` to run a file and then keep the prompt open,
 //! `galileo --kernel` to serve the notebook kernel protocol on stdin/stdout.
 
 use galileo_rs::{Output, Session};
 use std::io::{self, BufRead, IsTerminal};
 
+/// Print one result (hidden when its statement ended in ;), then its explanations
+fn show(r: Result<Output, String>, quiet: bool, notes: &[galileo_rs::eval::Note]) {
+    match r {
+        Ok(o) => {
+            let t = o.render();
+            if !quiet && !t.is_empty() {
+                println!("{}", t);
+            }
+            // explanations as comments, so the output stays Galileo source
+            let c = galileo_rs::eval::comment_notes(notes);
+            if !quiet && !c.is_empty() {
+                println!("{}", c);
+            }
+        }
+        Err(e) => println!("Error: {}", e),
+    }
+}
+
 /// Print results; statements ending in ; stay quiet. Returns false on exit.
 fn report(s: &mut Session, src: &str) -> bool {
     for (r, quiet, notes) in s.run_notes(src) {
-        match r {
-            Ok(Output::Exit) => return false,
-            Ok(o) => {
-                let t = o.render();
-                if !quiet && !t.is_empty() {
-                    println!("{}", t);
-                }
-                // explanations as comments, so the output stays Galileo source
-                let c = galileo_rs::eval::comment_notes(&notes);
-                if !quiet && !c.is_empty() {
-                    println!("{}", c);
-                }
-            }
-            Err(e) => println!("Error: {}", e),
+        if matches!(r, Ok(Output::Exit)) {
+            return false;
         }
+        show(r, quiet, &notes);
     }
     true
-}
-
-/// How many ( and [ are still open, outside strings and comments
-fn open_brackets(src: &str) -> i32 {
-    let mut depth = 0;
-    let mut in_str = false;
-    let mut chars = src.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => in_str = !in_str,
-            _ if in_str => {}
-            '/' if chars.peek() == Some(&'/') => {
-                while chars.peek().is_some_and(|&c| c != '\n') {
-                    chars.next();
-                }
-            }
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth -= 1,
-            _ => {}
-        }
-    }
-    depth
 }
 
 fn main() {
@@ -66,32 +52,54 @@ fn run(args: Vec<String>) -> i32 {
             0
         }
         Some("-h") | Some("--help") => {
-            println!("usage: galileo [file.gg] | galileo --kernel | galileo --version");
+            println!(
+                "usage: galileo [-i] [file.gg] | galileo --kernel | galileo --version\n\
+                 \n  galileo            interactive prompt\n\
+                 \x20 galileo file.gg    run a file\n\
+                 \x20 galileo -i file.gg run a file, then keep the prompt open with its definitions"
+            );
             0
         }
         Some("--version") => {
             println!("galileo {}", env!("CARGO_PKG_VERSION"));
             0
         }
-        Some(file) => {
-            let src = match std::fs::read_to_string(file) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("{}: {}", file, e);
-                    return 1;
-                }
-            };
-            report(&mut Session::new(), &src);
-            0
-        }
-        None => {
+        Some("-i") => {
             let mut s = Session::new();
-            if io::stdin().is_terminal() {
-                interactive(&mut s)
-            } else {
-                piped(&mut s)
+            // the prompt opens even after an error, so it can be looked into
+            for file in &args[1..] {
+                if !run_file(&mut s, file) {
+                    break;
+                }
             }
+            prompt(&mut s)
         }
+        Some(file) => {
+            let mut s = Session::new();
+            if run_file(&mut s, file) { 0 } else { 1 }
+        }
+        None => prompt(&mut Session::new()),
+    }
+}
+
+/// Run a script and print its results; false when it stopped on an error
+fn run_file(s: &mut Session, file: &str) -> bool {
+    let mut ok = true;
+    for (r, quiet, notes) in s.load_file(file) {
+        if r.is_err() {
+            ok = false;
+        }
+        show(r, quiet, &notes);
+    }
+    ok
+}
+
+/// The prompt: line editing on a terminal, plain line reading otherwise
+fn prompt(s: &mut Session) -> i32 {
+    if io::stdin().is_terminal() {
+        interactive(s)
+    } else {
+        piped(s)
     }
 }
 
@@ -110,7 +118,7 @@ fn piped(s: &mut Session) -> i32 {
             return 0;
         }
         buf.push_str(&line);
-        if open_brackets(&buf) > 0 {
+        if galileo_rs::parser::needs_more(&buf) {
             continue;
         }
         let src = std::mem::take(&mut buf);
@@ -148,12 +156,16 @@ fn interactive(s: &mut Session) -> i32 {
     }
     let mut buf = String::new();
     let code = loop {
-        let prompt = if buf.is_empty() { "galileo> " } else { "    ...> " };
+        let prompt = if buf.is_empty() {
+            "galileo> "
+        } else {
+            "    ...> "
+        };
         match rl.readline(prompt) {
             Ok(line) => {
                 buf.push_str(&line);
                 buf.push('\n');
-                if open_brackets(&buf) > 0 {
+                if galileo_rs::parser::needs_more(&buf) {
                     continue;
                 }
                 let src = std::mem::take(&mut buf);

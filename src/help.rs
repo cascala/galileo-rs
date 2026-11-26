@@ -67,7 +67,7 @@ pub const ENTRIES: &[Entry] = &[
         "load",
         "Basics",
         "load(file), load(RSA)",
-        "Runs the Galileo statements in a file. load(RSA) instead defines the RSA Factoring Challenge numbers: RSA100, RSA110, ... RSA617 by decimal digits and RSA576, RSA640, RSA704, RSA768, RSA896, RSA1024, RSA1536, RSA2048 by bits, with the two primes of each factored one as RSA100p and RSA100q and so on. Factors are included up to RSA250, plus RSA270 and RSA896 (RSA-896, factored in September 2026, is the largest so far); RSA260 was factored in September 2026 too, but its factors are not included yet.",
+        "Runs the Galileo statements in a file and shows their results, as if they were typed in (a statement ending in ; stays quiet). Quote a name with spaces, load(\"my file.gg\"); .gg may be left off. A file can load others, found next to it. An error stops the file and says where: file.gg:12: ... In Docker, mount the folder first: docker run -it --rm -v \"$PWD:/work\" cascala/galileo. load(RSA) instead defines the RSA Factoring Challenge numbers: RSA100, RSA110, ... RSA617 by decimal digits and RSA576, RSA640, RSA704, RSA768, RSA896, RSA1024, RSA1536, RSA2048 by bits, with the two primes of each factored one as RSA100p and RSA100q and so on. Factors are included up to RSA250, plus RSA270 and RSA896 (RSA-896, factored in September 2026, is the largest so far); RSA260 was factored in September 2026 too, but its factors are not included yet.",
         "load(RSA)"
     ),
     e!(

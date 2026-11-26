@@ -92,6 +92,22 @@ fn lex(src: &str) -> Result<Vec<Token>, String> {
             }
             continue;
         }
+        // a backslash ending a line continues the statement on the next line
+        if ch == '\\' {
+            let mut j = i + 1;
+            while j < c.len() && c[j] != '\n' && c[j].is_whitespace() {
+                j += 1;
+            }
+            let comment = c.get(j) == Some(&'/') && c.get(j + 1) == Some(&'/');
+            if j >= c.len() || c[j] == '\n' || comment {
+                while j < c.len() && c[j] != '\n' {
+                    j += 1;
+                }
+                i = j + 1;
+                space = true;
+                continue;
+            }
+        }
         if ch == '\n' {
             out.push(Token {
                 tok: Tok::Newline,
@@ -557,6 +573,68 @@ fn describe(t: &Tok) -> String {
     }
 }
 
+/// Whether input is unfinished: a `(` or `[` is still open, or the last line
+/// ends in `\` (outside strings and `//` comments). The prompt keeps reading
+/// lines while this holds.
+pub fn needs_more(src: &str) -> bool {
+    let (depth, cont) = scan(src);
+    depth > 0 || cont
+}
+
+/// (open brackets, whether the text ends in a continuation `\`)
+fn scan(src: &str) -> (i32, bool) {
+    let mut depth = 0;
+    let mut in_str = false;
+    let mut cont = false;
+    let mut chars = src.chars().peekable();
+    while let Some(c) = chars.next() {
+        if !c.is_whitespace() {
+            cont = false;
+        }
+        match c {
+            '"' => in_str = !in_str,
+            '\n' => in_str = false,
+            _ if in_str => {}
+            '/' if chars.peek() == Some(&'/') => {
+                while chars.peek().is_some_and(|&c| c != '\n') {
+                    chars.next();
+                }
+            }
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            '\\' => cont = true,
+            _ => {}
+        }
+    }
+    (depth, cont)
+}
+
+/// Split a script into pieces that each hold whole statements, with the line
+/// number (from 1) each piece starts on; a piece runs on while brackets are
+/// open or a line ends in `\`, so errors can name the line they are on
+pub fn statement_chunks(src: &str) -> Vec<(usize, String)> {
+    let mut out = vec![];
+    let mut buf = String::new();
+    let mut start = 1;
+    for (n, line) in src.lines().enumerate() {
+        if buf.is_empty() {
+            start = n + 1;
+        }
+        buf.push_str(line);
+        buf.push('\n');
+        if !needs_more(&buf) {
+            let piece = std::mem::take(&mut buf);
+            if !piece.trim().is_empty() {
+                out.push((start, piece));
+            }
+        }
+    }
+    if !buf.trim().is_empty() {
+        out.push((start, buf));
+    }
+    out
+}
+
 /// Parse a program: statements separated by `;` or newlines.
 pub fn parse(src: &str) -> Result<Vec<Stmt>, String> {
     Ok(parse_quiet(src)?.into_iter().map(|(s, _)| s).collect())
@@ -569,14 +647,20 @@ pub fn parse_quiet(src: &str) -> Result<Vec<(Stmt, bool)>, String> {
     let mut semi = vec![];
     // newlines outside brackets separate statements
     let mut t: Vec<Token> = vec![];
-    let mut depth = 0i32;
+    // inside ( ) a newline is just space, so a long call can span lines;
+    // inside [ ] it separates matrix rows
+    let mut open: Vec<&str> = vec![];
     for tok in toks {
         match &tok.tok {
-            Tok::Sym("(") | Tok::Sym("[") => depth += 1,
-            Tok::Sym(")") | Tok::Sym("]") => depth -= 1,
+            Tok::Sym(b @ ("(" | "[")) => open.push(b),
+            Tok::Sym(")") | Tok::Sym("]") => {
+                open.pop();
+            }
+            Tok::Newline if open.last() == Some(&"(") => continue,
             _ => {}
         }
-        let sep = depth <= 0 && matches!(tok.tok, Tok::Newline | Tok::Sym(";"));
+        let depth = open.len();
+        let sep = depth == 0 && matches!(tok.tok, Tok::Newline | Tok::Sym(";"));
         semi.push(sep && matches!(tok.tok, Tok::Sym(";")));
         t.push(if sep {
             Token {

@@ -1,6 +1,7 @@
 # The Galileo REPL in a small image:
 #   docker run -it --rm cascala/galileo
 #   docker run --rm -v "$PWD:/work" cascala/galileo script.gg
+#   docker run -it --rm -v "$PWD:/work" cascala/galileo -i script.gg
 
 FROM rust:1-slim AS build
 WORKDIR /src
