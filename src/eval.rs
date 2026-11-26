@@ -791,7 +791,8 @@ impl Session {
                             v if v.is_scalar()
                                 || matches!(v, Expr::Bool(_) | Expr::Str(_))
                                 || crate::ffield::as_elem(&v).is_some()
-                                || crate::qring::as_elem(&v).is_some() =>
+                                || crate::qring::as_elem(&v).is_some()
+                                || crate::quat::as_quat(&v).is_some() =>
                             {
                                 parts.push(vec![vec![v]])
                             }
@@ -1137,6 +1138,10 @@ impl Session {
                     v if crate::qring::as_elem(&v).is_some() && args.len() == 1 => {
                         self.note("The field norm: the determinant of multiplication by the element (the product of its conjugates).");
                         return Ok(crate::qring::qnum(crate::qring::as_elem(&v).unwrap().norm()));
+                    }
+                    v if crate::quat::as_quat(&v).is_some() && args.len() == 1 => {
+                        self.note("|q| = sqrt(a^2 + b^2 + c^2 + d^2); it is multiplicative: |p q| = |p| |q|.");
+                        return Ok(crate::quat::as_quat(&v).unwrap().norm());
                     }
                     other => return Err(format!("norm needs a matrix, got {}", show(&other))),
                 };
@@ -1627,6 +1632,12 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
             (x, y) => arith(scalar, x, y),
         };
     }
+    if (crate::quat::as_quat(&a).is_some() || crate::quat::as_quat(&b).is_some())
+        && !matches!(&a, M(_))
+        && !matches!(&b, M(_))
+    {
+        return crate::quat::arith(op, &a, &b);
+    }
     if (crate::qring::as_elem(&a).is_some() || crate::qring::as_elem(&b).is_some())
         && !matches!(&a, M(_))
         && !matches!(&b, M(_))
@@ -1735,6 +1746,14 @@ pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
             Op::Eq => Ok(Expr::Bool(eq)),
             Op::Ne => Ok(Expr::Bool(!eq)),
             _ => Err("elements of a finite ring can't be ordered".into()),
+        };
+    }
+    if crate::quat::as_quat(&a).is_some() || crate::quat::as_quat(&b).is_some() {
+        let eq = crate::quat::equal(&a, &b)?;
+        return match op {
+            Op::Eq => Ok(Expr::Bool(eq)),
+            Op::Ne => Ok(Expr::Bool(!eq)),
+            _ => Err("quaternions can't be ordered".into()),
         };
     }
     if crate::qring::as_elem(&a).is_some() || crate::qring::as_elem(&b).is_some() {
