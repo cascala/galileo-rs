@@ -110,6 +110,9 @@ impl Session {
         if let Some(r) = self.units_call(f, args) {
             return r;
         }
+        if let Some(r) = self.signal_call(f, args) {
+            return r;
+        }
         if let Some(r) = self.stats_call(f, args) {
             return r;
         }
@@ -137,6 +140,7 @@ impl Session {
         match f {
             "plot" => self.plot(args),
             "parametric" => self.parametric(args),
+            "animate" => self.animate(args),
             "plot3d" => self.plot3d(args),
             "surface" => self.surface(args),
             "parametric3d" => self.parametric3d(args),
@@ -343,6 +347,84 @@ impl Session {
             ..Default::default()
         };
         Ok(obj(Obj::Figure(Figure::new(vec![s], "", "", true))))
+    }
+
+    /// animate(f, x, a, b, t, t0, t1[, frames]): the curve y = f(x, t) as t runs;
+    /// animate(fx, fy, t, t0, t1[, frames]): a point moving along a path;
+    /// animate(xs, ys): a point moving through data (a numeric solution)
+    fn animate(&mut self, args: &[Node]) -> R<Expr> {
+        let usage = "usage: animate(f, x, a, b, t, t0, t1) for a curve that moves, animate(fx, fy, t, t0, t1) for a moving point, animate(xs, ys) for data; an optional last argument sets the number of frames (60)";
+        let frames_arg = |s: &mut Session, n: Option<&Node>| -> R<usize> {
+            match n {
+                None => Ok(60),
+                Some(n) => {
+                    let k = s.number(n, "the number of frames")?;
+                    if !(2.0..=1000.0).contains(&k) {
+                        return Err("animate: between 2 and 1000 frames".into());
+                    }
+                    Ok(k as usize)
+                }
+            }
+        };
+        let tag = |t: &str, v: f64| format!("{} = {}", t, { let r = (v * 1000.0).round() / 1000.0; if r == r.trunc() { format!("{}", r as i64) } else { format!("{}", r) } });
+        match args.len() {
+            7 | 8 => {
+                let [f, x, a, b, t, t0, t1] = &args[..7] else { unreachable!() };
+                let nf = frames_arg(self, args.get(7))?;
+                let (x, t) = (ident(x, "x")?, ident(t, "the time")?);
+                let (a, b) = self.range("animate", a, b)?;
+                let (t0, t1) = self.range("animate", t0, t1)?;
+                let (g, e) = self.function(f, &[x.clone(), t.clone()])?;
+                let xs = plot::steps(a, b, plot::SAMPLES);
+                let ts = plot::steps(t0, t1, nf - 1);
+                let at = |tv: f64| xs.iter().map(|&xv| (xv, run(&g, &[xv, tv]))).collect::<Vec<_>>();
+                let mut fig = Figure::new(
+                    vec![Series { label: label(f, &e), points: at(t0), ..Default::default() }],
+                    &x,
+                    "",
+                    false,
+                );
+                fig.frames = ts
+                    .iter()
+                    .map(|&tv| plot::Frame { label: tag(&t, tv), series: vec![(0, at(tv))] })
+                    .collect();
+                Ok(obj(Obj::Figure(fig)))
+            }
+            5 | 6 => {
+                let [fx, fy, t, t0, t1] = &args[..5] else { unreachable!() };
+                let nf = frames_arg(self, args.get(5))?;
+                let t = ident(t, "the time")?;
+                let (t0, t1) = self.range("animate", t0, t1)?;
+                let ts1 = std::slice::from_ref(&t);
+                let (gx, ex) = self.function(fx, ts1)?;
+                let (gy, ey) = self.function(fy, ts1)?;
+                let p = |tv: f64| (run(&gx, &[tv]), run(&gy, &[tv]));
+                let path: Vec<(f64, f64)> = plot::steps(t0, t1, plot::SAMPLES).iter().map(|&tv| p(tv)).collect();
+                let ts = plot::steps(t0, t1, nf - 1);
+                Ok(obj(Obj::Figure(moving_point(
+                    path,
+                    format!("({}, {})", label(fx, &ex), label(fy, &ey)),
+                    ts.iter().map(|&tv| (tag(&t, tv), p(tv))).collect(),
+                ))))
+            }
+            2 => {
+                let xs = self.numbers(&args[0], "animate")?;
+                let ys = self.numbers(&args[1], "animate")?;
+                if xs.len() != ys.len() || xs.len() < 2 {
+                    return Err("animate(xs, ys): two lists of the same length".into());
+                }
+                let path: Vec<(f64, f64)> = xs.iter().copied().zip(ys.iter().copied()).collect();
+                let step = path.len().div_ceil(200).max(1);
+                let pts: Vec<(String, (f64, f64))> = path
+                    .iter()
+                    .enumerate()
+                    .step_by(step)
+                    .map(|(k, &q)| (format!("point {}", k + 1), q))
+                    .collect();
+                Ok(obj(Obj::Figure(moving_point(path, "the moving point".into(), pts))))
+            }
+            _ => Err(usage.into()),
+        }
     }
 
     fn grid(
@@ -803,4 +885,23 @@ impl Session {
         let map: Vec<Expr> = map.iter().map(|e| self.values(e, &all)).collect();
         self.figure(trajs, &all, map, true)
     }
+}
+
+/// a path drawn thin, and a point moving along it
+fn moving_point(path: Vec<(f64, f64)>, name: String, frames: Vec<(String, (f64, f64))>) -> Figure {
+    let first = frames.first().map(|f| f.1).unwrap_or((0.0, 0.0));
+    let mut fig = Figure::new(
+        vec![
+            Series { label: "path".into(), points: path, thin: true, ..Default::default() },
+            Series { label: name, points: vec![first], markers: true, ..Default::default() },
+        ],
+        "x",
+        "y",
+        true,
+    );
+    fig.frames = frames
+        .into_iter()
+        .map(|(label, q)| plot::Frame { label, series: vec![(1, vec![q])] })
+        .collect();
+    fig
 }

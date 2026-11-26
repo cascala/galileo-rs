@@ -159,6 +159,16 @@ pub struct Figure {
     pub window: Option<(f64, f64, f64, f64)>,
     /// a picture under the curves (domain coloring)
     pub image: Option<Raster>,
+    /// an animation: frame k gives new points for some series (the series
+    /// themselves hold the first frame)
+    pub frames: Vec<Frame>,
+}
+
+/// One frame of an animation: its label (t = 0.5) and (series index, points)
+#[derive(Clone, Debug, PartialEq)]
+pub struct Frame {
+    pub label: String,
+    pub series: Vec<(usize, Vec<(f64, f64)>)>,
 }
 
 /// RGB pixels covering [x0, x1] x [y0, y1], top row first
@@ -349,6 +359,7 @@ impl Figure {
             equal_aspect,
             window: None,
             image: None,
+            frames: vec![],
         }
     }
 
@@ -362,6 +373,28 @@ impl Figure {
             equal_aspect: self.equal_aspect || o.equal_aspect,
             window: self.window.or(o.window),
             image: self.image.clone().or_else(|| o.image.clone()),
+            frames: {
+                // frames of both, side by side; a shorter animation holds its last frame
+                let n = self.frames.len().max(o.frames.len());
+                let off = self.series.len();
+                (0..n)
+                    .map(|k| {
+                        let a = self.frames.get(k.min(self.frames.len().saturating_sub(1)));
+                        let b = o.frames.get(k.min(o.frames.len().saturating_sub(1)));
+                        let mut series = a.map(|f| f.series.clone()).unwrap_or_default();
+                        if let Some(f) = b {
+                            series.extend(f.series.iter().map(|(i, p)| (i + off, p.clone())));
+                        }
+                        let label = self
+                            .frames
+                            .get(k)
+                            .or(o.frames.get(k))
+                            .map(|f| f.label.clone())
+                            .unwrap_or_default();
+                        Frame { label, series }
+                    })
+                    .collect()
+            },
         }
     }
 
@@ -378,6 +411,11 @@ impl Figure {
             .collect();
         if let Some(r) = &self.image {
             pts.extend([(r.x0, r.y0), (r.x1, r.y1)]);
+        }
+        for f in &self.frames {
+            for (_, p) in &f.series {
+                pts.extend(p.iter().copied().filter(|p| finite(p.0) && finite(p.1)));
+            }
         }
         for s in &self.series {
             for (p, e) in s.points.iter().zip(&s.errors) {
@@ -616,7 +654,7 @@ impl Figure {
                     ("l", "60".into()),
                     ("r", "20".into()),
                     ("t", if self.title.is_empty() { "20" } else { "50" }.into()),
-                    ("b", "50".into()),
+                    ("b", if self.frames.is_empty() { "50" } else { "140" }.into()),
                 ]),
             ),
             ("width", "700".into()),
@@ -650,9 +688,115 @@ impl Figure {
             }
             None => layout,
         };
+        if self.frames.is_empty() {
+            return obj(&[
+                ("data", format!("[{}]", traces.join(","))),
+                ("layout", layout),
+            ]);
+        }
+        // an animation: fixed axes, a play button and a slider
+        let frames: Vec<String> = self
+            .frames
+            .iter()
+            .enumerate()
+            .map(|(k, f)| {
+                let data: Vec<String> = f
+                    .series
+                    .iter()
+                    .map(|(i, p)| {
+                        let mut xs = vec![];
+                        let mut ys = vec![];
+                        match self.series.get(*i) {
+                            Some(ser) if !ser.markers => {
+                                let ghost = Series { points: p.clone(), ..ser.clone() };
+                                for r in self.runs(&ghost, &b) {
+                                    xs.extend(r.iter().map(|q| q.0));
+                                    ys.extend(r.iter().map(|q| q.1));
+                                    xs.push(f64::NAN);
+                                    ys.push(f64::NAN);
+                                }
+                            }
+                            _ => {
+                                xs.extend(p.iter().map(|q| q.0));
+                                ys.extend(p.iter().map(|q| q.1));
+                            }
+                        }
+                        obj(&[("x", jnums(&xs)), ("y", jnums(&ys))])
+                    })
+                    .collect();
+                let idx: Vec<String> = f.series.iter().map(|(i, _)| i.to_string()).collect();
+                obj(&[
+                    ("name", jstr(&k.to_string())),
+                    ("data", format!("[{}]", data.join(","))),
+                    ("traces", format!("[{}]", idx.join(","))),
+                ])
+            })
+            .collect();
+        let quick = obj(&[
+            ("mode", jstr("immediate")),
+            ("frame", obj(&[("duration", "0".into()), ("redraw", "false".into())])),
+            ("transition", obj(&[("duration", "0".into())])),
+        ]);
+        let play = obj(&[
+            ("fromcurrent", "true".into()),
+            ("frame", obj(&[("duration", "40".into()), ("redraw", "false".into())])),
+            ("transition", obj(&[("duration", "0".into())])),
+        ]);
+        let buttons = format!(
+            "[{}]",
+            [
+                obj(&[("label", jstr("Play")), ("method", jstr("animate")), ("args", format!("[null,{}]", play))]),
+                obj(&[("label", jstr("Pause")), ("method", jstr("animate")), ("args", format!("[[null],{}]", quick))]),
+            ]
+            .join(",")
+        );
+        let steps: Vec<String> = self
+            .frames
+            .iter()
+            .enumerate()
+            .map(|(k, f)| {
+                obj(&[
+                    ("label", jstr(&f.label)),
+                    ("method", jstr("animate")),
+                    ("args", format!("[[{}],{}]", jstr(&k.to_string()), quick)),
+                ])
+            })
+            .collect();
+        let extra = format!(
+            ",\"xaxis\":{},\"updatemenus\":[{}],\"sliders\":[{}]",
+            obj(&[
+                ("range", jnums(&[b.x0, b.x1])),
+                ("autorange", "false".into()),
+                ("title", obj(&[("text", jstr(&self.x_label))])),
+                ("zeroline", "true".into()),
+            ]),
+            obj(&[
+                ("type", jstr("buttons")),
+                ("showactive", "false".into()),
+                ("x", "0".into()),
+                ("y", "-0.18".into()),
+                ("xanchor", jstr("left")),
+                ("yanchor", jstr("top")),
+                ("direction", jstr("left")),
+                ("buttons", buttons),
+            ]),
+            obj(&[
+                ("x", "0.18".into()),
+                ("len", "0.82".into()),
+                ("y", "-0.12".into()),
+                // many steps: only the current value is written out
+                ("font", obj(&[("color", jstr("rgba(0,0,0,0)"))])),
+                ("currentvalue", obj(&[("visible", "true".into()), ("font", obj(&[("color", jstr("#374151"))]))])),
+                ("steps", format!("[{}]", steps.join(","))),
+            ])
+        );
+        // the layout's own xaxis is replaced: JSON keeps the last key
+        let layout = format!("{}{}}}", &layout[..layout.len() - 1], extra);
+        let layout = layout.replacen("\"height\":440", "\"height\":520", 1);
         obj(&[
             ("data", format!("[{}]", traces.join(","))),
             ("layout", layout),
+            ("frames", format!("[{}]", frames.join(","))),
         ])
     }
 
@@ -773,6 +917,36 @@ impl Figure {
         }
         s.push_str(r#"<g clip-path="url(#plotarea)" fill="none" stroke-width="2" stroke-linejoin="round">"#);
         let span = b.y1 - b.y0;
+        // an animation on paper: later frames drawn faintly under the first
+        let n = self.frames.len();
+        if n > 3 {
+            for k in [n / 3, 2 * n / 3, n - 1] {
+                for (i, pts) in &self.frames[k].series {
+                    let Some(ser) = self.series.get(*i) else { continue };
+                    let c = ser.col(*i);
+                    if ser.markers {
+                        for &(x, y) in pts.iter().filter(|p| finite(p.0) && finite(p.1)) {
+                            let _ = write!(
+                                s,
+                                r#"<circle cx="{:.2}" cy="{:.2}" r="4" fill="{c}" fill-opacity="0.35" stroke="none"/>"#,
+                                sx(x),
+                                sy(y)
+                            );
+                        }
+                    } else {
+                        let ghost = Series { points: pts.clone(), ..ser.clone() };
+                        let mut d = String::new();
+                        for run in self.runs(&ghost, &b) {
+                            for (k, (x, y)) in run.iter().enumerate() {
+                                let yy = y.clamp(b.y0 - span, b.y1 + span);
+                                let _ = write!(d, "{}{:.2},{:.2}", if k == 0 { "M" } else { "L" }, sx(*x), sy(yy));
+                            }
+                        }
+                        let _ = write!(s, r#"<path d="{d}" stroke="{c}" stroke-opacity="0.3" stroke-width="{}"/>"#, ser.width());
+                    }
+                }
+            }
+        }
         for (i, ser) in self.series.iter().enumerate() {
             if ser.markers && ser.points.len() > 1500 {
                 // many points (a fractal, a bifurcation diagram): tiny squares in one path

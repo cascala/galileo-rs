@@ -8,6 +8,7 @@
 pub mod algebra_cmd;
 pub mod units;
 pub mod units_cmd;
+pub mod signal;
 pub mod algext;
 pub mod algfactor;
 pub mod auri_families;

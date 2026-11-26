@@ -471,6 +471,13 @@ pub const ENTRIES: &[Entry] = &[
         "plot(sin(x), cos(x), x, 0, 2*pi)"
     ),
     e!(
+        "animate",
+        "Plotting",
+        "animate(f, x, a, b, t, t0, t1[, frames]), animate(fx, fy, t, t0, t1[, frames]), animate(xs, ys)",
+        "An animated plot with a play button and a time slider: the curve y = f(x, t) as t runs from t0 to t1 (a wave), a point moving along (fx(t), fy(t)) with its path, or a point moving through data such as a numeric solution. 60 frames unless given. On paper (SVG) later frames are drawn faintly under the first. Combine with show, label with legend, labels and title.",
+        "animate(sin(x - t), x, 0, 10, t, 0, 2*pi)"
+    ),
+    e!(
         "parametric",
         "Plotting",
         "parametric(fx, fy, t, from, to)",
@@ -1484,6 +1491,20 @@ pub const ENTRIES: &[Entry] = &[
         "const.c, const.G, ...",
         "Physical constants with units (CODATA 2018): c (speed of light), G (gravitation), g (standard gravity), h, hbar (Planck), k (Boltzmann), NA (Avogadro), R (gas constant), e (elementary charge), me, mp (electron and proton mass), eps0, mu0 (vacuum), sigma (Stefan-Boltzmann), Mearth, Rearth, Msun, Rsun, Mmoon.",
         "const.hbar*const.c"
+    ),
+    e!(
+        "fft",
+        "Signals",
+        "fft(x), ifft(X)",
+        "The discrete Fourier transform of a row or column of numbers: X_k = sum of x_n e^(-2 pi i k n/N), for k = 0, ..., N - 1 (fast for N a power of 2). ifft inverts it. For samples dt apart, entry k is the frequency k/(N dt) (freqs gives them all); abs(fft(x)) is the spectrum.",
+        "fft([1 0 -1 0])"
+    ),
+    e!(
+        "freqs",
+        "Signals",
+        "freqs(n, dt)",
+        "The frequencies of the entries of fft for n samples taken dt apart: 0, 1/(n dt), 2/(n dt), ..., then the negative frequencies, as numpy's fftfreq.",
+        "freqs(8, 0.5)"
     ),
     e!(
         "polylog",
