@@ -3,6 +3,7 @@
 
 use crate::eval::{R, Session};
 use crate::expr::{Expr, Obj};
+use crate::ffield as ff;
 use crate::fgroup::{self as fg, Group, Perm};
 use crate::parser::Node;
 use std::rc::Rc;
@@ -109,11 +110,31 @@ impl Session {
             "isomorphic",
             "abelianinv",
             "cayleygraph",
+            "zmod",
+            "gf",
+            "generator",
+            "dlog",
+            "characteristic",
+            "modulus",
+            "lift",
+            "isfield",
         ];
         if !NAMES.contains(&f) {
             return None;
         }
-        let v = match args.iter().map(|a| self.eval(a)).collect::<R<Vec<Expr>>>() {
+        let hide = |i: usize| (f == "gf" || f == "zmod") && i == 1;
+        let v = match args
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                if hide(i) {
+                    self.eval_hidden(a, &["a".to_string()])
+                } else {
+                    self.eval(a)
+                }
+            })
+            .collect::<R<Vec<Expr>>>()
+        {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };
@@ -122,7 +143,145 @@ impl Session {
         if f == "cayley" && !v.first().is_some_and(is_group) {
             return None;
         }
+        let ringish = |e: &Expr| ff::as_ring(e).is_some() || ff::as_elem(e).is_some();
+        if matches!(
+            f,
+            "zmod"
+                | "gf"
+                | "generator"
+                | "dlog"
+                | "characteristic"
+                | "modulus"
+                | "lift"
+                | "isfield"
+        ) || v.first().is_some_and(ringish)
+        {
+            return Some(self.ring_cmd(f, &v));
+        }
         Some(self.algebra(f, &v))
+    }
+
+    fn ring_cmd(&mut self, f: &str, v: &[Expr]) -> R<Expr> {
+        use num_bigint::BigInt;
+        let big = |e: &Expr| -> R<BigInt> {
+            e.num()
+                .filter(|n| n.is_integer())
+                .and_then(|n| n.as_bigint())
+                .ok_or_else(|| {
+                    format!(
+                        "{}: expected a whole number, got {}",
+                        f,
+                        crate::print::show(e)
+                    )
+                })
+        };
+        let ring = |e: &Expr| -> R<Rc<ff::Ring>> {
+            ff::as_ring(e)
+                .or_else(|| ff::as_elem(e).map(|x| x.ring.clone()))
+                .ok_or_else(|| format!("{}: expected a ring such as gf(9) or zmod(12)", f))
+        };
+        let elem = |e: &Expr| -> R<ff::Elem> {
+            ff::as_elem(e)
+                .cloned()
+                .ok_or_else(|| format!("{}: expected an element such as gf(7, 3)", f))
+        };
+        let num = |n: BigInt| Expr::Num(crate::num::Number::from_bigint(n));
+        match (f, v) {
+            ("zmod" | "gf", [n, rest @ ..]) if rest.len() <= 1 => {
+                let n = big(n)?;
+                let r = if f == "gf" {
+                    ff::gf(&n)?
+                } else {
+                    ff::zmod(&n)?
+                };
+                match rest {
+                    [x] => Ok(ff::value(r.from_expr(x)?)),
+                    _ => {
+                        let field = if r.is_field() {
+                            "a field"
+                        } else {
+                            "not a field"
+                        };
+                        self.note(&format!(
+                            "{} has {} elements and is {}{}.",
+                            r.name(),
+                            r.size(),
+                            field,
+                            if r.k > 1 {
+                                format!(
+                                    "; its elements are polynomials in `a` of degree below {}, with {} = 0",
+                                    r.k,
+                                    crate::print::show(&ff::poly_expr(&r.m, "a"))
+                                )
+                            } else {
+                                String::new()
+                            }
+                        ));
+                        Ok(ff::ring_value(r))
+                    }
+                }
+            }
+            ("order", [x]) => match ff::as_elem(x) {
+                Some(x) => {
+                    let o = x.order()?;
+                    self.note(&format!(
+                        "{}^{} = 1 and no smaller positive power is 1; the order divides {}, the number of units of {}.",
+                        x.text(),
+                        o,
+                        x.ring.units(),
+                        x.ring.name()
+                    ));
+                    Ok(num(o))
+                }
+                None => {
+                    let r = ring(x)?;
+                    self.note(&format!("{} has {} elements.", r.name(), r.size()));
+                    Ok(num(r.size()))
+                }
+            },
+            ("elements", [r]) => {
+                let es = ring(r)?.elements()?;
+                Ok(Expr::Matrix(vec![es.into_iter().map(ff::value).collect()]))
+            }
+            ("generator", [r]) => {
+                let r = ring(r)?;
+                let g = r.generator()?;
+                self.note(&format!(
+                    "Every unit of {} is a power of {}: it has order {}, the number of units.",
+                    r.name(),
+                    g.text(),
+                    r.units()
+                ));
+                Ok(ff::value(g))
+            }
+            ("dlog", [h, g]) => {
+                let (h, g) = (elem(h)?, elem(g)?);
+                let x = ff::dlog(&h, &g)?;
+                self.note(&format!(
+                    "{}^{} = {} (Pohlig–Hellman: one small log per prime factor of the order of {}, then the Chinese remainder theorem).",
+                    g.text(),
+                    x,
+                    h.text(),
+                    g.text()
+                ));
+                Ok(num(x))
+            }
+            ("characteristic", [r]) => Ok(num(ring(r)?.n.clone())),
+            ("modulus", [r]) => {
+                let r = ring(r)?;
+                Ok(if r.k > 1 {
+                    ff::poly_expr(&r.m, "x")
+                } else {
+                    num(r.n.clone())
+                })
+            }
+            ("lift", [x]) => Ok(elem(x)?.lift()),
+            ("isfield", [r]) => Ok(Expr::Bool(ring(r)?.is_field())),
+            _ => Err(format!(
+                "{}: wrong arguments for a ring command; see help(\"{}\")",
+                f, f
+            )),
+        }
     }
 
     fn algebra(&mut self, f: &str, v: &[Expr]) -> R<Expr> {
@@ -413,11 +572,7 @@ impl Session {
                             "An isomorphism, sending generators (in cycle notation) to: {}.",
                             gs.iter()
                                 .zip(&imgs)
-                                .map(|(x, y)| format!(
-                                    "{} ↦ {}",
-                                    fg::cycles(x),
-                                    fg::cycles(y)
-                                ))
+                                .map(|(x, y)| format!("{} ↦ {}", fg::cycles(x), fg::cycles(y)))
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ));

@@ -21,6 +21,7 @@ pub mod expr;
 pub mod extra_cmd;
 pub mod factor_cmd;
 pub mod factorlab;
+pub mod ffield;
 pub mod fgroup;
 pub mod geometry;
 pub mod gnfs;

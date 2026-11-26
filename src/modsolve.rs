@@ -17,18 +17,18 @@ pub const MAX_ROOTS: usize = 10_000;
 
 type P = Vec<BigInt>; // coefficients low to high, reduced mod p, no leading zeros
 
-fn trim(mut a: P) -> P {
+pub(crate) fn trim(mut a: P) -> P {
     while a.last().is_some_and(|c| c.is_zero()) {
         a.pop();
     }
     a
 }
 
-fn reduce(a: &[BigInt], p: &BigInt) -> P {
+pub(crate) fn reduce(a: &[BigInt], p: &BigInt) -> P {
     trim(a.iter().map(|c| c.mod_floor(p)).collect())
 }
 
-fn sub(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
+pub(crate) fn sub(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
     let n = a.len().max(b.len());
     let z = BigInt::zero();
     trim(
@@ -39,7 +39,7 @@ fn sub(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
 }
 
 /// remainder of a by b (b nonzero) mod p
-fn rem(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
+pub(crate) fn rem(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
     let mut r = reduce(a, p);
     let lead_inv = nt::modinv(b.last().unwrap(), p).expect("p prime");
     while r.len() >= b.len() && !r.is_empty() {
@@ -53,7 +53,7 @@ fn rem(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
     r
 }
 
-fn quo(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
+pub(crate) fn quo(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
     let mut r = reduce(a, p);
     let lead_inv = nt::modinv(b.last().unwrap(), p).expect("p prime");
     let mut q = vec![BigInt::zero(); r.len().saturating_sub(b.len()) + 1];
@@ -69,7 +69,7 @@ fn quo(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
     trim(q)
 }
 
-fn mulmod(a: &[BigInt], b: &[BigInt], m: &[BigInt], p: &BigInt) -> P {
+pub(crate) fn mulmod(a: &[BigInt], b: &[BigInt], m: &[BigInt], p: &BigInt) -> P {
     if a.is_empty() || b.is_empty() {
         return vec![];
     }
@@ -82,7 +82,7 @@ fn mulmod(a: &[BigInt], b: &[BigInt], m: &[BigInt], p: &BigInt) -> P {
     rem(&out, m, p)
 }
 
-fn monic(a: P, p: &BigInt) -> P {
+pub(crate) fn monic(a: P, p: &BigInt) -> P {
     match a.last() {
         None => a,
         Some(l) => {
@@ -92,7 +92,7 @@ fn monic(a: P, p: &BigInt) -> P {
     }
 }
 
-fn gcd(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
+pub(crate) fn gcd(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
     let (mut a, mut b) = (reduce(a, p), reduce(b, p));
     while !b.is_empty() {
         let r = rem(&a, &b, p);
@@ -103,7 +103,7 @@ fn gcd(a: &[BigInt], b: &[BigInt], p: &BigInt) -> P {
 }
 
 /// base^e mod (m, p)
-fn powmod(base: &[BigInt], e: &BigInt, m: &[BigInt], p: &BigInt) -> P {
+pub(crate) fn powmod(base: &[BigInt], e: &BigInt, m: &[BigInt], p: &BigInt) -> P {
     let mut result: P = rem(&[BigInt::one()], m, p);
     let mut b = rem(base, m, p);
     let bits = e.bits();

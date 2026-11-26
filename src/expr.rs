@@ -121,6 +121,8 @@ pub enum Obj {
     Equations(crate::geometry::Equations),
     Report(crate::discover::Report),
     Group(crate::fgroup::Group),
+    Ring(std::rc::Rc<crate::ffield::Ring>),
+    Elem(crate::ffield::Elem),
 }
 
 impl Obj {
@@ -133,6 +135,8 @@ impl Obj {
             Obj::Equations(_) => "Equations",
             Obj::Report(r) => r.kind,
             Obj::Group(_) => "Group",
+            Obj::Ring(_) => "Ring",
+            Obj::Elem(_) => "RingElement",
         }
     }
     /// Plain text rendering
@@ -144,6 +148,8 @@ impl Obj {
             Obj::Components(c) => c.text(),
             Obj::Equations(e) => e.text(),
             Obj::Group(g) => g.name.clone(),
+            Obj::Ring(r) => r.name(),
+            Obj::Elem(x) => x.text(),
             Obj::Report(r) => r
                 .shown_value()
                 .map(|v| crate::print::show(&v))

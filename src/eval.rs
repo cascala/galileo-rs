@@ -662,7 +662,10 @@ impl Session {
                     for x in r {
                         match self.eval(x)? {
                             Expr::Matrix(m) => parts.push(m),
-                            v if v.is_scalar() || matches!(v, Expr::Bool(_) | Expr::Str(_)) => {
+                            v if v.is_scalar()
+                                || matches!(v, Expr::Bool(_) | Expr::Str(_))
+                                || crate::ffield::as_elem(&v).is_some() =>
+                            {
                                 parts.push(vec![vec![v]])
                             }
                             v => return Err(format!("{} can't be a matrix element", show(&v))),
@@ -777,6 +780,13 @@ impl Session {
             .filter(|_| !self.hidden.iter().any(|h| h == f))
             .cloned()
         {
+            if let crate::expr::Obj::Ring(r) = &*o {
+                if args.len() != 1 {
+                    return Err(format!("{}(x) takes one argument", f));
+                }
+                let x = self.eval_hidden(&args[0], &["a".to_string()])?;
+                return r.from_expr(&x).map(crate::ffield::value);
+            }
             if let crate::expr::Obj::Report(r) = &*o {
                 if let Some(Expr::Matrix(m)) = r.shown_value() {
                     return self.index(f, &m, args);
@@ -1299,6 +1309,11 @@ fn elementwise(a: &Expr, f: &dyn Fn(&Expr) -> Expr) -> R<Expr> {
 /// Arithmetic on scalars and matrices
 pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
     use Expr::Matrix as M;
+    if crate::ffield::as_elem(&a).is_some() || crate::ffield::as_elem(&b).is_some() {
+        if !matches!(&a, M(_)) && !matches!(&b, M(_)) {
+            return crate::ffield::arith(op, &a, &b);
+        }
+    }
     for v in [&a, &b] {
         if matches!(v, Expr::Bool(_) | Expr::Str(_)) {
             return Err(format!("can't do arithmetic with {}", show(v)));
@@ -1381,6 +1396,14 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
 /// a == b, a < b, ...: true or false when that can be decided; a symbolic
 /// a == b stays an equation (for solve, dsolve and implicitplot)
 pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
+    if crate::ffield::as_elem(&a).is_some() || crate::ffield::as_elem(&b).is_some() {
+        let eq = crate::ffield::equal(&a, &b)?;
+        return match op {
+            Op::Eq => Ok(Expr::Bool(eq)),
+            Op::Ne => Ok(Expr::Bool(!eq)),
+            _ => Err("elements of a finite ring can't be ordered".into()),
+        };
+    }
     if let (Expr::Bool(_), _) | (_, Expr::Bool(_)) | (Expr::Str(_), _) | (_, Expr::Str(_)) =
         (&a, &b)
     {
