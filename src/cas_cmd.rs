@@ -579,6 +579,13 @@ impl Session {
     }
 
     fn unary(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        if let ("round", [a, d]) = (f, args) {
+            // round(x, d): d decimals, entry by entry
+            let v = self.eval(a)?;
+            let d = self.eval(d)?.num().and_then(|k| k.as_int()).filter(|k| (0..=15).contains(k)).ok_or("round: the number of decimals must be a whole number from 0 to 15")?;
+            let k = 10f64.powi(d as i32);
+            return elementwise_num(&v, f, &|x| Expr::float((x * k).round() / k + 0.0));
+        }
         let [a] = args else {
             return Err(format!("{} takes 1 argument", f));
         };

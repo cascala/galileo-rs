@@ -209,7 +209,7 @@ impl Session {
 
     /// An explanation with separate plain-text and Markdown forms
     pub(crate) fn note2(&mut self, plain: String, markdown: String) {
-        if self.explaining() && self.calls <= 1 && !markdown.trim().is_empty() {
+        if self.explaining() && self.calls <= 1 && !markdown.trim().is_empty() && !self.notes.iter().any(|n| n.markdown == markdown) {
             self.notes.push(Note { plain, markdown });
         }
     }
@@ -227,14 +227,18 @@ impl Session {
                 }
                 _ => None,
             };
-            if let Some(e) = call.and_then(crate::help::entry) {
-                if !self.funcs.contains_key(e.name) {
+            if let Some((f, e)) = call.and_then(|f| crate::help::entry(f).map(|e| (f, e))) {
+                if !self.funcs.contains_key(f) && !self.funcs.contains_key(e.name) {
                     let s = if self.teaching() {
                         e.description.to_string()
                     } else {
                         first_sentence(e.description).to_string()
                     };
-                    self.note(format!("`{}`: {}", e.name, s));
+                    if f == e.name {
+                        self.note(format!("`{}`: {}", f, s));
+                    } else {
+                        self.note(format!("`{}` (see `{}`): {}", f, e.name, s));
+                    }
                 }
             }
         }
@@ -1041,6 +1045,10 @@ impl Session {
                     _ => return Err("subs(expr, x, value): x must be a variable name".into()),
                 };
                 let v = self.eval(&args[2])?;
+                // a list of values into a scalar expression: one result per value
+                if let (Expr::Matrix(m), false) = (&v, matches!(e, Expr::Matrix(_))) {
+                    return Ok(Expr::Matrix(m.iter().map(|row| row.iter().map(|val| calc::simplify(&calc::subst(&e, &x, val))).collect()).collect()));
+                }
                 Ok(calc::subst(&e, &x, &v))
             }
             "and" | "or" | "xor" => {
@@ -1594,7 +1602,15 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
         }
         (Op::Sub, M(x), s) => M(linalg::map(&x, |p| sub(p.clone(), s.clone()))),
         (Op::Sub, s, M(x)) => M(linalg::map(&x, |p| sub(s.clone(), p.clone()))),
-        (Op::Mul, M(x), M(y)) => M(linalg::matmul(&x, &y)?),
+        (Op::Mul, M(x), M(y)) => {
+            let r = linalg::matmul(&x, &y)?;
+            // a row times a column is a number (the dot product)
+            if x.len() == 1 && x[0].len() > 1 && r.len() == 1 && r[0].len() == 1 {
+                r[0][0].clone()
+            } else {
+                M(r)
+            }
+        }
         (Op::Mul, M(x), s) => M(linalg::map(&x, |p| mul2(p.clone(), s.clone()))),
         (Op::Mul, s, M(x)) => M(linalg::map(&x, |p| mul2(s.clone(), p.clone()))),
         (Op::Div, M(x), M(y)) => M(linalg::matmul(&x, &linalg::inverse(&y)?)?),

@@ -200,8 +200,8 @@ pub const ENTRIES: &[Entry] = &[
     e!(
         "floor",
         "Functions",
-        "floor(x), ceil(x), round(x)",
-        "Round down, up, or to the nearest whole number.",
+        "floor(x), ceil(x), round(x), round(x, d)",
+        "Round down, up, or to the nearest whole number; round(x, d) keeps d decimals. Matrices are rounded entry by entry.",
         "round(2.5)"
     ),
     e!(
@@ -1020,7 +1020,7 @@ pub const ENTRIES: &[Entry] = &[
         "hist",
         "Statistics",
         "hist(data), hist(data, bins), hist(data, [edges]), with a last \"density\"; bar(heights) or bar(xs, heights)",
-        "Histogram of a list of numbers (bins equal-width bins, or the given edges); \"density\" scales the area to 1 to compare with a density curve using show. bar draws bars of the given heights, for example the probabilities of a discrete distribution.",
+        "Histogram of a list of numbers (bins equal-width bins, or the given edges); \"density\" scales the area to 1 to compare with a density curve using show. bar(xs, heights) draws bars of the given heights, for example the probabilities of a discrete distribution; bar(xs, heights, width) sets the bar width, to put two sets of bars side by side.",
         "show(hist(randn(1, 1000), 20, \"density\"), plot(normpdf(x), x, -4, 4))"
     ),
     e!(

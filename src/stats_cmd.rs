@@ -438,6 +438,31 @@ impl Session {
 
     fn dist_cmd(&mut self, f: &str, args: &[Node]) -> R<Expr> {
         let vals: Vec<Expr> = args.iter().map(|a| self.eval(a)).collect::<R<_>>()?;
+        // a matrix first argument: apply entry by entry, with one note
+        if let Some(Expr::Matrix(m)) = vals.first() {
+            let m = m.clone();
+            let mut first = true;
+            let mut out = Vec::with_capacity(m.len());
+            for row in &m {
+                let mut r = Vec::with_capacity(row.len());
+                for x in row {
+                    let mut v = vals.clone();
+                    v[0] = x.clone();
+                    let keep = self.notes.len();
+                    r.push(self.dist_vals(f, v)?);
+                    if !first {
+                        self.notes.truncate(keep);
+                    }
+                    first = false;
+                }
+                out.push(r);
+            }
+            return Ok(Expr::Matrix(out));
+        }
+        self.dist_vals(f, vals)
+    }
+
+    fn dist_vals(&mut self, f: &str, vals: Vec<Expr>) -> R<Expr> {
         let usage = match f {
             "normpdf" | "normcdf" => "(x) or (x, mu, sigma)",
             "norminv" => "(p) or (p, mu, sigma)",
@@ -635,10 +660,11 @@ impl Session {
         };
         let p = 2.0 * (1.0 - stats::t_cdf(t.abs(), df));
         self.note(format!(
-            "{}, t = {:.4} with {:.2} degrees of freedom. The answer is the two-sided p-value: the probability of a |t| at least this large if the null hypothesis were true. {}",
+            "{}, t = {:.4} with {} {}. The answer is the two-sided p-value: the probability of a |t| at least this large if the null hypothesis were true. {}",
             what,
             t,
-            df,
+            if df.fract() == 0.0 { format!("{}", df) } else { format!("{:.2}", df) },
+            if df == 1.0 { "degree of freedom" } else { "degrees of freedom" },
             if p < 0.05 { "p < 0.05: significant at the 5% level." } else { "p ≥ 0.05: not significant at the 5% level." }
         ));
         Ok(Expr::float(p))
@@ -699,9 +725,10 @@ impl Session {
         };
         let p = 1.0 - stats::chi2_cdf(stat, df);
         self.note(format!(
-            "{} with {} degrees of freedom. The answer is the p-value P(χ² ≥ {:.4}). {}",
+            "{} with {} degree{} of freedom. The answer is the p-value P(χ² ≥ {:.4}). {}",
             what,
             df,
+            if df == 1.0 { "" } else { "s" },
             stat,
             if p < 0.05 { "p < 0.05: the data are unlikely under the hypothesis." } else { "p ≥ 0.05: the data are consistent with the hypothesis." }
         ));
@@ -812,8 +839,12 @@ impl Session {
                 let h = to_data(flat(self.eval(h)?), "bar")?.floats();
                 ((1..=h.len()).map(|i| i as f64).collect::<Vec<_>>(), h)
             }
-            [x, h] => (to_data(flat(self.eval(x)?), "bar")?.floats(), to_data(flat(self.eval(h)?), "bar")?.floats()),
-            _ => return Err("usage: bar(heights) or bar(xs, heights)".into()),
+            [x, h] | [x, h, _] => (to_data(flat(self.eval(x)?), "bar")?.floats(), to_data(flat(self.eval(h)?), "bar")?.floats()),
+            _ => return Err("usage: bar(heights), bar(xs, heights) or bar(xs, heights, width)".into()),
+        };
+        let given = match args {
+            [_, _, wd] => Some(arg_num(&self.eval(wd)?, "bar").ok().filter(|w| *w > 0.0).ok_or("bar: the width must be a positive number")?),
+            _ => None,
         };
         if xs.len() != hs.len() {
             return Err("bar: xs and heights need the same length".into());
@@ -826,13 +857,14 @@ impl Session {
                 gap = gap.min(w[1] - w[0]);
             }
         }
-        let w = if gap.is_finite() { 0.8 * gap } else { 0.8 };
+        let w = given.unwrap_or(if gap.is_finite() { 0.8 * gap } else { 0.8 });
         let mut pts = vec![];
         for (x, h) in xs.iter().zip(&hs) {
             let (l, r) = (x - w / 2.0, x + w / 2.0);
             pts.extend([(l, 0.0), (l, *h), (r, *h), (r, 0.0), (f64::NAN, f64::NAN)]);
         }
         pts.pop();
+        self.note(format!("Bar chart: {} bars of width {} centred on the given values; the heights are drawn as given.", xs.len(), crate::num::fmt_float(w)));
         let s = Series { label: "bars".into(), points: pts, fill: true, ..Default::default() };
         Ok(Expr::Obj(Rc::new(Obj::Figure(Figure::new(vec![s], "", "", false)))))
     }

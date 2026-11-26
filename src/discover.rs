@@ -1988,6 +1988,13 @@ impl Session {
         if args.len() < 2 || args.len() > 4 {
             return Err(usage.into());
         }
+        if args.len() == 2 {
+            if let Some((xs, ys)) = self.two_lists(&args[0], &args[1], "scatter")? {
+                self.note(format!("scatter: the {} points (x, y) of the two lists.", xs.len()));
+                let s = Series { label: "data".into(), points: xs.into_iter().zip(ys).collect(), markers: true, ..Default::default() };
+                return Ok(Expr::Obj(std::rc::Rc::new(Obj::Figure(Figure::new(vec![s], "", "", false)))));
+            }
+        }
         let (names, _, _) = var_specs(&args[1])?;
         let d = self.eval(&args[0])?;
         let rows = numbers_of(&d, "scatter: the data")?;

@@ -60,3 +60,19 @@ fn inference() {
     assert!(!one("hist([1 2 2 3 3 3], 3)").starts_with("ERROR"));
     assert!(!one("bar([1 3 3 1])").starts_with("ERROR"));
 }
+
+#[test]
+fn lists_and_plots() {
+    // distributions apply to each entry of a list
+    assert_eq!(one("binopdf([0 1 2 3], 3, 1/2)"), "[1/8, 3/8, 3/8, 1/8]");
+    // a row times a column is a number
+    assert_eq!(one("k = [0 1 2 3]; P = [1 3 3 1]/8; k*P'"), "3/2");
+    // subs with a list evaluates at each value
+    assert_eq!(one("subs(2*x + 1, x, [1 2 3])"), "[3, 5, 7]");
+    // plot and scatter of two lists, bars with a given width
+    assert!(one("plot([1 2 3], [2 4 5])").contains("Figure") || !one("plot([1 2 3], [2 4 5])").starts_with("ERROR"));
+    assert!(!one("scatter([1 2 3], [2 4 5])").starts_with("ERROR"));
+    assert!(!one("bar([1 2 3], [2 4 5], 0.4)").starts_with("ERROR"));
+    assert!(one("plot([1 2 3], [2 4])").starts_with("ERROR"));
+    assert_eq!(one("round(-0.001, 2)"), "0.0");
+}

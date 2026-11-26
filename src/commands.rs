@@ -231,6 +231,24 @@ impl Session {
         }
     }
 
+    /// Two numeric lists of the same length (at least two values), for plot(xs, ys) and scatter(xs, ys)
+    pub(crate) fn two_lists(&mut self, a: &Node, b: &Node, f: &str) -> R<Option<(Vec<f64>, Vec<f64>)>> {
+        if matches!(b, Node::Ident(_)) && !self.vars.contains_key(match b { Node::Ident(n) => n.as_str(), _ => "" }) {
+            return Ok(None);
+        }
+        let (Ok(va), Ok(vb)) = (self.eval(a), self.eval(b)) else { return Ok(None) };
+        let (Expr::Matrix(_), Expr::Matrix(_)) = (&va, &vb) else { return Ok(None) };
+        let xs: Vec<f64> = flat(va).iter().map(numeric::value).collect();
+        let ys: Vec<f64> = flat(vb).iter().map(numeric::value).collect();
+        if xs.len() < 2 || !xs.iter().chain(&ys).all(|x| x.is_finite()) {
+            return Ok(None);
+        }
+        if xs.len() != ys.len() {
+            return Err(format!("{}: the two lists need the same length ({} and {})", f, xs.len(), ys.len()));
+        }
+        Ok(Some((xs, ys)))
+    }
+
     pub(crate) fn range(&mut self, cmd: &str, a: &Node, b: &Node) -> R<(f64, f64)> {
         let (x, y) = (self.number(a, "the range")?, self.number(b, "the range")?);
         if x == y {
@@ -252,8 +270,15 @@ impl Session {
     // ---------- plots ----------
 
     fn plot(&mut self, args: &[Node]) -> R<Expr> {
-        let usage = "usage: plot(f, x) or plot(f1, f2, ..., x, from, to)";
+        let usage = "usage: plot(f, x), plot(f1, f2, ..., x, from, to), or plot(xs, ys) for two lists";
         let k = args.len();
+        if k == 2 {
+            if let Some((xs, ys)) = self.two_lists(&args[0], &args[1], "plot")? {
+                self.note(format!("plot: a line through the {} points (x, y) of the two lists.", xs.len()));
+                let s = Series { label: label(&args[1], &Expr::sym("y")), points: xs.into_iter().zip(ys).collect(), ..Default::default() };
+                return Ok(obj(Obj::Figure(Figure::new(vec![s], "", "", false))));
+            }
+        }
         // plot(f..., x, from, to) when the last two are numbers, else plot(f..., x) on -10..10
         let explicit = k >= 4 && matches!(args[k - 3], Node::Ident(_)) && {
             let a = self.eval(&args[k - 2]).map(|v| numeric::value(&v));
