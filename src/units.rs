@@ -631,3 +631,14 @@ pub fn matrix_units(rows: &[Vec<Expr>]) -> Option<(Vec<Vec<Expr>>, Units)> {
     }
     Some((out, u0?))
 }
+
+/// the numbers of a quantity (or of each entry of a matrix), without units
+pub fn strip(e: &Expr) -> Expr {
+    match e {
+        Expr::Matrix(m) => Expr::Matrix(m.iter().map(|r| r.iter().map(strip).collect()).collect()),
+        _ => match split(e) {
+            Some((c, _)) => c,
+            None => e.clone(),
+        },
+    }
+}

@@ -101,3 +101,10 @@ fn latex_of_quantities() {
         ]
     );
 }
+
+#[test]
+fn bare_numbers() {
+    assert_eq!(one("value(3 km)"), "3000");
+    assert_eq!(one("value(100 km/h, m/s)"), "27.7777777777778");
+    assert_eq!(one("value([1 2] km, m)"), "[1000, 2000]");
+}

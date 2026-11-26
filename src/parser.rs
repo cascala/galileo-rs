@@ -849,8 +849,8 @@ impl P {
                     if !self.is(")") {
                         args.push(self.expr()?);
                         while self.eat(",") {
-                            // convert(q, km/h): the target is read as units
-                            if name == "convert" && args.len() == 1 {
+                            // convert(q, km/h), value(q, km/h): the target is read as units
+                            if (name == "convert" || name == "value") && args.len() == 1 {
                                 if let Some(u) = self.unit_target() {
                                     args.push(u);
                                     continue;

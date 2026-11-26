@@ -1,4 +1,4 @@
-<!-- syntax stamp: 1b6bb720f9d2fe3a -->
+<!-- syntax stamp: 22355d3af008d2f7 -->
 
 # The Galileo language
 
@@ -296,7 +296,8 @@ space separates entries, put quantities in parentheses: `[(1 m) (2 s)]`.
 
 Quantities multiply and divide like any product, and units that cancel give a number.
 A sum converts to the units of its first term, and adding different dimensions is an
-error. `convert(q, km/h)` changes units, and `convert(q)` gives SI base units.
+error. `convert(q, km/h)` changes units, `convert(q)` gives SI base units, and `value(q, km/h)`
+is the bare number (for plots and tables).
 
 ```galileo
 galileo> v = 3 m/s;

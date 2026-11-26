@@ -11,6 +11,7 @@ impl Session {
         let r = match f {
             "unit" => self.unit_cmd(args),
             "convert" => self.convert_cmd(args),
+            "value" => self.value_cmd(args),
             "dimension" => match args {
                 [q] => self.eval(q).and_then(|q| units::dimension(&q).map(Expr::Str)),
                 _ => Err("usage: dimension(q), such as dimension(3 m/s)".into()),
@@ -30,6 +31,17 @@ impl Session {
         let Expr::Str(u) = u else { return Err(usage.into()) };
         let u = units::expr_of(&units::parse(&u)?);
         crate::eval::arith(crate::parser::Op::Mul, x, u)
+    }
+
+    /// value(q): the number in SI base units; value(q, km/h): in those units
+    fn value_cmd(&mut self, args: &[Node]) -> R<Expr> {
+        let (q, t) = match args {
+            [q] => (self.eval(q)?, None),
+            [q, t] => (self.eval(q)?, Some(self.eval(t)?)),
+            _ => return Err("usage: value(q) is the number in SI units, value(q, km/h) in other units".into()),
+        };
+        let c = units::convert(&q, t.as_ref())?;
+        Ok(units::strip(&c))
     }
 
     fn convert_cmd(&mut self, args: &[Node]) -> R<Expr> {

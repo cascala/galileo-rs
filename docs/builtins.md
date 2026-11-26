@@ -1902,6 +1902,14 @@ Converts a quantity to other units of the same dimension: convert(100 km/h, m/s)
 
 Example: `convert(60 mph, km/h)`
 
+### value
+
+`value(q), value(q, unit)`
+
+The number of a quantity without its units: in SI base units (value(3 km) is 3000), or in the units given (value(3 km, mi)). Use it to plot or compute with plain numbers: value(v, m/s). Works entry by entry on a matrix.
+
+Example: `value(100 km/h, m/s)`
+
 ### unit
 
 `unit(x, "m/s")`
