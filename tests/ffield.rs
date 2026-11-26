@@ -264,6 +264,8 @@ fn quaternions() {
             "true",
         ),
         ("parts(quat(1, 2, 3, 4))", "[1, 2, 3, 4]"),
+        ("r = quat(pi/2, [0, 0, 1]); s = quat(pi/2, [1, 0, 0]); su2(s*r) == su2(s)*su2(r)", "true"),
+        ("[1, 2] == [1, 3]", "false"),
         ("quat(1, 2, 3, 4) + 1", "quat(2, 2, 3, 4)"),
     ] {
         assert_eq!(one(code), want, "{}", code);

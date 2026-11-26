@@ -1868,9 +1868,28 @@ pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
         }
     }
     if let (Expr::Matrix(_), _) | (_, Expr::Matrix(_)) = (&a, &b) {
+        // equal matrices: same shape and entries that simplify to the same value
+        let same = || -> bool {
+            match (&a, &b) {
+                (Expr::Matrix(x), Expr::Matrix(y)) => {
+                    x.len() == y.len()
+                        && x.iter().zip(y).all(|(r, s)| {
+                            r.len() == s.len()
+                                && r.iter().zip(s).all(|(p, q)| {
+                                    p == q
+                                        || matches!(
+                                            compare(Op::Eq, p.clone(), q.clone()),
+                                            Ok(Expr::Bool(true))
+                                        )
+                                })
+                        })
+                }
+                _ => false,
+            }
+        };
         return match op {
-            Op::Eq => Ok(Expr::Bool(a == b)),
-            Op::Ne => Ok(Expr::Bool(a != b)),
+            Op::Eq => Ok(Expr::Bool(same())),
+            Op::Ne => Ok(Expr::Bool(!same())),
             _ => Err("matrices can't be ordered".into()),
         };
     }
