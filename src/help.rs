@@ -1489,7 +1489,7 @@ pub const ENTRIES: &[Entry] = &[
         "const",
         "Units",
         "const.c, const.G, ...",
-        "Physical constants with units (CODATA 2018): c (speed of light), G (gravitation), g (standard gravity), h, hbar (Planck), k (Boltzmann), NA (Avogadro), R (gas constant), e (elementary charge), me, mp (electron and proton mass), eps0, mu0 (vacuum), sigma (Stefan-Boltzmann), Mearth, Rearth, Msun, Rsun, Mmoon.",
+        "Physical constants with units (CODATA 2022): c (speed of light), G (gravitation), g (standard gravity), h, hbar (Planck), k or kB (Boltzmann), NA (Avogadro), R (gas constant), e (elementary charge), me, mp (electron and proton mass), eps0, mu0 (vacuum), sigma (Stefan-Boltzmann), Mearth, Rearth, Msun, Rsun, Mmoon.",
         "const.hbar*const.c"
     ),
     e!(

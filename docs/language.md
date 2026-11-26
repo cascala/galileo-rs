@@ -323,7 +323,7 @@ galileo> [1 2 3] m
 The units are the SI ones, with the prefixes G, M, k, m, u (micro), n and p (and c for
 cm): m, g, s, A, K, mol, N, J, W, Wh, Pa, Hz, C, V, ohm, F, H, T, Wb, eV, L, cal and bar;
 also min, h, day, yr, atm, lb, ft, inch, mi, mph, AU, ly, and the angles rad and deg.
-`const.c`, `const.G`, `const.g`, `const.h`, `const.hbar`, `const.k`, `const.NA`, `const.R`,
+`const.c`, `const.G`, `const.g`, `const.h`, `const.hbar`, `const.k` (or `const.kB`), `const.NA`, `const.R`,
 `const.e`, `const.me`, `const.mp`, `const.eps0`, `const.mu0`, `const.sigma`, `const.Mearth`,
 `const.Rearth`, `const.Msun`, `const.Rsun` and `const.Mmoon` are physical constants with
 their units, and `dimension(q)` names the dimension of a quantity.
