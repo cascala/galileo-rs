@@ -1,0 +1,333 @@
+<!-- syntax stamp: 5b1849a2ff1af3e3 -->
+
+# The Galileo language
+
+This is the reference for the language Galileo reads: at the `galileo>` prompt, in `.gg`
+scripts, in Jupyter notebooks and in the browser playground. Every command is listed,
+with its usage and an example, in the [command reference](builtins.md); inside Galileo,
+`help` lists them and `help(name)` describes one.
+
+The examples below are transcripts. A line starting with `galileo>` is what you type,
+a line starting with `...>` continues it, and the lines after it are what Galileo shows.
+They are shown with `explain = false`, so without the short explanations that some
+commands add.
+
+## Statements and results
+
+Each line is a statement, and Galileo shows its result. A `;` at the end of a statement
+hides the result, and `;` also separates statements on one line. `ans` is the last result
+that was not assigned to a name.
+
+```galileo
+galileo> 2 + 3
+5
+galileo> ans * 10
+50
+galileo> a = 7; b = a^2
+49
+```
+
+`//` starts a comment that runs to the end of the line.
+
+```galileo
+galileo> 6*7   // the answer
+42
+```
+
+A statement can span lines. Inside `( )` a new line is just space, inside `[ ]` it starts
+a new matrix row, and a line ending in `\` continues on the next one. The prompt waits for
+the rest, and so do blocks (`for`, `while`, `if`, `function`) until their `end`.
+
+```galileo
+galileo> 1 + 2 + \
+...> 3
+6
+galileo> max(4,
+...> 9)
+9
+```
+
+## Numbers
+
+Whole numbers and fractions are exact, with no size limit. Roots and constants stay
+symbolic until you ask for a number with `eval`.
+
+```galileo
+galileo> 1/3 + 2/6
+2/3
+galileo> 2^100
+1267650600228229401496703205376
+galileo> sqrt(8)
+2*sqrt(2)
+galileo> eval(5/4)
+1.25
+```
+
+A number with a decimal point, like `0.5` or `1e-3`, is a decimal (a 64-bit float), and
+anything combined with a decimal becomes one. `eval(x, digits)` gives as many significant
+digits as you ask for, up to 100000, and the digits carry through `+ - * /`.
+
+```galileo
+galileo> 0.5 + 1/4
+0.75
+galileo> eval(pi, 30)
+3.14159265358979323846264338328
+```
+
+The constants are `pi`, `e`, and `i` (or `j`) for the imaginary unit. `true` and `false`
+are the two booleans, and `inf` stands for infinity in limits and integrals.
+
+```galileo
+galileo> (2 + 3*i)*(2 - 3*i)
+13
+galileo> i^2
+-1
+```
+
+## Names and variables
+
+`name = value` stores a value. Names start with a letter or `_`, and may contain letters,
+digits and `_`. A name that has no value is a symbol, so expressions stay symbolic.
+
+```galileo
+galileo> p = (x + 1)^2
+(x+1)^2
+galileo> expand(p)
+x^2+2*x+1
+```
+
+Names in a stored expression are looked up again each time it is used (late binding):
+
+```galileo
+galileo> f = a2*x;
+galileo> a2 = 3;
+galileo> f
+3*x
+```
+
+`who` lists the variables you defined, and `clear` removes them all.
+
+A one-letter name, or a letter followed by digits or `_` and more, used as a function
+(`y(t)`, `f2(x)`) is an undefined function, and primes write its derivatives.
+Any other unknown function name is an error.
+
+```galileo
+galileo> deriv(y(t)^2, t)
+2*y(t)*y'(t)
+galileo> sinx(1)
+Error: unknown function sinx
+```
+
+## Operators
+
+From loosest to tightest binding:
+
+| Operators | Meaning |
+|---|---|
+| `a:b`, `a:step:b` | range |
+| `\|\|` | or |
+| `&&` | and |
+| `==` `~=` `!=` `<` `>` `<=` `>=` | comparison; `==` between expressions is an equation |
+| `+` `-` | sum, difference |
+| `*` `/` `\` `.*` `./` | product, quotient, left division (`A\b` solves `A*x = b`), elementwise product and quotient |
+| unary `-` `+` `!` | negation, not |
+| `^` `.^` | power and elementwise power, right associative |
+| `f(args)` `A[i]` `A'` | call, index from 0, transpose |
+
+So `-x^2` is `-(x^2)`, `2^3^2` is `2^9`, and `2^-1` is allowed.
+
+```galileo
+galileo> 2^3^2
+512
+galileo> -2^2
+-4
+galileo> 2^-1
+1/2
+galileo> 3 > 2 && 1 == 1
+true
+```
+
+## Calling and defining functions
+
+A function call is a name followed directly by `(`, with no space: `sin(x)`. The
+[command reference](builtins.md) lists all built-in functions. A few commands also work
+without parentheses: `help`, `help name`, `who`, `whos`, `clear`, `ls`, `pwd`, `cd folder`
+and `exit` (or `quit`). The arguments of `load(...)`, `help(...)`, `cd(...)` and
+`metric.generate(...)` are taken as text, so they need no quotes.
+
+`f(x) := expression` (or `f(x) = expression`) defines a function in one line.
+
+```galileo
+galileo> g(x) := x^2 + 1
+g(x) := x^2+1
+galileo> g(3)
+10
+galileo> deriv(g(t), t)
+2*t
+```
+
+Longer functions are blocks closed by `end`. Their variables are their own. A function
+`function name(a, b)` returns with `return value`; a function written as
+`function out = name(a, b)` returns the value of `out` when it ends.
+
+```galileo
+galileo> function r = steps(n)
+...>   r = 0;
+...>   while n ~= 1
+...>     if mod(n, 2) == 0
+...>       n = n/2;
+...>     else
+...>       n = 3*n + 1;
+...>     end
+...>     r = r + 1;
+...>   end
+...> end
+galileo> steps(27)
+111
+```
+
+## Matrices and vectors
+
+Square brackets build a matrix: spaces or commas separate entries, and `;` or a new line
+separates rows. Inside brackets, `[a -b]` has two entries while `[a - b]` and `[a-b]`
+have one.
+
+```galileo
+galileo> A = [1 2; 3 4]
+[1, 2;
+ 3, 4]
+galileo> A'
+[1, 3;
+ 2, 4]
+galileo> det(A)
+-2
+galileo> A \ [5; 6]
+[ -4;
+ 9/2]
+```
+
+`a:b` and `a:step:b` are ranges, which make row vectors.
+
+```galileo
+galileo> 1:5
+[1, 2, 3, 4, 5]
+galileo> 10:-3:1
+[10, 7, 4, 1]
+```
+
+`*`, `/` and `^` are the matrix operations; `.*`, `./` and `.^` work entry by entry.
+
+```galileo
+galileo> [1 2 3] .* [4 5 6]
+[4, 10, 18]
+galileo> [1 2 3].^2
+[1, 4, 9]
+```
+
+`x(k)` counts positions from 1 and `x[k]` from 0; `end` inside the parentheses is the last
+position. Assigning to a part changes it, and a vector grows when you assign past its end.
+
+```galileo
+galileo> v = [10 20 30];
+galileo> v(1)
+10
+galileo> v[1]
+20
+galileo> v(end + 1) = 40
+[10, 20, 30, 40]
+```
+
+A command that returns several values hands them out with `[a, b] = ...`:
+
+```galileo
+galileo> [Q, R] = qr([3 0; 4 5]);
+galileo> R
+[5, 4;
+ 0, 3]
+```
+
+## Strings
+
+Strings are written in double quotes. `+` joins a string with anything.
+
+```galileo
+galileo> s = "x = " + 3
+"x = 3"
+galileo> upper("galileo")
+"GALILEO"
+galileo> format("{} + {} = {}", 1, 2, 3)
+"1 + 2 = 3"
+```
+
+The other string commands are `str`, `num`, `split`, `join`, `replace`, `contains`,
+`lower`, `trim` and `length`; `print(a, b, ...)` shows values as text.
+
+## Lists and records
+
+A list holds values of any kind: `{1, "a", [1 2]}`. A record has named fields:
+`{mass: 3, name: "ball"}`. `p.field` reads a field, and `p.field = v` makes or changes one.
+
+```galileo
+galileo> L = {1, "a", [1 2]};
+galileo> L(2)
+"a"
+galileo> ball = {mass: 3, name: "ball"};
+galileo> ball.mass
+3
+galileo> ball.speed = 2;
+galileo> fields(ball)
+{"mass", "name", "speed"}
+galileo> sq(k) := k^2;
+galileo> map(sq, {1, 2, 3})
+{1, 4, 9}
+```
+
+`append`, `concat`, `reverse`, `map(f, L)` and `filter(f, L)` work on lists (`f` is the
+name of a function), and `fields` and `has` on records.
+
+## Control flow
+
+`if`, `for` and `while` are blocks closed by `end`. Statements inside show their results
+unless they end in `;`. On one line, separate the parts with commas.
+
+```galileo
+galileo> for k = 1:3
+...>   k^2
+...> end
+1
+4
+9
+galileo> s = 0; for x in [2 3 5], s = s + x; end; s
+10
+galileo> n = 7;
+galileo> if mod(n, 2) == 0, "even", else, "odd", end
+"odd"
+```
+
+* `for k = range ... end` or `for x in values ... end` walks a range, a vector, the rows of
+  a matrix, a list or a string.
+* `while condition ... end` repeats while the condition holds.
+* `if c1 ... elseif c2 ... else ... end` picks a branch. `if(c, a, b)` is a function that
+  gives `a` or `b`.
+* `break` leaves a loop and `continue` starts its next turn.
+
+## Explanations
+
+Results are always plain Galileo values, which can be pasted back in. Many commands also
+add a short explanation, shown apart from the result (as `//` comments at the prompt).
+`explain = false` turns explanations off, `explain = "teach"` makes them longer for
+learning, and `explain = true` brings back the short ones. The environment variable
+`GALILEO_EXPLAIN` sets the start: `0` for off, `teach` for teaching.
+
+## Scripts
+
+A script is a text file of statements, usually named `*.gg`. `load(file)` runs one as if
+it were typed in (`.gg` may be left off, and a name with spaces is quoted:
+`load("my file.gg")`). From a shell, `galileo file.gg` runs a script and
+`galileo -i file.gg` runs it and keeps the prompt open. An error stops the script and
+names the file and line: `file.gg:12: ...`.
+
+## Changes from the Scala version
+
+* Inside a matrix, `[a -b]` has two entries (as in Matlab); `[a - b]` and `[a-b]` have one.
+* `exit` is not available in a notebook.

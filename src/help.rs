@@ -73,8 +73,8 @@ pub const ENTRIES: &[Entry] = &[
     e!(
         "sin",
         "Functions",
-        "sin(x), cos(x), tan(x)",
-        "Trigonometric functions, in radians. Exact at multiples of pi/12 (15 degrees).",
+        "sin(x), cos(x), tan(x), sec(x), csc(x), cot(x)",
+        "Trigonometric functions, in radians. Exact at multiples of pi/12 (15 degrees). sec, csc and cot are 1/cos, 1/sin and 1/tan, and are written that way.",
         "sin(pi/6)"
     ),
     e!(
@@ -109,8 +109,8 @@ pub const ENTRIES: &[Entry] = &[
     e!(
         "sinh",
         "Functions",
-        "sinh(x), cosh(x), tanh(x), asinh(x), acosh(x), atanh(x)",
-        "Hyperbolic functions and their inverses.",
+        "sinh(x), cosh(x), tanh(x), asinh(x), acosh(x), atanh(x), sech(x), csch(x), coth(x)",
+        "Hyperbolic functions and their inverses. sech, csch and coth are 1/cosh, 1/sinh and 1/tanh, and are written that way.",
         "deriv(tanh(x), x)"
     ),
     e!(
@@ -699,7 +699,7 @@ pub const ENTRIES: &[Entry] = &[
         "Factoring lab",
         "leaderboard()",
         "The best programs found by every algosearch in this session, with how they compare to Pollard rho on numbers no search trained on.",
-        "leaderboard()"
+        "algosearch(1); leaderboard()"
     ),
     e!(
         "gnfs",
@@ -1015,6 +1015,13 @@ pub const ENTRIES: &[Entry] = &[
         "mean(x), median(x), mode(x), var(x), std(x), summary(x), quantile(x, p)",
         "Descriptive statistics of a list of numbers (a row or column). var and std divide by n - 1 (sample variance). summary gives [min, Q1, median, Q3, max]; quantile interpolates linearly between sorted values (p may be a list). Whole numbers and fractions give exact answers.",
         "summary([2 4 4 4 5 5 7 9])"
+    ),
+    e!(
+        "entropy",
+        "Statistics",
+        "entropy(p), entropy(p, 2), entropy(rho)",
+        "The Shannon entropy -sum p*log(p) of probabilities p = [p1 p2 ...], in nats (natural log), or in bits with entropy(p, 2). It is 0 when one outcome is certain and log(n) for n equally likely outcomes. For a square density matrix rho it is the von Neumann entropy -tr(rho*log(rho)), from the eigenvalues of rho.",
+        "entropy([1/2 1/4 1/4], 2)"
     ),
     e!(
         "tally",
@@ -1473,7 +1480,13 @@ pub const ENTRIES: &[Entry] = &[
     ),
 ];
 
-const ALIASES: &[(&str, &str)] = &[
+/// other names for a command: (alias, the entry it is described under)
+pub const ALIASES: &[(&str, &str)] = &[
+    ("characteristic", "gf"),
+    ("modulus", "gf"),
+    ("lift", "gf"),
+    ("isfield", "gf"),
+    ("minpoly", "numfield"),
     ("julia", "mandelbrot"),
     ("orth", "gramschmidt"),
     ("dirac", "heaviside"),
@@ -1710,4 +1723,40 @@ pub fn help(name: Option<&str>) -> String {
             }
         },
     }
+}
+
+/// The command reference, docs/builtins.md: every entry by topic, as Markdown.
+/// tests/reference.rs keeps the file equal to this.
+pub fn reference_markdown() -> String {
+    let anchor = |s: &str| s.to_lowercase().replace(' ', "-");
+    let mut s = String::from(
+        "<!-- Generated from src/help.rs: GALILEO_BLESS=1 cargo test --test reference -->\n\n\
+         # Galileo commands\n\n\
+         Every built-in command, by topic. Inside Galileo, `help` lists them and `help(name)` \
+         shows the same text as here. How statements, operators, functions, matrices, \
+         strings, lists and blocks are written is described in the \
+         [language reference](language.md).\n\n",
+    );
+    let topics = topics();
+    s += &topics
+        .iter()
+        .map(|(t, _)| format!("[{}](#{})", t, anchor(t)))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    s += "\n";
+    for (t, es) in &topics {
+        s += &format!("\n## {}\n", t);
+        for e in es {
+            s += &format!("\n### {}\n\n`{}`\n\n{}\n\nExample: `{}`\n", e.name, e.usage, e.description, e.example);
+            let also: Vec<String> = ALIASES
+                .iter()
+                .filter(|(_, k)| *k == e.name)
+                .map(|(a, _)| format!("`{}`", a))
+                .collect();
+            if !also.is_empty() {
+                s += &format!("\nAlso found as {}.\n", also.join(", "));
+            }
+        }
+    }
+    s
 }

@@ -79,6 +79,10 @@ docker buildx build --platform linux/amd64,linux/arm64 -t cascala/galileo:0.4.0 
 Type `help` for the list of commands, and `help(name)` for one of them. A statement ending
 in `;` runs without printing its result.
 
+**Reference:** the [language reference](docs/language.md) describes how Galileo is written
+(statements, numbers, operators, functions, matrices, strings, lists, records and blocks),
+and the [command reference](docs/builtins.md) lists every command with an example.
+
 ## Scripts
 
 A script is a text file of Galileo statements, one per line, usually named `*.gg`:
@@ -193,24 +197,25 @@ for n = 1:5
 end
 ```
 
-* `for k = 1:10 ... end` (or `for x in values`) walks a range, a vector, the rows of a
-  matrix, a list or a string; `while`, `if ... elseif ... else ... end`, `break`,
-  `continue`. On one line: `for k = 1:3, print(k), end`.
-* `function name(a, b) ... end` has its own variables and ends with `return value`;
-  `function out = name(a, b) ... end` returns `out`. `f(x) := ...` is the one-line form.
-* Strings: `"x = " + 3`, `str`, `num`, `split`, `join`, `replace`, `contains`, `upper`,
-  `lower`, `trim`, `format("{} + {} = {}", 1, 2, 3)`.
-* Lists `{1, "a", [1 2]}` and records `{mass: 3, name: "ball"}`; `p.mass = 3` makes or
-  changes a field. `append`, `concat`, `map(f, L)`, `filter(f, L)`, `fields`, `has`.
-* Parts: `x(k) = v` counts from 1, `x[k] = v` from 0, and `end` is the last position:
-  `x(end + 1) = v` appends. A vector grows as you assign past its end.
-* Elementwise `.*`, `./`, `.^`; `*`, `/`, `^` stay the matrix operations.
-* `eval(pi, 50)` gives 50 digits (up to 100000); the digits carry through `+ - * /`.
+The [language reference](docs/language.md) covers all of it: loops and conditions,
+functions, strings, lists and records, assignment to parts, and elementwise operators.
 
-## Language changes from the Scala version
+## Changing the language
 
-* Inside a matrix, `[a -b]` has two elements (as in Matlab); `[a - b]` and `[a-b]` are one.
-* `exit` is not available in a notebook.
+`tests/reference.rs` keeps the reference in step with the engine, and CI runs it:
+
+* every example in `docs/language.md` is run, and must show what the reference says;
+* `docs/language.md` carries a stamp of `src/parser.rs`: after any change to the parser,
+  the test fails until the reference has been updated for it and the stamp renewed;
+* `docs/builtins.md` is generated from the help entries in `src/help.rs`;
+* every command the engine answers to must have a help entry, and every help example
+  must run without an error.
+
+After updating `docs/language.md` or `src/help.rs`, renew the stamp and the command reference with
+
+```
+GALILEO_BLESS=1 cargo test --test reference
+```
 
 ## Layout
 
@@ -229,7 +234,8 @@ end
 | `src/eval.rs` | Sessions: variables, commands, built-in functions |
 | `src/lang.rs` | Blocks (`for`, `while`, `if`, `function`), lists, records, strings, assignment to parts |
 | `src/prec.rs` | `eval(x, digits)`: many-digit values in fixed point |
-| `src/help.rs` | `help` and `help(name)` |
+| `src/help.rs` | `help` and `help(name)`; the source of `docs/builtins.md` |
+| `docs/language.md`, `docs/builtins.md` | The language reference and the command reference |
 | `src/ratfun.rs` | Rational-function normal form behind `simplify` |
 | `src/geometry.rs` | Metrics, curvature tensors, geodesic equations |
 | `src/commands.rs` | Geometry, plot and ODE commands |
