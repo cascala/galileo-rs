@@ -47,6 +47,7 @@ pub mod plot;
 pub mod polyselect;
 pub mod prec;
 pub mod print;
+pub mod qring;
 pub mod radicals;
 pub mod ratfun;
 pub mod rsa_data;

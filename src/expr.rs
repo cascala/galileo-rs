@@ -127,6 +127,8 @@ pub enum Obj {
     Record(Vec<(String, Expr)>),
     Ring(std::rc::Rc<crate::ffield::Ring>),
     Elem(crate::ffield::Elem),
+    QRing(std::rc::Rc<crate::qring::QRing>),
+    QElem(crate::qring::QElem),
 }
 
 impl Obj {
@@ -143,6 +145,8 @@ impl Obj {
             Obj::Record(_) => "Record",
             Obj::Ring(_) => "Ring",
             Obj::Elem(_) => "RingElement",
+            Obj::QRing(_) => "Ring",
+            Obj::QElem(_) => "RingElement",
         }
     }
     /// Plain text rendering
@@ -158,6 +162,8 @@ impl Obj {
             Obj::Record(v) => crate::lang::record_text(v),
             Obj::Ring(r) => r.name(),
             Obj::Elem(x) => x.text(),
+            Obj::QRing(r) => r.name(),
+            Obj::QElem(x) => x.text(),
             Obj::Report(r) => r
                 .shown_value()
                 .map(|v| crate::print::show(&v))

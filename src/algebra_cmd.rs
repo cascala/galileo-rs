@@ -121,6 +121,8 @@ impl Session {
             "groebner",
             "polyrem",
             "inideal",
+            "numfield",
+            "minpoly",
         ];
         if !NAMES.contains(&f) {
             return None;
@@ -145,6 +147,19 @@ impl Session {
         // cayley of a list of permutations is the older command
         if f == "cayley" && !v.first().is_some_and(is_group) {
             return None;
+        }
+        let qringish = |e: &Expr| crate::qring::as_ring(e).is_some();
+        if f == "numfield"
+            || (f == "quotient" && !v.first().is_some_and(is_group))
+            || v.first().is_some_and(qringish)
+        {
+            return Some(self.qring_cmd(f, &v));
+        }
+        if f == "minpoly" {
+            return Some(Err(
+                "minpoly(x) takes an element of a number field, such as numfield(x^2 - 2, x + 1)"
+                    .into(),
+            ));
         }
         if matches!(f, "groebner" | "polyrem" | "inideal") {
             return Some(self.groebner_cmd(f, &v));
@@ -313,6 +328,136 @@ impl Session {
                     Ok(show_poly(&r))
                 }
             }
+        }
+    }
+
+    fn qring_cmd(&mut self, f: &str, v: &[Expr]) -> R<Expr> {
+        use crate::qring as qr;
+        let var_of = |e: &Expr| -> R<String> {
+            match e {
+                Expr::Sym(s) => Ok(s.clone()),
+                _ => Err(format!(
+                    "{}: expected a variable name, got {}",
+                    f,
+                    crate::print::show(e)
+                )),
+            }
+        };
+        let elem = |e: &Expr| -> R<qr::QElem> {
+            qr::as_elem(e)
+                .cloned()
+                .ok_or_else(|| format!("{}: expected an element such as numfield(x^2 - 2, x)", f))
+        };
+        let made = |s: &mut Self, r: Rc<qr::QRing>, x: Option<&Expr>| -> R<Expr> {
+            match x {
+                Some(x) => Ok(qr::value(r.from_expr(x)?)),
+                None => {
+                    let kind = if r.field {
+                        "a field"
+                    } else {
+                        "not a field (the modulus factors)"
+                    };
+                    s.note(&format!(
+                        "{}[{}]/({}): {} has degree {} over {} and is {}; its elements are polynomials in {} of degree below {}, and {} = 0 in it.",
+                        r.base(),
+                        r.var,
+                        crate::print::show(&qr::poly_expr(&r.f, &r.var)),
+                        r.name(),
+                        r.degree(),
+                        r.base(),
+                        kind,
+                        r.var,
+                        r.degree(),
+                        crate::print::show(&qr::poly_expr(&r.f, &r.var)),
+                    ));
+                    Ok(qr::ring_value(r))
+                }
+            }
+        };
+        let prime = |e: &Expr| -> R<Option<num_bigint::BigInt>> {
+            let n = e
+                .num()
+                .filter(|n| n.is_integer())
+                .and_then(|n| n.as_bigint())
+                .ok_or_else(|| format!("{}: the characteristic must be 0 or a prime", f))?;
+            if n.is_zero() {
+                Ok(None)
+            } else if crate::numtheory::is_prime(&n) {
+                Ok(Some(n))
+            } else {
+                Err(format!(
+                    "{}: the characteristic must be 0 or a prime, got {}",
+                    f, n
+                ))
+            }
+        };
+        use num_traits::Zero;
+        match (f, v) {
+            ("numfield", [p, rest @ ..]) if rest.len() <= 1 => {
+                let syms = p.symbols();
+                if syms.len() != 1 {
+                    return Err(
+                        "numfield: give a polynomial in one variable, such as numfield(x^2 - 2)"
+                            .into(),
+                    );
+                }
+                let r = qr::make(p, &syms[0], None, true)?;
+                made(self, r, rest.first())
+            }
+            ("quotient", [p, x, rest @ ..]) if rest.len() <= 2 => {
+                let ch = match rest.first() {
+                    Some(c) => prime(c)?,
+                    None => None,
+                };
+                let r = qr::make(p, &var_of(x)?, ch, false)?;
+                made(self, r, rest.get(1))
+            }
+            ("minpoly", [a]) => {
+                let a = elem(a)?;
+                let m = a.minpoly();
+                self.note(&format!(
+                    "The monic polynomial of least degree over {} that vanishes at {}; it has degree {}, at most {}, the degree of the ring.",
+                    a.ring.base(),
+                    a.text(),
+                    m.len() - 1,
+                    a.ring.degree()
+                ));
+                Ok(qr::poly_expr(&m, &a.ring.var))
+            }
+            ("lift", [a]) => Ok(elem(a)?.lift()),
+            ("modulus", [r]) => {
+                let r = qr::as_ring(r).unwrap();
+                Ok(qr::poly_expr(&r.f, &r.var))
+            }
+            ("isfield", [r]) => Ok(Expr::Bool(qr::as_ring(r).unwrap().field)),
+            ("characteristic", [r]) => Ok(Expr::Num(crate::num::Number::from_bigint(
+                qr::as_ring(r)
+                    .unwrap()
+                    .p
+                    .clone()
+                    .unwrap_or_else(num_bigint::BigInt::zero),
+            ))),
+            ("order", [r]) => {
+                let r = qr::as_ring(r).unwrap();
+                match &r.p {
+                    Some(p) => {
+                        let q = num_traits::pow(p.clone(), r.degree());
+                        self.note(&format!(
+                            "{} has {}^{} = {} elements.",
+                            r.name(),
+                            p,
+                            r.degree(),
+                            q
+                        ));
+                        Ok(Expr::Num(crate::num::Number::from_bigint(q)))
+                    }
+                    None => Err(format!("order: {} is infinite", r.name())),
+                }
+            }
+            _ => Err(format!(
+                "{}: wrong arguments; numfield(f), quotient(f, x), quotient(f, x, p) build rings, and K(g) builds elements",
+                f
+            )),
         }
     }
 

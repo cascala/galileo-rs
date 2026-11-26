@@ -636,6 +636,10 @@ impl Session {
                 eigvec(&m).map(|(vecs, _)| Expr::Matrix(vecs))
             }
             "trace" | "size" | "eig" => {
+                if let (Some(x), "trace") = (crate::qring::as_elem(&v), f) {
+                    self.note("The field trace: the trace of multiplication by the element (the sum of its conjugates).");
+                    return Ok(crate::qring::qnum(x.trace()));
+                }
                 let m = match v {
                     Expr::Matrix(m) => m,
                     _ if f == "size" => {

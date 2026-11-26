@@ -126,3 +126,88 @@ fn groebner_bases() {
         assert_eq!(one(code), want, "{}", code);
     }
 }
+
+#[test]
+fn number_fields_and_quotients() {
+    for (code, want) in [
+        (
+            "K = numfield(x^2 - 2); K(x + 1)^2",
+            "numfield(x^2-2, 2*x+3)",
+        ),
+        (
+            "K = numfield(x^2 - 2); 1 / K(x + 1)",
+            "numfield(x^2-2, x-1)",
+        ),
+        ("K = numfield(x^2 - 2); norm(K(x + 1))", "-1"),
+        ("K = numfield(x^2 - 2); trace(K(x + 1))", "2"),
+        ("K = numfield(x^2 - 2); minpoly(K(x + 1))", "x^2-2*x-1"),
+        ("L = numfield(x^3 - 2); minpoly(L(x^2 + x))", "x^3-6*x-6"),
+        ("L = numfield(x^3 - 2); norm(L(x^2 + x))", "6"),
+        ("L = numfield(x^3 - 2); minpoly(L(3))", "x-3"),
+        ("numfield(x^2 - 1)", "ERROR"),
+        (
+            "R = quotient(x^2 - 1, x); R(x + 1) * R(x - 1)",
+            "quotient(x^2-1, x, 0, 0)",
+        ),
+        ("R = quotient(x^2 - 1, x); R(x + 1)^-1", "ERROR"),
+        (
+            "F = quotient(x^2 + 1, x, 3); F(x + 1)^8",
+            "quotient(x^2+1, x, 3, 1)",
+        ),
+        ("isfield(quotient(x^2 + 1, x, 5))", "false"),
+        ("order(quotient(x^3 + x + 1, x, 2))", "8"),
+        (
+            "quotient(x^2+1, x, 3, x+1) == quotient(x^2 + 1, x, 3)(x + 1)",
+            "ERROR",
+        ),
+        (
+            "F = quotient(x^2 + 1, x, 3); quotient(x^2+1, x, 3, x+1) == F(x+1)",
+            "true",
+        ),
+        ("numfield(x^2-2, x+1) + 1", "numfield(x^2-2, x+2)"),
+        ("trace([1, 2; 3, 4])", "5"),
+    ] {
+        let got = one(code);
+        if want == "ERROR" {
+            assert!(got.starts_with("ERROR"), "{} gave {}", code, got);
+        } else {
+            assert_eq!(got, want, "{}", code);
+        }
+    }
+}
+
+#[test]
+fn quotient_identities() {
+    use galileo_rs::qring as qr;
+    use num_rational::BigRational;
+    let mut seed = 12345u64;
+    let mut rnd = |m: i64| {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((seed >> 33) % (2 * m as u64 + 1)) as i64 - m
+    };
+    for case in 0..60 {
+        let p = [None, Some(5), Some(7)][case % 3].map(BigInt::from);
+        let n = 2 + case % 3;
+        let mut f = format!("x^{}", n);
+        for k in 0..n {
+            f.push_str(&format!(" + ({})*x^{}", rnd(4), k));
+        }
+        let fe = galileo_rs::eval::Session::new().run(&f).pop().unwrap().ok();
+        let Some(galileo_rs::Output::Value(fe)) = fe else { panic!() };
+        let r = qr::make(&fe, "x", p, false).unwrap();
+        for _ in 0..5 {
+            let v: Vec<BigRational> = (0..n).map(|_| BigRational::from_integer(rnd(5).into())).collect();
+            let a = r.elem(v);
+            if let Ok(b) = a.inv() {
+                assert_eq!(a.mul(&b), r.elem(vec![BigRational::from_integer(1.into())]));
+            }
+            // minpoly(a)(a) = 0
+            let m = a.minpoly();
+            let mut acc = r.elem(vec![]);
+            for c in m.iter().rev() {
+                acc = acc.mul(&a).add(&r.elem(vec![c.clone()]));
+            }
+            assert!(acc.v.is_empty(), "minpoly fails in {}", r.name());
+        }
+    }
+}

@@ -790,7 +790,8 @@ impl Session {
                             Expr::Matrix(m) => parts.push(m),
                             v if v.is_scalar()
                                 || matches!(v, Expr::Bool(_) | Expr::Str(_))
-                                || crate::ffield::as_elem(&v).is_some() =>
+                                || crate::ffield::as_elem(&v).is_some()
+                                || crate::qring::as_elem(&v).is_some() =>
                             {
                                 parts.push(vec![vec![v]])
                             }
@@ -929,6 +930,13 @@ impl Session {
                 }
                 let x = self.eval_hidden(&args[0], &["a".to_string()])?;
                 return r.from_expr(&x).map(crate::ffield::value);
+            }
+            if let crate::expr::Obj::QRing(r) = &*o {
+                if args.len() != 1 {
+                    return Err(format!("{}(x) takes one argument", f));
+                }
+                let x = self.eval_hidden(&args[0], std::slice::from_ref(&r.var))?;
+                return r.from_expr(&x).map(crate::qring::value);
             }
             if let crate::expr::Obj::Report(r) = &*o {
                 if let Some(Expr::Matrix(m)) = r.shown_value() {
@@ -1092,7 +1100,14 @@ impl Session {
             }
             "lu" => Err("use [L,U] = lu(A) or [L,U,P] = lu(A)".into()),
             "norm" => {
-                let m = self.matrix_arg(args.first().ok_or("norm takes a matrix")?, "norm")?;
+                let m = match self.eval(args.first().ok_or("norm takes a matrix")?)? {
+                    Expr::Matrix(m) => m,
+                    v if crate::qring::as_elem(&v).is_some() && args.len() == 1 => {
+                        self.note("The field norm: the determinant of multiplication by the element (the product of its conjugates).");
+                        return Ok(crate::qring::qnum(crate::qring::as_elem(&v).unwrap().norm()));
+                    }
+                    other => return Err(format!("norm needs a matrix, got {}", show(&other))),
+                };
                 let p = match args.get(1) {
                     None => "2".to_string(),
                     Some(Node::Ident(s)) => s.clone(),
@@ -1580,6 +1595,12 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
             (x, y) => arith(scalar, x, y),
         };
     }
+    if (crate::qring::as_elem(&a).is_some() || crate::qring::as_elem(&b).is_some())
+        && !matches!(&a, M(_))
+        && !matches!(&b, M(_))
+    {
+        return crate::qring::arith(op, &a, &b);
+    }
     if crate::ffield::as_elem(&a).is_some() || crate::ffield::as_elem(&b).is_some() {
         if !matches!(&a, M(_)) && !matches!(&b, M(_)) {
             return crate::ffield::arith(op, &a, &b);
@@ -1678,6 +1699,14 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
 pub fn compare(op: Op, a: Expr, b: Expr) -> R<Expr> {
     if crate::ffield::as_elem(&a).is_some() || crate::ffield::as_elem(&b).is_some() {
         let eq = crate::ffield::equal(&a, &b)?;
+        return match op {
+            Op::Eq => Ok(Expr::Bool(eq)),
+            Op::Ne => Ok(Expr::Bool(!eq)),
+            _ => Err("elements of a finite ring can't be ordered".into()),
+        };
+    }
+    if crate::qring::as_elem(&a).is_some() || crate::qring::as_elem(&b).is_some() {
+        let eq = crate::qring::equal(&a, &b)?;
         return match op {
             Op::Eq => Ok(Expr::Bool(eq)),
             Op::Ne => Ok(Expr::Bool(!eq)),

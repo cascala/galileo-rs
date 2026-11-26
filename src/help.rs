@@ -961,6 +961,13 @@ pub const ENTRIES: &[Entry] = &[
         "groebner([x^2 + y^2 - 1, x - y], [x, y])"
     ),
     e!(
+        "numfield",
+        "Rings and fields",
+        "numfield(f), quotient(f, x), quotient(f, x, p), K = numfield(x^2 - 2); K(x + 1)",
+        "The number field Q[x]/(f) for f irreducible over Q, and the quotient ring K[x]/(f) with K = Q, or Z/p when a prime p is given. Elements are polynomials in x reduced mod f and support + - * / ^ (division fails on a zero divisor, naming the common factor). norm(a), trace(a) and minpoly(a) give the field norm, the trace and the minimal polynomial; modulus, isfield, characteristic, order and lift work as for gf.",
+        "K = numfield(x^3 - 2); minpoly(K(x^2 + x))"
+    ),
+    e!(
         "table",
         "Calculus",
         "table(expr, k, a, b (, step)) or table(expr, k, [v1, v2, ...])",
