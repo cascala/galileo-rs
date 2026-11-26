@@ -153,6 +153,8 @@ pub struct Figure {
     pub y_label: String,
     pub title: String,
     pub equal_aspect: bool,
+    /// fixed view [x0, x1] x [y0, y1], set by window(p, ...)
+    pub window: Option<(f64, f64, f64, f64)>,
 }
 
 struct Bounds {
@@ -170,6 +172,7 @@ impl Figure {
             y_label: y_label.into(),
             title: String::new(),
             equal_aspect,
+            window: None,
         }
     }
 
@@ -181,11 +184,15 @@ impl Figure {
             y_label: pick(&self.y_label, &o.y_label),
             title: pick(&self.title, &o.title),
             equal_aspect: self.equal_aspect || o.equal_aspect,
+            window: self.window.or(o.window),
         }
     }
 
     /// Data bounds, ignoring poles: when a few points blow up (tan, 1/x), clip to the bulk
     fn bounds(&self) -> Bounds {
+        if let Some((x0, x1, y0, y1)) = self.window {
+            return Bounds { x0, x1, y0, y1 };
+        }
         let mut pts: Vec<(f64, f64)> = self
             .series
             .iter()

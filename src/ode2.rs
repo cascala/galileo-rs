@@ -49,18 +49,24 @@ pub fn split_separable(r: &Expr, y: &str, x: &str) -> Option<(Expr, Expr)> {
     None
 }
 
-/// all y-terms of an Add are c*log(u): one log of the product
+/// all y-terms of an Add are c*log(u): one log of the product, with the
+/// common size of the coefficients pulled out (2 log a - 2 log b = 2 log(a/b))
 fn combine_logs(v: &[Expr]) -> Option<Expr> {
     let mut parts = vec![];
     for t in v {
         let (c, f) = match t {
-            Expr::Mul(w) if w.len() == 2 && w[0].num().is_some() => (w[0].clone(), w[1].clone()),
-            o => (Expr::one(), o.clone()),
+            Expr::Mul(w) if w.len() == 2 && w[0].num().is_some() => (w[0].num().unwrap(), w[1].clone()),
+            o => (crate::num::Number::one(), o.clone()),
         };
         let Expr::Func(Func::Log, u) = f else { return None };
-        parts.push(pow((*u).clone(), c));
+        parts.push((c, (*u).clone()));
     }
-    Some(func(Func::Log, mul(parts)))
+    let c0 = parts[0].0.abs();
+    if parts.iter().all(|(c, _)| c.abs() == c0) {
+        let inner = mul(parts.iter().map(|(c, u)| pow(u.clone(), Expr::int(if c.is_negative() { -1 } else { 1 }))).collect());
+        return Some(mul2(Expr::Num(c0), func(Func::Log, inner)));
+    }
+    Some(func(Func::Log, mul(parts.into_iter().map(|(c, u)| pow(u, Expr::Num(c))).collect())))
 }
 
 /// solve lhs(y) = rhs for y by peeling off one function at a time
@@ -199,7 +205,7 @@ pub fn separable(r: &Expr, y: &str, x: &str, ic: Option<(&Expr, &Expr)>) -> R<(S
         "dsolve: this first-order equation is neither linear nor separable (y' = f(x) g(y)); use odeplot for a numeric solution",
     )?;
     let mut notes = vec![format!(
-        "Separable: y' = f(x) g(y) with f(x) = {} and g(y) = {}.",
+        "Separable: {y}' = f({x}) g({y}) with f({x}) = {} and g({y}) = {}.",
         show(&f),
         show(&g)
     )];
@@ -208,7 +214,7 @@ pub fn separable(r: &Expr, y: &str, x: &str, ic: Option<(&Expr, &Expr)>) -> R<(S
     let fi = cas::antiderivative(&f, x).ok_or_else(|| format!("dsolve: can't integrate {}", show(&f)))?;
     let (gi, fi) = (tidy(&gi), tidy(&fi));
     notes.push(format!(
-        "Divide by g(y) and integrate both sides: ∫ dy/g(y) = ∫ f(x) dx, so {} = {} + C1.",
+        "Divide by g({y}) and integrate both sides: ∫ d{y}/g({y}) = ∫ f({x}) d{x}, so {} = {} + C1.",
         show(&gi),
         show(&fi)
     ));
@@ -217,8 +223,8 @@ pub fn separable(r: &Expr, y: &str, x: &str, ic: Option<(&Expr, &Expr)>) -> R<(S
         let zs: Vec<Expr> = zs.into_iter().filter(|z| !has_i(z)).collect();
         if !zs.is_empty() && !free(&g, y) {
             notes.push(format!(
-                "Dividing by g(y) loses the constant solutions where g(y) = 0: y = {}.",
-                zs.iter().map(show).collect::<Vec<_>>().join(", y = ")
+                "Dividing by g({y}) loses the constant solutions where g({y}) = 0: {y} = {}.",
+                zs.iter().map(show).collect::<Vec<_>>().join(&format!(", {} = ", y))
             ));
         }
     }
@@ -228,11 +234,11 @@ pub fn separable(r: &Expr, y: &str, x: &str, ic: Option<(&Expr, &Expr)>) -> R<(S
     let Some((x0, y0)) = ic else {
         return Ok(match explicit {
             Some(s) => {
-                notes.push("Solved for y; C1 is an arbitrary constant (e^C1 is renamed C1).".into());
+                notes.push(format!("Solved for {y}; C1 is an arbitrary constant (e^C1 is renamed C1).").into());
                 (Separable::Explicit(s), notes)
             }
             None => {
-                notes.push("This can't be solved for y in closed form; the answer is the implicit equation.".into());
+                notes.push(format!("This can't be solved for {y} in closed form; the answer is the implicit equation.").into());
                 (Separable::Implicit(gi, add2(fi, c1)), notes)
             }
         });
@@ -258,7 +264,7 @@ pub fn separable(r: &Expr, y: &str, x: &str, ic: Option<(&Expr, &Expr)>) -> R<(S
             for c in cs.into_iter().filter(|v| v.symbols().is_empty()) {
                 let cand = tidy(&subst(s, "C1", &c));
                 if fits(&cand) {
-                    notes.push(format!("The start value y({}) = {} fixes the constant: C1 = {}.", show(x0), show(y0), show(&c)));
+                    notes.push(format!("The start value {y}({}) = {} fixes the constant: C1 = {}.", show(x0), show(y0), show(&c)));
                     return Ok((Separable::Explicit(cand), notes));
                 }
             }
@@ -270,7 +276,7 @@ pub fn separable(r: &Expr, y: &str, x: &str, ic: Option<(&Expr, &Expr)>) -> R<(S
         let cand = tidy(&subst(s, "C1", &c));
         for cand in [cand.clone(), tidy(&neg(cand))] {
             if fits(&cand) {
-                notes.push(format!("The start value y({}) = {} fixes C1 = {}.", show(x0), show(y0), show(&c)));
+                notes.push(format!("The start value {y}({}) = {} fixes C1 = {}.", show(x0), show(y0), show(&c)));
                 return Ok((Separable::Explicit(cand), notes));
             }
         }

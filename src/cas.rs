@@ -1809,7 +1809,17 @@ fn verify(f: &Expr, big_f: &Expr, x: &str) -> bool {
 
 /// Symbolic antiderivative, checked; None if the rules don't find one
 pub fn antiderivative(f: &Expr, x: &str) -> Option<Expr> {
-    let r = integ(f, x, 0)?;
+    let r = match integ(f, x, 0) {
+        Some(r) => r,
+        None => {
+            // products and powers of sines and cosines: reduce to sums first
+            let g = crate::extra_cmd::trig_reduce(f);
+            if g == *f {
+                return None;
+            }
+            integ(&calc::expand(&g), x, 0)?
+        }
+    };
     if !verify(f, &r, x) {
         return None;
     }

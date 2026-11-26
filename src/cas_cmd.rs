@@ -274,6 +274,7 @@ impl Session {
             "coeff" => self.coeff(args),
             "polarplot" => self.polarplot(args),
             "title" | "xlabel" | "ylabel" | "zlabel" | "labels" | "legend" => self.labels(f, args),
+            "window" => self.window(args),
             _ => return None,
         };
         Some(r)
@@ -784,6 +785,27 @@ impl Session {
             "y",
             true,
         )))))
+    }
+
+    /// window(p, x0, x1, y0, y1): show exactly that part of a 2D plot
+    fn window(&mut self, args: &[Node]) -> R<Expr> {
+        let usage = "usage: window(p, x0, x1, y0, y1): show x from x0 to x1 and y from y0 to y1";
+        if args.len() != 5 {
+            return Err(usage.into());
+        }
+        let p = self.eval(&args[0])?;
+        let mut v = vec![];
+        for a in &args[1..] {
+            v.push(real(&self.eval(a)?, "window")?);
+        }
+        if !(v[0] < v[1] && v[2] < v[3]) || v.iter().any(|x| !x.is_finite()) {
+            return Err("window: need x0 < x1 and y0 < y1".into());
+        }
+        let Expr::Obj(o) = &p else { return Err("window: the first argument must be a plot".into()) };
+        let Obj::Figure(fig) = &**o else { return Err("window: only 2D plots have a window".into()) };
+        let mut g = fig.clone();
+        g.window = Some((v[0], v[1], v[2], v[3]));
+        Ok(Expr::Obj(Rc::new(Obj::Figure(g))))
     }
 
     fn labels(&mut self, f: &str, args: &[Node]) -> R<Expr> {
