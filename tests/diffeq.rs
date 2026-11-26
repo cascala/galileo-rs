@@ -57,6 +57,10 @@ fn dsolve_more() {
     assert_eq!(one("dsolve([x' == -x + y, y' == -x - y], [x, y], t, 0, [1, 0])"), "[exp(-t)*cos(t), -exp(-t)*sin(t)]");
     assert_eq!(one("dsolve(y'' == 1/x, y, x)"), "C1+C2*x+x*log(x)-x");
     assert_eq!(one("dsolve(v' == -u/M, v, M, M0, 0)"), "u*log(M0)-u*log(M)");
+    assert_eq!(
+        one("dsolve([x' == u, y' == v, u' == -2*x + y, v' == x - 2*y], [x, y, u, v], t, 0, [1, 0, 0, 0])"),
+        "[(cos(t)+cos(sqrt(3)*t))/2, cos(t)/2-cos(sqrt(3)*t)/2, -(sqrt(3)*sin(sqrt(3)*t)+sin(t))/2, sqrt(3)*sin(sqrt(3)*t)/2-sin(t)/2]"
+    );
 }
 
 #[test]
@@ -73,4 +77,15 @@ fn trig_products_and_window() {
     assert!(!one("window(plot(x, x, 0, 1), 0, 1, -1, 2)").starts_with("ERROR"));
     assert!(one("window(plot(x, x, 0, 1), 1, 0, -1, 2)").starts_with("ERROR"));
     assert_eq!(one("dsolve(P' == P*(1 - P) - 3/16, P, t, 0, 1)"), "(1-9*exp(t/2))/(4-12*exp(t/2))");
+}
+
+#[test]
+fn ode_steps_refine_at_close_encounters() {
+    // a near-collision orbit (speed 0.2 at distance 1, perihelion about 0.02): the fixed grid alone fails here
+    let kepler = "f = [vx, vy, -x/(x^2 + y^2)^(3/2), -y/(x^2 + y^2)^(3/2)]; D = odedata(f, [x y vx vy], t, [1, 0, 0, 0.2], 0, 4, 40);";
+    let e = |k: usize| format!("{} eval((D({k}, 4)^2 + D({k}, 5)^2)/2 - 1/sqrt(D({k}, 2)^2 + D({k}, 3)^2), 6)", kepler);
+    assert_eq!(one(&e(1)), "-0.980000");
+    assert_eq!(one(&e(41)), "-0.980000");
+    // a single point is a scatter plot too
+    assert!(!one("scatter([0], [0])").starts_with("ERROR"));
 }

@@ -435,7 +435,7 @@ fn merge_alike(c: Expr, u: Units) -> Option<Expr> {
     }
     let mut factor = vec![c];
     let mut out: Units = vec![];
-    for (i, (n, e)) in u.iter().enumerate() {
+    for (i, (_, e)) in u.iter().enumerate() {
         let k = target[i];
         if k != i {
             let ratio = build::div(scale_expr(info[i].0), scale_expr(info[k].0));

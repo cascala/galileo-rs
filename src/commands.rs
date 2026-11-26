@@ -253,10 +253,16 @@ impl Session {
             return Ok(None);
         }
         let (Ok(va), Ok(vb)) = (self.eval(a), self.eval(b)) else { return Ok(None) };
-        let (Expr::Matrix(_), Expr::Matrix(_)) = (&va, &vb) else { return Ok(None) };
-        let xs: Vec<f64> = flat(va).iter().map(numeric::value).collect();
-        let ys: Vec<f64> = flat(vb).iter().map(numeric::value).collect();
-        if xs.len() < 2 || !xs.iter().chain(&ys).all(|x| x.is_finite()) {
+        // a single point [x0], [y0] may come out as two plain numbers
+        let list = |v: Expr| -> Option<Vec<f64>> {
+            match v {
+                Expr::Matrix(_) => Some(flat(v).iter().map(numeric::value).collect()),
+                ref e if !matches!(b, Node::Ident(_)) && e.is_scalar() => Some(vec![numeric::value(e)]),
+                _ => None,
+            }
+        };
+        let (Some(xs), Some(ys)) = (list(va), list(vb)) else { return Ok(None) };
+        if xs.is_empty() || !xs.iter().chain(&ys).all(|x| x.is_finite()) {
             return Ok(None);
         }
         if xs.len() != ys.len() {

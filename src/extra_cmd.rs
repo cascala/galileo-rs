@@ -2284,7 +2284,18 @@ impl Session {
         } else {
             None
         };
-        let (sol, notes) = crate::ode2::linear_system(&a2, &b2, &t, ic.as_ref().map(|(a, b)| (a, b.as_slice())))?;
+        let (mut sol, notes) = crate::ode2::linear_system(&a2, &b2, &t, ic.as_ref().map(|(a, b)| (a, b.as_slice())))?;
+        // a real system with real starting values has a real solution: write
+        // exp(i w t) + exp(-i w t) as 2 cos(w t)
+        let real_data = a2.iter().flatten().chain(&b2).all(|e| !has_i(e))
+            && ic.as_ref().is_some_and(|(t0, v)| !has_i(t0) && v.iter().all(|e| !has_i(e)));
+        if real_data && sol.iter().any(has_i) {
+            if let Ok(re) = sol.iter().map(|e| tidy_parts(e).map(|(r, _)| r)).collect::<R<Vec<_>>>() {
+                if re.iter().all(|e| !has_i(e)) {
+                    sol = re;
+                }
+            }
+        }
         let am = Expr::Matrix(a2.clone());
         let mut msg = format!(
             "Linear system X' = A X + b with X = [{}] and A = {}. ",

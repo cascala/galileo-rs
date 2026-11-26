@@ -147,12 +147,102 @@ pub(crate) fn rationalize_root(e: &Expr) -> Expr {
     }
 }
 
+/// A real symmetric matrix of numbers that is better diagonalized numerically:
+/// it has a decimal entry, or is too large for exact roots (5 or more rows).
+/// Returns the eigenvalues in increasing order and unit eigenvectors as columns.
+pub(crate) fn numeric_symmetric_eig(m: &linalg::Mat) -> Option<(Vec<f64>, Vec<Vec<f64>>)> {
+    let n = m.len();
+    if n == 0 || m.iter().any(|r| r.len() != n) {
+        return None;
+    }
+    let nums: Vec<Number> = m.iter().flatten().map(|e| e.num()).collect::<Option<_>>()?;
+    if !(n >= 5 || nums.iter().any(|x| !x.is_exact())) {
+        return None;
+    }
+    let a: Vec<Vec<f64>> = m.iter().map(|r| r.iter().map(numeric::value).collect()).collect();
+    if a.iter().flatten().any(|x| !x.is_finite()) {
+        return None;
+    }
+    let scale = a.iter().flatten().fold(0.0f64, |s, x| s.max(x.abs())).max(1e-300);
+    for i in 0..n {
+        for j in 0..i {
+            if (a[i][j] - a[j][i]).abs() > 1e-12 * scale {
+                return None;
+            }
+        }
+    }
+    let (vals, vecs) = jacobi(a);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&i, &j| vals[i].total_cmp(&vals[j]));
+    // 12 significant digits, and rounding noise below 1e-12 of the largest entry set to 0
+    let round = |x: f64| format!("{:.11e}", x).parse().unwrap_or(x);
+    let tidy = |x: f64| if x.abs() < 1e-12 * scale { 0.0 } else { round(x) };
+    let values = order.iter().map(|&k| tidy(vals[k])).collect();
+    // columns, each with its first clearly nonzero entry positive
+    let mut cols: Vec<Vec<f64>> = order.iter().map(|&k| (0..n).map(|i| vecs[i][k]).collect()).collect();
+    for c in &mut cols {
+        if let Some(f) = c.iter().find(|x| x.abs() > 1e-9) {
+            if *f < 0.0 {
+                c.iter_mut().for_each(|x| *x = -*x);
+            }
+        }
+        c.iter_mut().for_each(|x| *x = if x.abs() < 1e-12 { 0.0 } else { round(*x) });
+    }
+    let rows = (0..n).map(|i| cols.iter().map(|c| c[i]).collect()).collect();
+    Some((values, rows))
+}
+
+/// Cyclic Jacobi rotations: eigenvalues and eigenvectors (columns) of a symmetric matrix
+fn jacobi(mut a: Vec<Vec<f64>>) -> (Vec<f64>, Vec<Vec<f64>>) {
+    let n = a.len();
+    let mut v: Vec<Vec<f64>> = (0..n).map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect()).collect();
+    for _sweep in 0..100 {
+        let off: f64 = (0..n).flat_map(|i| (0..n).filter(move |&j| j != i).map(move |j| (i, j))).map(|(i, j)| a[i][j] * a[i][j]).sum();
+        let diag: f64 = (0..n).map(|i| a[i][i] * a[i][i]).sum();
+        if off <= 1e-30 * diag.max(1e-300) {
+            break;
+        }
+        for p in 0..n {
+            for q in p + 1..n {
+                if a[p][q] == 0.0 {
+                    continue;
+                }
+                let theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+                let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
+                let t = if theta == 0.0 { 1.0 } else { t };
+                let c = 1.0 / (t * t + 1.0).sqrt();
+                let s = t * c;
+                for k in 0..n {
+                    let (akp, akq) = (a[k][p], a[k][q]);
+                    a[k][p] = c * akp - s * akq;
+                    a[k][q] = s * akp + c * akq;
+                }
+                for k in 0..n {
+                    let (apk, aqk) = (a[p][k], a[q][k]);
+                    a[p][k] = c * apk - s * aqk;
+                    a[q][k] = s * apk + c * aqk;
+                }
+                for k in 0..n {
+                    let (vkp, vkq) = (v[k][p], v[k][q]);
+                    v[k][p] = c * vkp - s * vkq;
+                    v[k][q] = s * vkp + c * vkq;
+                }
+            }
+        }
+    }
+    ((0..n).map(|i| a[i][i]).collect(), v)
+}
+
 /// Eigenvectors (columns) and the matching eigenvalues, from the null space
 /// of A - λI for each distinct exact eigenvalue.
 pub(crate) fn eigvec(m: &linalg::Mat) -> R<(linalg::Mat, Vec<Expr>)> {
     let (r, c) = linalg::dims(m);
     if r != c {
         return Err("eigvec needs a square matrix".into());
+    }
+    if let Some((vals, vecs)) = numeric_symmetric_eig(m) {
+        let cols = vecs.iter().map(|r| r.iter().map(|&x| Expr::float(x)).collect()).collect();
+        return Ok((cols, vals.into_iter().map(Expr::float).collect()));
     }
     let p = charpoly(m, "λ")?;
     let co = cas::poly_coeffs(&p, "λ").ok_or("eigvec: no characteristic polynomial")?;
@@ -675,6 +765,10 @@ impl Session {
                     _ if r != c => Err(format!("{} needs a square matrix", f)),
                     "trace" => Ok(simplify(&add((0..r).map(|i| m[i][i].clone()).collect()))),
                     _ => {
+                        if let Some((vals, _)) = numeric_symmetric_eig(&m) {
+                            self.note("eig: a symmetric matrix of numbers, diagonalized numerically (Jacobi rotations); eigenvalues in increasing order.");
+                            return Ok(row(vals.into_iter().map(Expr::float).collect()));
+                        }
                         let p = charpoly(&m, "λ")?;
                         let c =
                             cas::poly_coeffs(&p, "λ").ok_or("eig: no characteristic polynomial")?;

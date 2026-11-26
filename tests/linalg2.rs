@@ -91,3 +91,18 @@ fn posdef_cond_and_systems() {
     // decimals: no rounding noise
     assert_eq!(one("[1 1; 1 2; 1 3; 1 4; 1 5]\\[2.1; 3.9; 6.2; 7.8; 10.1]"), "[0.05;\n 1.99]");
 }
+
+#[test]
+fn numeric_symmetric_eigenvalues() {
+    // a chain of 8 springs: 2 - 2 cos(k pi/9), found by Jacobi rotations, not by exact roots
+    let chain = "N = 8; M = zeros(N, N);\nfor k in 1:N\n M(k, k) = 2;\n if k < N\n  M(k, k+1) = -1; M(k+1, k) = -1;\n end\nend\n";
+    assert_eq!(
+        one(&format!("{} eig(M)", chain)),
+        "[0.120614758428, 0.467911113762, 1.0, 1.65270364467, 2.34729635533, 3.0, 3.53208888624, 3.87938524157]"
+    );
+    assert_eq!(one(&format!("{} [V, D] = eig(M); eval([V(1, 1), sin(pi/9)*sqrt(2/9)], 6)", chain)), "[0.161230, 0.161230]");
+    assert_eq!(one("eig([2.0, 1; 1, 2])"), "[1.0, 3.0]");
+    assert_eq!(one("[V, D] = eig([2.0, 1; 1, 2]); V"), "[ 0.707106781187, 0.707106781187;\n -0.707106781187, 0.707106781187]");
+    // exact matrices keep exact eigenvalues
+    assert_eq!(one("eig([2, -1; -1, 2])"), "[1, 3]");
+}

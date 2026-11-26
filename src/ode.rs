@@ -1,10 +1,14 @@
-//! Numerical integration of dy/dt = f(t, y) with the classical Runge-Kutta method.
+//! Numerical integration of dy/dt = f(t, y) with the classical Runge-Kutta method,
+//! refined locally by step doubling.
 
 pub const DEFAULT_STEPS: usize = 20000;
 pub const MAX_PLOT_POINTS: usize = 1500;
 
-/// Samples (t, y), including the start. Stops early when the solution blows up
-/// or a single step suddenly jumps (a singularity such as r = 0 or a horizon).
+/// Samples (t, y) on an even grid of `steps` intervals, including the start.
+/// Each grid step is checked against two half steps and split further where they
+/// disagree (close encounters, sharp turns), so the grid stays even while the
+/// accuracy does not depend on it. Stops early when the solution blows up or a
+/// step cannot be resolved (a singularity such as r = 0 or a horizon).
 pub fn rk4(
     f: &dyn Fn(f64, &[f64]) -> Vec<f64>,
     y0: &[f64],
@@ -12,34 +16,52 @@ pub fn rk4(
     t1: f64,
     steps: usize,
 ) -> Vec<(f64, Vec<f64>)> {
-    let n = y0.len();
     let h = (t1 - t0) / steps as f64;
     let mut out = vec![(t0, y0.to_vec())];
     let mut y = y0.to_vec();
-    let mut t = t0;
-    let axpy =
-        |a: &[f64], s: f64, b: &[f64]| -> Vec<f64> { (0..n).map(|i| a[i] + s * b[i]).collect() };
-    for _ in 0..steps {
-        let k1 = f(t, &y);
-        let k2 = f(t + h / 2.0, &axpy(&y, h / 2.0, &k1));
-        let k3 = f(t + h / 2.0, &axpy(&y, h / 2.0, &k2));
-        let k4 = f(t + h, &axpy(&y, h, &k3));
-        let next: Vec<f64> = (0..n)
-            .map(|j| y[j] + h / 6.0 * (k1[j] + 2.0 * k2[j] + 2.0 * k3[j] + k4[j]))
-            .collect();
+    for i in 0..steps {
+        let t = t0 + i as f64 * h;
+        let Some(next) = refine(f, t, &y, h, 0) else { break };
         if !next.iter().all(|v| v.is_finite() && v.abs() < 1e12) {
             break;
         }
-        let jump = (0..n).map(|j| (next[j] - y[j]).abs()).fold(0.0, f64::max);
-        let size = y.iter().map(|v| v.abs()).fold(1.0, f64::max);
-        if jump >= 0.25 * size {
-            break;
-        }
         y = next;
-        t += h;
-        out.push((t, y.clone()));
+        out.push((t0 + (i + 1) as f64 * h, y.clone()));
     }
     out
+}
+
+/// One classical Runge-Kutta step
+fn step(f: &dyn Fn(f64, &[f64]) -> Vec<f64>, t: f64, y: &[f64], h: f64) -> Vec<f64> {
+    let n = y.len();
+    let axpy = |a: &[f64], s: f64, b: &[f64]| -> Vec<f64> { (0..n).map(|i| a[i] + s * b[i]).collect() };
+    let k1 = f(t, y);
+    let k2 = f(t + h / 2.0, &axpy(y, h / 2.0, &k1));
+    let k3 = f(t + h / 2.0, &axpy(y, h / 2.0, &k2));
+    let k4 = f(t + h, &axpy(y, h, &k3));
+    (0..n).map(|j| y[j] + h / 6.0 * (k1[j] + 2.0 * k2[j] + 2.0 * k3[j] + k4[j])).collect()
+}
+
+/// Advance by h, halving the step until one step and two half steps agree
+fn refine(f: &dyn Fn(f64, &[f64]) -> Vec<f64>, t: f64, y: &[f64], h: f64, depth: u32) -> Option<Vec<f64>> {
+    const TOL: f64 = 1e-9;
+    const MAX_DEPTH: u32 = 20;
+    let full = step(f, t, y, h);
+    let mid = step(f, t, y, h / 2.0);
+    let half = step(f, t + h / 2.0, &mid, h / 2.0);
+    let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
+    if finite(&full) && finite(&half) {
+        let scale = y.iter().chain(&half).map(|v| v.abs()).fold(1.0, f64::max);
+        let err = (0..y.len()).map(|j| (full[j] - half[j]).abs()).fold(0.0, f64::max);
+        if err <= TOL * scale {
+            return Some(half);
+        }
+    }
+    if depth >= MAX_DEPTH {
+        return None;
+    }
+    let mid = refine(f, t, y, h / 2.0, depth + 1)?;
+    refine(f, t + h / 2.0, &mid, h / 2.0, depth + 1)
 }
 
 /// Keep at most `max` evenly spaced samples (and always the last)

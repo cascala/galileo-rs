@@ -578,7 +578,7 @@ Also found as `size`.
 
 `eig(A), charpoly(A, x)`
 
-Eigenvalues of a square matrix (exact when the characteristic polynomial factors or has degree 2, numeric otherwise), and the characteristic polynomial det(A - x*I).
+Eigenvalues of a square matrix (exact when the characteristic polynomial factors or has degree 2, numeric otherwise), and the characteristic polynomial det(A - x*I). A symmetric matrix of numbers with a decimal entry, or with 5 or more rows, is diagonalized numerically by Jacobi rotations: eigenvalues in increasing order, unit eigenvectors from [V, D] = eig(A).
 
 Example: `eig([2 1; 1 2])`
 
