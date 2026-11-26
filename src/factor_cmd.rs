@@ -45,7 +45,7 @@ fn bnum(n: BigInt) -> Expr {
 // ---------- expressions <-> integer polynomials ----------
 
 /// the terms of a polynomial in vars as exponent vectors with rational coefficients
-fn terms_of(e: &Expr, vars: &[String]) -> Option<Vec<(Vec<usize>, BigRational)>> {
+pub(crate) fn terms_of(e: &Expr, vars: &[String]) -> Option<Vec<(Vec<usize>, BigRational)>> {
     let ex = calc::expand(e);
     let ts = match &ex {
         Expr::Add(t) => t.clone(),

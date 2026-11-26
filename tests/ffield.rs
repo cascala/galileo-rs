@@ -104,3 +104,25 @@ fn zmod_units() {
         }
     }
 }
+
+#[test]
+fn groebner_bases() {
+    for (code, want) in [
+        ("groebner([x^2 + y^2 - 1, x - y], [x, y])", "[x-y, y^2-1/2]"),
+        (
+            "groebner([x^2 + y + z - 1, x + y^2 + z - 1, x + y + z^2 - 1], [x, y, z])",
+            "[x+y+z^2-1, y^2-y-z^2+z, y*z^2+z^4/2-z^2/2, z^6-4*z^4+4*z^3-z^2]",
+        ),
+        (
+            "groebner([x^3 - 2*x*y, x^2*y - 2*y^2 + x], [x, y], \"grlex\")",
+            "[x^2, x*y, y^2-x/2]",
+        ),
+        ("groebner([x^2 + 1, x + 1], [x], 7)", "[1]"),
+        ("groebner([x^2 + 1, x + 3], [x], 5)", "[x+3]"),
+        ("polyrem(x^3*y, [x^2 + y^2 - 1, x - y], [x, y])", "1/4"),
+        ("inideal(2*y^2 - 1, [x^2 + y^2 - 1, x - y], [x, y])", "true"),
+        ("inideal(y, [x^2 + y^2 - 1, x - y], [x, y])", "false"),
+    ] {
+        assert_eq!(one(code), want, "{}", code);
+    }
+}

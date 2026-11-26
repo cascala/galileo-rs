@@ -118,6 +118,9 @@ impl Session {
             "modulus",
             "lift",
             "isfield",
+            "groebner",
+            "polyrem",
+            "inideal",
         ];
         if !NAMES.contains(&f) {
             return None;
@@ -143,6 +146,9 @@ impl Session {
         if f == "cayley" && !v.first().is_some_and(is_group) {
             return None;
         }
+        if matches!(f, "groebner" | "polyrem" | "inideal") {
+            return Some(self.groebner_cmd(f, &v));
+        }
         let ringish = |e: &Expr| ff::as_ring(e).is_some() || ff::as_elem(e).is_some();
         if matches!(
             f,
@@ -159,6 +165,155 @@ impl Session {
             return Some(self.ring_cmd(f, &v));
         }
         Some(self.algebra(f, &v))
+    }
+
+    fn groebner_cmd(&mut self, f: &str, v: &[Expr]) -> R<Expr> {
+        use crate::groebner::{Order, Ring};
+        let usage = || {
+            format!(
+                "usage: groebner([f1, f2, ...], [x, y, ...]), polyrem(f, [f1, ...], [x, ...]), inideal(f, [f1, ...], [x, ...]); add \"grevlex\" or \"grlex\" for another order and a prime p to work mod p (see help(\"{}\"))",
+                f
+            )
+        };
+        let items = |e: &Expr| -> Option<Vec<Expr>> {
+            match e {
+                Expr::Matrix(m) if m.len() == 1 => Some(m[0].clone()),
+                Expr::Matrix(m) if m.iter().all(|r| r.len() == 1) => {
+                    Some(m.iter().map(|r| r[0].clone()).collect())
+                }
+                Expr::Obj(o) => match &**o {
+                    Obj::List(l) => Some(l.clone()),
+                    _ => None,
+                },
+                e => Some(vec![e.clone()]),
+            }
+        };
+        let (target, rest) = if f == "groebner" {
+            (None, v)
+        } else {
+            match v.split_first() {
+                Some((t, r)) => (Some(t.clone()), r),
+                None => return Err(usage()),
+            }
+        };
+        let [fs, xs, opts @ ..] = rest else {
+            return Err(usage());
+        };
+        let fs = items(fs).ok_or_else(usage)?;
+        let vars: Vec<String> = items(xs)
+            .ok_or_else(usage)?
+            .iter()
+            .map(|x| match x {
+                Expr::Sym(s) => Ok(s.clone()),
+                _ => Err(format!(
+                    "{}: the variables must be names, got {}",
+                    f,
+                    crate::print::show(x)
+                )),
+            })
+            .collect::<R<_>>()?;
+        let mut ring = Ring {
+            p: None,
+            order: Order::Lex,
+        };
+        for o in opts {
+            match o {
+                Expr::Str(s) => {
+                    ring.order = Order::parse(s).ok_or_else(|| {
+                        format!("{}: orders are \"lex\", \"grlex\" and \"grevlex\"", f)
+                    })?
+                }
+                e => {
+                    let p = e
+                        .num()
+                        .filter(|n| n.is_integer())
+                        .and_then(|n| n.as_bigint())
+                        .filter(crate::numtheory::is_prime)
+                        .ok_or_else(usage)?;
+                    ring.p = Some(p);
+                }
+            }
+        }
+        let to_poly = |e: &Expr| -> R<crate::groebner::Poly> {
+            let ts = crate::factor_cmd::terms_of(e, &vars).ok_or_else(|| {
+                format!(
+                    "{}: {} is not a polynomial in {} with rational coefficients",
+                    f,
+                    crate::print::show(e),
+                    vars.join(", ")
+                )
+            })?;
+            ring.poly(
+                ts.into_iter()
+                    .map(|(m, c)| (m.into_iter().map(|k| k as u32).collect(), c))
+                    .collect(),
+            )
+        };
+        let polys = fs.iter().map(to_poly).collect::<R<Vec<_>>>()?;
+        let g = ring.groebner(polys)?;
+        let show_poly = |p: &crate::groebner::Poly| -> Expr {
+            use crate::build::*;
+            add(p
+                .iter()
+                .map(|(m, c)| {
+                    let mut fs = vec![Expr::Num(crate::num::Number::from_big(c.clone()))];
+                    for (x, &k) in vars.iter().zip(m) {
+                        if k > 0 {
+                            fs.push(pow(Expr::sym(x), Expr::int(k as i128)));
+                        }
+                    }
+                    mul(fs)
+                })
+                .collect())
+        };
+        let field = match &ring.p {
+            Some(p) => format!("Z/{}", p),
+            None => "Q".into(),
+        };
+        match target {
+            None => {
+                let lex_last = ring.order == Order::Lex && vars.len() > 1;
+                let dim0 = crate::groebner::zero_dimensional(&g, vars.len());
+                let order = match ring.order {
+                    Order::Lex => "lex",
+                    Order::Grlex => "grlex",
+                    Order::Grevlex => "grevlex",
+                };
+                let mut note = format!(
+                    "A reduced Gröbner basis over {} ({} order, {}): it generates the same ideal, and a polynomial lies in the ideal exactly when polyrem gives 0.",
+                    field,
+                    order,
+                    vars.join(" > ")
+                );
+                if g.len() == 1 && g[0].len() == 1 && g[0][0].0.iter().all(|&e| e == 0) {
+                    note = format!(
+                        "The basis is [1]: 1 is in the ideal, so the equations have no common solution, even over {}.",
+                        if ring.p.is_some() {
+                            "the algebraic closure"
+                        } else {
+                            "the complex numbers"
+                        }
+                    );
+                } else if lex_last && dim0 {
+                    note.push_str(&format!(
+                        " In lex order the last polynomials involve only the last variables, so the system can be solved from {} upward; finitely many solutions.",
+                        vars[vars.len() - 1]
+                    ));
+                }
+                self.note(&note);
+                Ok(Expr::Matrix(vec![g.iter().map(show_poly).collect()]))
+            }
+            Some(t) => {
+                let r = ring.reduce(&to_poly(&t)?, &g);
+                if f == "inideal" {
+                    Ok(Expr::Bool(r.is_empty()))
+                } else if r.is_empty() {
+                    Ok(Expr::zero())
+                } else {
+                    Ok(show_poly(&r))
+                }
+            }
+        }
     }
 
     fn ring_cmd(&mut self, f: &str, v: &[Expr]) -> R<Expr> {

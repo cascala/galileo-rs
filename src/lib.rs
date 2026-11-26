@@ -25,6 +25,7 @@ pub mod ffield;
 pub mod fgroup;
 pub mod geometry;
 pub mod gnfs;
+pub mod groebner;
 pub mod groups;
 pub mod groups_cmd;
 pub mod help;
