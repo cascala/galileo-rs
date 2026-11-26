@@ -139,7 +139,7 @@ fn clean(p: Poly) -> Poly {
     let scale = p.values().map(|c| c.to_f64().abs()).fold(0.0, f64::max);
     p.into_iter()
         .filter(|(_, c)| match c {
-            Number::Rat(..) | Number::Big(_) => !c.is_zero(),
+            Number::Rat(..) | Number::Big(_) | Number::Dec(..) => !c.is_zero(),
             Number::Float(f) => f.abs() > 1e-11 * scale && *f != 0.0,
         })
         .map(|(m, c)| (m, round(c)))
@@ -385,7 +385,7 @@ impl Ctx {
                 *e = e.sub(c.mul(cdd));
             }
             rem.retain(|_, v| match v {
-                Number::Rat(..) | Number::Big(_) => !v.is_zero(),
+                Number::Rat(..) | Number::Big(_) | Number::Dec(..) => !v.is_zero(),
                 Number::Float(f) => f.abs() > 1e-9 * scale,
             });
         }

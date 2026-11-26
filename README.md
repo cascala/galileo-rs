@@ -164,6 +164,43 @@ cargo build --release --target wasm32-unknown-unknown --lib
 `--kernel` protocol. iGalileo's JupyterLite site and the Galileo playground use it.
 `ls`, `cd` and `load` have no file system in the browser and report an error there.
 
+## Programming
+
+Loops, conditions and functions of several statements are blocks closed by `end`.
+Statements inside show their results unless they end in `;`.
+
+```
+function r = collatz(n)
+  r = 0;
+  while n ~= 1
+    if mod(n, 2) == 0
+      n = n/2;
+    else
+      n = 3*n + 1;
+    end
+    r = r + 1;
+  end
+end
+
+for n = 1:5
+  print("collatz", n, "=", collatz(n))
+end
+```
+
+* `for k = 1:10 ... end` (or `for x in values`) walks a range, a vector, the rows of a
+  matrix, a list or a string; `while`, `if ... elseif ... else ... end`, `break`,
+  `continue`. On one line: `for k = 1:3, print(k), end`.
+* `function name(a, b) ... end` has its own variables and ends with `return value`;
+  `function out = name(a, b) ... end` returns `out`. `f(x) := ...` is the one-line form.
+* Strings: `"x = " + 3`, `str`, `num`, `split`, `join`, `replace`, `contains`, `upper`,
+  `lower`, `trim`, `format("{} + {} = {}", 1, 2, 3)`.
+* Lists `{1, "a", [1 2]}` and records `{mass: 3, name: "ball"}`; `p.mass = 3` makes or
+  changes a field. `append`, `concat`, `map(f, L)`, `filter(f, L)`, `fields`, `has`.
+* Parts: `x(k) = v` counts from 1, `x[k] = v` from 0, and `end` is the last position:
+  `x(end + 1) = v` appends. A vector grows as you assign past its end.
+* Elementwise `.*`, `./`, `.^`; `*`, `/`, `^` stay the matrix operations.
+* `eval(pi, 50)` gives 50 digits (up to 100000); the digits carry through `+ - * /`.
+
 ## Language changes from the Scala version
 
 * Inside a matrix, `[a -b]` has two elements (as in Matlab); `[a - b]` and `[a-b]` are one.
@@ -184,6 +221,8 @@ cargo build --release --target wasm32-unknown-unknown --lib
 | `src/la_cmd.rs` | Commands for the decompositions (`[Q, R] = qr(A)`, `svd`, `jordan`, `expm`, `chol`, `kron`, `diag`) |
 | `src/parser.rs` | Lexer and Pratt parser |
 | `src/eval.rs` | Sessions: variables, commands, built-in functions |
+| `src/lang.rs` | Blocks (`for`, `while`, `if`, `function`), lists, records, strings, assignment to parts |
+| `src/prec.rs` | `eval(x, digits)`: many-digit values in fixed point |
 | `src/help.rs` | `help` and `help(name)` |
 | `src/ratfun.rs` | Rational-function normal form behind `simplify` |
 | `src/geometry.rs` | Metrics, curvature tensors, geodesic equations |

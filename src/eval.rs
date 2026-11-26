@@ -95,6 +95,14 @@ pub struct Session {
     /// the files being loaded, innermost last (relative paths also resolve
     /// against the loading file's folder; guards against a file loading itself)
     pub(crate) loading: Vec<std::path::PathBuf>,
+    /// functions defined with `function ... end`
+    pub(crate) procs: BTreeMap<String, crate::lang::Proc>,
+    /// results of statements inside blocks, and printed text, waiting to be shown
+    pub(crate) emitted: Vec<(Output, Vec<Note>)>,
+    /// how deeply blocks, loops and `function` calls are running
+    pub(crate) in_block: usize,
+    pub(crate) in_loop: usize,
+    pub(crate) in_proc: usize,
 }
 
 impl Default for Session {
@@ -103,7 +111,7 @@ impl Default for Session {
     }
 }
 
-fn builtins() -> BTreeMap<String, Expr> {
+pub(crate) fn builtins() -> BTreeMap<String, Expr> {
     let mut v = BTreeMap::new();
     v.insert("pi".into(), Expr::Const(Const::Pi));
     v.insert("e".into(), Expr::Const(Const::E));
@@ -150,6 +158,11 @@ impl Session {
             notes: vec![],
             calls: 0,
             loading: vec![],
+            procs: BTreeMap::new(),
+            emitted: vec![],
+            in_block: 0,
+            in_loop: 0,
+            in_proc: 0,
         }
     }
 
@@ -272,6 +285,9 @@ impl Session {
                     }
                     let (r, notes) = self.exec_notes(&s);
                     let stop = matches!(r, Ok(Output::Exit)) || (stop_on_error && r.is_err());
+                    for (o, n) in self.take_emitted() {
+                        out.push((Ok(o), false, n));
+                    }
                     out.push((r, quiet, notes));
                     if stop {
                         break;
@@ -331,7 +347,13 @@ impl Session {
                     Some(f) => self.load_file(f),
                     None => {
                         let (r, n) = self.exec_notes(&s);
-                        vec![(r, quiet, n)]
+                        let mut v: Vec<_> = self
+                            .take_emitted()
+                            .into_iter()
+                            .map(|(o, n)| (Ok(o), false, n))
+                            .collect();
+                        v.push((r, quiet, n));
+                        v
                     }
                 };
                 for (r, q, n) in res {
@@ -408,6 +430,49 @@ impl Session {
 
     pub fn exec(&mut self, s: &Stmt) -> R<Output> {
         match s {
+            Stmt::For(..)
+            | Stmt::While(..)
+            | Stmt::If(..)
+            | Stmt::Function(..)
+            | Stmt::Break
+            | Stmt::Continue
+            | Stmt::Return(_) => self.exec_block_stmt(s),
+            Stmt::SetIndex(name, idx, zero, v) => self.set_index(name, idx, *zero, v),
+            Stmt::Assign(name, _)
+                if name.contains('.')
+                    && !self.is_field_path(name)
+                    && !self.vars.contains_key(name)
+                    && self
+                        .vars
+                        .get(name.split('.').next().unwrap_or(""))
+                        .is_some_and(|v| !matches!(v, Expr::Sym(_))) =>
+            {
+                Err(format!("{} is not a record", name.split('.').next().unwrap_or("")))
+            }
+            Stmt::Assign(name, n) if name.contains('.') && self.is_field_path(name) => {
+                let v = self.eval(n)?;
+                self.set_field(name, v)
+            }
+            Stmt::Define(name, params, body) if self.define_is_assignment(name, params) => {
+                let idx: Vec<Node> = params.iter().map(|p| Node::Ident(p.clone())).collect();
+                self.set_index(name, &idx, false, body)
+            }
+            Stmt::Expr(Node::Call(f, args)) if f == "print" || f == "disp" => {
+                self.lang_call(f, args).unwrap()?;
+                Ok(Output::Nothing)
+            }
+            Stmt::Expr(Node::Call(f, args)) if self.procs.contains_key(f) => {
+                self.calls += 1;
+                let r = self.call_proc(f, args);
+                self.calls -= 1;
+                match r? {
+                    Some(v) => {
+                        self.set("ans", v.clone());
+                        Ok(Output::Value(v))
+                    }
+                    None => Ok(Output::Nothing),
+                }
+            }
             Stmt::Expr(n) => {
                 let v = self.eval(n)?;
                 self.note_report(&v);
@@ -493,6 +558,39 @@ impl Session {
                 Ok(Output::Text(text))
             }
         }
+    }
+
+    /// p.mass = ...: the part before the first dot is a record, or not a value yet
+    fn is_field_path(&self, name: &str) -> bool {
+        if self.vars.contains_key(name) || name.ends_with('.') || name.contains("..") {
+            return false;
+        }
+        let base = name.split('.').next().unwrap_or("");
+        match self.vars.get(base) {
+            None => true,
+            Some(Expr::Sym(s)) => s == base,
+            Some(v) => crate::lang::as_record(v).is_some(),
+        }
+    }
+
+    /// x(k) = v is an assignment, not a function definition, when x already
+    /// holds a vector, matrix or list, or inside a block when every k has a whole-number value
+    fn define_is_assignment(&self, name: &str, params: &[String]) -> bool {
+        if self.funcs.contains_key(name) {
+            return false;
+        }
+        match self.vars.get(name) {
+            Some(Expr::Matrix(_)) => return true,
+            Some(v) if crate::lang::as_list(v).is_some() => return true,
+            _ => {}
+        }
+        self.in_block > 0
+            && params.iter().all(|p| {
+                self.vars
+                    .get(p)
+                    .and_then(|v| v.num())
+                    .is_some_and(|n| n.is_integer())
+            })
     }
 
     /// a report shows its value; its text becomes the explanation
@@ -625,7 +723,31 @@ impl Session {
         let v = match n {
             Node::Num(s) => Expr::Num(Number::parse(s).ok_or_else(|| format!("bad number {}", s))?),
             Node::Str(s) => Expr::Str(s.clone()),
+            Node::Ident(name) if name.contains('.') && !self.vars.contains_key(name) => {
+                match self.get_field(name) {
+                    Some(r) => r?,
+                    None => self.lookup(name),
+                }
+            }
             Node::Ident(name) => self.lookup(name),
+            Node::List(items) => {
+                let mut v = vec![];
+                for x in items {
+                    v.push(self.eval(x)?);
+                }
+                crate::lang::list(v)
+            }
+            Node::Record(fields) => {
+                let mut v: Vec<(String, Expr)> = vec![];
+                for (k, x) in fields {
+                    let x = self.eval(x)?;
+                    match v.iter_mut().find(|(n, _)| n == k) {
+                        Some(slot) => slot.1 = x,
+                        None => v.push((k.clone(), x)),
+                    }
+                }
+                crate::lang::record(v)
+            }
             Node::Neg(a) => {
                 let a = self.eval(a)?;
                 arith(Op::Mul, Expr::int(-1), a)?
@@ -696,6 +818,12 @@ impl Session {
             },
             Node::Index(a, idx) => {
                 let target = self.eval(a)?;
+                if matches!(target, Expr::Matrix(_) | Expr::Str(_))
+                    || crate::lang::as_list(&target).is_some()
+                {
+                    let what = format!("{}[...]", crate::parser::source(a));
+                    return self.index_value(&target, idx, true, &what);
+                }
                 let mut ix = vec![];
                 for i in idx {
                     let v = self.eval(i)?;
@@ -759,16 +887,27 @@ impl Session {
                 ))
             }
         };
+        if self.procs.contains_key(f) {
+            return self
+                .call_proc(f, args)?
+                .ok_or_else(|| format!("{} gives no value", f));
+        }
         if self.funcs.contains_key(f) {
             return self.call_user(f, args);
         }
-        if let Some(Expr::Matrix(m)) = self
+        if let Some(v) = self
             .vars
             .get(f)
             .filter(|_| !self.hidden.iter().any(|h| h == f))
+            .filter(|v| {
+                matches!(v, Expr::Matrix(_) | Expr::Str(_)) || crate::lang::as_list(v).is_some()
+            })
             .cloned()
         {
-            return self.index(f, &m, args);
+            if args.is_empty() || args.len() > 2 {
+                return Err(format!("{}(...) takes one or two positions", f));
+            }
+            return self.index_value(&v, args, false, f);
         }
         // a result with explanations indexes like the value it shows
         if let Some(Expr::Obj(o)) = self
@@ -803,14 +942,34 @@ impl Session {
         if let Some(func) = Func::from_name(f) {
             arity(1)?;
             let a = self.eval(&args[0])?;
-            return elementwise(&a, &|x| build::func(func, x.clone()));
+            return elementwise(&a, &|x| {
+                // decimals directly (fast for large arrays); outside the real domain
+                // (log(-1.0)) the symbolic rules give the complex value
+                if let Expr::Num(Number::Float(v)) = x {
+                    let y = func.apply(*v);
+                    if y.is_finite() {
+                        return Expr::float(y);
+                    }
+                }
+                build::func(func, x.clone())
+            });
         }
         match f {
             "exp" | "sqrt" => {
                 arity(1)?;
                 let a = self.eval(&args[0])?;
                 let g = if f == "exp" { build::exp } else { build::sqrt };
-                elementwise(&a, &|x| g(x.clone()))
+                elementwise(&a, &|x| {
+                    if let Expr::Num(Number::Float(v)) = x {
+                        if f == "exp" || *v >= 0.0 {
+                            let y = if f == "exp" { v.exp() } else { v.sqrt() };
+                            if y.is_finite() {
+                                return Expr::float(y);
+                            }
+                        }
+                    }
+                    g(x.clone())
+                })
             }
             "deriv" | "diff" => {
                 arity(2)?;
@@ -826,6 +985,15 @@ impl Session {
                     return Err(format!("{} takes 1 argument", f));
                 }
                 let a = self.eval(&args[0])?;
+                if f == "eval" && args.len() == 2 {
+                    let d = self.eval(&args[1])?;
+                    let d = d
+                        .num()
+                        .and_then(|n| n.as_int())
+                        .filter(|&k| (1..=100_000).contains(&k))
+                        .ok_or("eval(x, digits): digits is a whole number from 1 to 100000")?;
+                    return crate::prec::eval_digits(&a, d as u32);
+                }
                 if f == "factor" && args.len() == 2 {
                     let field = self.eval(&args[1])?;
                     return self.factor_over(&a, &field);
@@ -1006,7 +1174,10 @@ impl Session {
                 best.map(|b| b.1)
                     .ok_or_else(|| format!("{} needs arguments", f))
             }
-            _ => self.command_call(f, args),
+            _ => match self.lang_call(f, args) {
+                Some(r) => r,
+                None => self.command_call(f, args),
+            },
         }
     }
 
@@ -1195,6 +1366,14 @@ impl Session {
             Expr::Num(_) | Expr::Const(_) | Expr::Bool(_) | Expr::Str(_) | Expr::Obj(_) => {
                 e.clone()
             }
+            // a matrix of plain numbers (fast for large arrays)
+            Expr::Matrix(m)
+                if m.iter().flatten().all(|x| {
+                    matches!(x, Expr::Num(_) | Expr::Const(_) | Expr::Bool(_) | Expr::Str(_))
+                }) =>
+            {
+                e.clone()
+            }
             _ => {
                 if e.symbols().iter().all(|s| {
                     !self.vars.contains_key(s) || self.hidden.contains(s) || stack.contains(s)
@@ -1275,10 +1454,19 @@ pub(crate) fn rand_f64() -> f64 {
     })
 }
 
-fn truthy(e: &Expr) -> R<bool> {
+pub(crate) fn truthy(e: &Expr) -> R<bool> {
     match e {
         Expr::Bool(b) => Ok(*b),
         Expr::Num(n) => Ok(!n.is_zero()),
+        // a matrix is true when every entry is (as in Matlab)
+        Expr::Matrix(m) if !m.is_empty() => {
+            for x in m.iter().flatten() {
+                if !truthy(x)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
         other => Err(format!("{} is not a boolean", show(other))),
     }
 }
@@ -1299,6 +1487,81 @@ fn elementwise(a: &Expr, f: &dyn Fn(&Expr) -> Expr) -> R<Expr> {
 /// Arithmetic on scalars and matrices
 pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
     use Expr::Matrix as M;
+    // "x = " + 3 joins text
+    if op == Op::Add && (matches!(a, Expr::Str(_)) || matches!(b, Expr::Str(_))) {
+        return Ok(Expr::Str(format!(
+            "{}{}",
+            crate::print::show(&a),
+            crate::print::show(&b)
+        )));
+    }
+    // elementwise .* ./ .^
+    if matches!(op, Op::EMul | Op::EDiv | Op::EPow) {
+        let scalar = match op {
+            Op::EMul => Op::Mul,
+            Op::EDiv => Op::Div,
+            _ => Op::Pow,
+        };
+        // two numbers: straight to the number rules (fast for large arrays)
+        let one = |p: Expr, q: Expr| -> R<Expr> {
+            match (scalar, &p, &q) {
+                (Op::Mul, Expr::Num(_), Expr::Num(_)) => Ok(mul2(p, q)),
+                (Op::Div, Expr::Num(_), Expr::Num(y)) if !y.is_zero() => Ok(div(p, q)),
+                _ => arith(scalar, p, q),
+            }
+        };
+        return match (a, b) {
+            (M(x), M(y)) => {
+                let (dx, dy) = (linalg::dims(&x), linalg::dims(&y));
+                if dx != dy {
+                    return Err(format!(
+                        "elementwise {}: sizes differ ({}x{} and {}x{})",
+                        match op {
+                            Op::EMul => ".*",
+                            Op::EDiv => "./",
+                            _ => ".^",
+                        },
+                        dx.0,
+                        dx.1,
+                        dy.0,
+                        dy.1
+                    ));
+                }
+                let mut out = vec![];
+                for (rx, ry) in x.into_iter().zip(y) {
+                    let mut row = vec![];
+                    for (p, q) in rx.into_iter().zip(ry) {
+                        row.push(one(p, q)?);
+                    }
+                    out.push(row);
+                }
+                Ok(M(out))
+            }
+            (M(x), s) => {
+                let mut out = vec![];
+                for r in x {
+                    let mut row = vec![];
+                    for p in r {
+                        row.push(one(p, s.clone())?);
+                    }
+                    out.push(row);
+                }
+                Ok(M(out))
+            }
+            (s, M(x)) => {
+                let mut out = vec![];
+                for r in x {
+                    let mut row = vec![];
+                    for p in r {
+                        row.push(one(s.clone(), p)?);
+                    }
+                    out.push(row);
+                }
+                Ok(M(out))
+            }
+            (x, y) => arith(scalar, x, y),
+        };
+    }
     for v in [&a, &b] {
         if matches!(v, Expr::Bool(_) | Expr::Str(_)) {
             return Err(format!("can't do arithmetic with {}", show(v)));
@@ -1372,6 +1635,7 @@ pub fn arith(op: Op, a: Expr, b: Expr) -> R<Expr> {
         (Op::Mul, x, y) => mul2(x, y),
         (Op::Div, x, y) => div(x, y),
         (Op::Pow, x, y) => pow(x, y),
+        (Op::EMul | Op::EDiv | Op::EPow, ..) => unreachable!(),
         (Op::And | Op::Or | Op::Eq | Op::Ne | Op::Lt | Op::Gt | Op::Le | Op::Ge, ..) => {
             return Err("comparisons are not arithmetic".into());
         }

@@ -121,6 +121,10 @@ pub enum Obj {
     Equations(crate::geometry::Equations),
     Report(crate::discover::Report),
     Group(crate::fgroup::Group),
+    /// {a, b, c}
+    List(Vec<Expr>),
+    /// {name: value, ...}
+    Record(Vec<(String, Expr)>),
 }
 
 impl Obj {
@@ -133,6 +137,8 @@ impl Obj {
             Obj::Equations(_) => "Equations",
             Obj::Report(r) => r.kind,
             Obj::Group(_) => "Group",
+            Obj::List(_) => "List",
+            Obj::Record(_) => "Record",
         }
     }
     /// Plain text rendering
@@ -144,6 +150,8 @@ impl Obj {
             Obj::Components(c) => c.text(),
             Obj::Equations(e) => e.text(),
             Obj::Group(g) => g.name.clone(),
+            Obj::List(v) => crate::lang::list_text(v),
+            Obj::Record(v) => crate::lang::record_text(v),
             Obj::Report(r) => r
                 .shown_value()
                 .map(|v| crate::print::show(&v))

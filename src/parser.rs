@@ -8,6 +8,17 @@
 //! matrix    := [a b c; d e f]   (elements separated by spaces or commas)
 //! ```
 //! Statements are separated by `;` or newlines; `//` starts a comment.
+//!
+//! ```text
+//! block statements, each closed by `end`:
+//!   for k = 1:10 ... end        for x in list ... end
+//!   while cond ... end
+//!   if cond ... elseif cond ... else ... end
+//!   function name(a, b) ... end      function out = name(a, b) ... end
+//!   break   continue   return [value]
+//! assignments to parts:  x(k) = v (from 1)   A[i, j] = v (from 0)   p.mass = v
+//! lists {1, "a", x} and records {mass: 3, name: "ball"}
+//! ```
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
@@ -21,6 +32,10 @@ pub enum Node {
     Index(Box<Node>, Vec<Node>),
     Matrix(Vec<Vec<Node>>),
     Transpose(Box<Node>),
+    /// {a, b, c}
+    List(Vec<Node>),
+    /// {name: value, ...}
+    Record(Vec<(String, Node)>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,6 +46,10 @@ pub enum Op {
     Div,
     Pow,
     Solve,
+    /// elementwise .* ./ .^
+    EMul,
+    EDiv,
+    EPow,
     And,
     Or,
     Eq,
@@ -50,7 +69,26 @@ pub enum Stmt {
     Define(String, Vec<String>, Node),
     /// who, whos, clear, exit, ls, pwd, cd <dir>, help [name], load(<file>)
     Command(String, Option<String>),
+    /// for k = values ... end
+    For(String, Node, Block),
+    /// while condition ... end
+    While(Node, Block),
+    /// if c1 ... elseif c2 ... else ... end: the branches, then the else part
+    If(Vec<(Node, Block)>, Option<Block>),
+    /// function name(params) ... end, or function out = name(params) ... end
+    Function(String, Vec<String>, Option<String>, Block),
+    Break,
+    Continue,
+    Return(Option<Node>),
+    /// name(i, j) = value (positions from 1) or name[i, j] = value (from 0, the bool)
+    SetIndex(String, Vec<Node>, bool, Node),
 }
+
+/// the statements of a block, each with whether it ends in `;`
+pub type Block = Vec<(Stmt, bool)>;
+
+/// words that open a block closed by `end`
+const OPENERS: [&str; 4] = ["for", "while", "if", "function"];
 
 #[derive(Clone, Debug, PartialEq)]
 enum Tok {
@@ -70,9 +108,9 @@ struct Token {
     space_before: bool,
 }
 
-const SYMS: [&str; 26] = [
-    "&&", "||", "==", "~=", "!=", "<=", ">=", ":=", "<", ">", "+", "-", "*", "/", "^", "\\", "'",
-    "(", ")", "[", "]", ",", ";", ":", "=", "!",
+const SYMS: [&str; 31] = [
+    "&&", "||", "==", "~=", "!=", "<=", ">=", ":=", ".*", "./", ".^", "<", ">", "+", "-", "*", "/",
+    "^", "\\", "'", "(", ")", "[", "]", "{", "}", ",", ";", ":", "=", "!",
 ];
 
 /// Commands whose argument is taken as raw text
@@ -126,7 +164,10 @@ fn lex(src: &str) -> Result<Vec<Token>, String> {
         let tok = if ch.is_ascii_digit()
             || (ch == '.' && c.get(i + 1).is_some_and(|d| d.is_ascii_digit()))
         {
-            while i < c.len() && (c[i].is_ascii_digit() || c[i] == '.') {
+            while i < c.len()
+                && (c[i].is_ascii_digit()
+                    || (c[i] == '.' && !matches!(c.get(i + 1), Some('*' | '/' | '^'))))
+            {
                 i += 1;
             }
             if i < c.len() && (c[i] == 'e' || c[i] == 'E') {
@@ -210,8 +251,8 @@ fn lex(src: &str) -> Result<Vec<Token>, String> {
                 .ok_or_else(|| format!("unexpected character '{}'", ch))?;
             i += s.len();
             match *s {
-                "(" | "[" => depth += 1,
-                ")" | "]" => depth -= 1,
+                "(" | "[" | "{" => depth += 1,
+                ")" | "]" | "}" => depth -= 1,
                 _ => {}
             }
             Tok::Sym(s)
@@ -228,6 +269,8 @@ fn lex(src: &str) -> Result<Vec<Token>, String> {
 
 struct P {
     t: Vec<Token>,
+    /// for each token, whether it is a `;` that ends a statement
+    semi: Vec<bool>,
     i: usize,
     /// inside [ ]: whitespace separates elements and newlines separate rows
     in_matrix: usize,
@@ -279,7 +322,11 @@ impl P {
             let ends = matches!(
                 next,
                 None | Some(Tok::Sep) | Some(Tok::Newline) | Some(Tok::Sym(";"))
-            );
+            ) || matches!(&next, Some(Tok::Sym(",")))
+                || matches!(&next, Some(Tok::Ident(w)) if w == "end");
+            if let Some(st) = self.block_statement(&name, ends)? {
+                return Ok(st);
+            }
             match name.as_str() {
                 "who" | "whos" | "clear" | "exit" | "quit" | "ls" | "pwd" if ends => {
                     self.i += 1;
@@ -307,6 +354,10 @@ impl P {
                 self.i = after;
                 return Ok(Stmt::Define(name, params, self.expr()?));
             }
+            // x(k) = v, A[i, j] = v
+            if let Some(st) = self.try_set_index(&name)? {
+                return Ok(st);
+            }
         }
         // [a, b] = ...
         if self.is("[") {
@@ -319,6 +370,198 @@ impl P {
             self.i = save;
         }
         Ok(Stmt::Expr(self.expr()?))
+    }
+
+    /// for, while, if, function, break, continue, return; None for other statements
+    fn block_statement(&mut self, word: &str, ends: bool) -> R<Option<Stmt>> {
+        let start = self.i;
+        match word {
+            "for" => {
+                self.i += 1;
+                let paren = self.eat("(");
+                let var = match self.peek().cloned() {
+                    Some(Tok::Ident(v)) => v,
+                    _ => return Err(format!("for: expected a variable name {}", self.here())),
+                };
+                self.i += 1;
+                if !self.eat("=") && !matches!(self.peek(), Some(Tok::Ident(w)) if w == "in") {
+                    return Err(format!("for {}: expected = or in {}", var, self.here()));
+                }
+                if matches!(self.peek(), Some(Tok::Ident(w)) if w == "in") {
+                    self.i += 1;
+                }
+                let vals = self.expr()?;
+                if paren {
+                    self.expect(")")?;
+                }
+                let (body, _) = self.block(&["end"], "for")?;
+                Ok(Some(Stmt::For(var, vals, body)))
+            }
+            "while" => {
+                self.i += 1;
+                let c = self.expr()?;
+                let (body, _) = self.block(&["end"], "while")?;
+                Ok(Some(Stmt::While(c, body)))
+            }
+            "if" => {
+                // if(c, a, b) is the function; if c ... end is a block
+                self.i += 1;
+                let c = match self.expr() {
+                    Ok(c) if self.at_separator() => c,
+                    _ => {
+                        self.i = start;
+                        return Ok(None);
+                    }
+                };
+                let mut branches = vec![];
+                let mut cond = c;
+                loop {
+                    let (body, stop) = self.block(&["end", "else", "elseif"], "if")?;
+                    branches.push((cond, body));
+                    match stop.as_str() {
+                        "elseif" => cond = self.expr()?,
+                        "else" => {
+                            let (body, _) = self.block(&["end"], "if")?;
+                            return Ok(Some(Stmt::If(branches, Some(body))));
+                        }
+                        _ => return Ok(Some(Stmt::If(branches, None))),
+                    }
+                }
+            }
+            "function" => {
+                self.i += 1;
+                let mut name = match self.peek().cloned() {
+                    Some(Tok::Ident(n)) => n,
+                    _ => return Err(format!("function: expected a name {}", self.here())),
+                };
+                self.i += 1;
+                let mut out = None;
+                if self.eat("=") {
+                    out = Some(name);
+                    name = match self.peek().cloned() {
+                        Some(Tok::Ident(n)) => n,
+                        _ => return Err(format!("function: expected a name {}", self.here())),
+                    };
+                    self.i += 1;
+                }
+                let mut params = vec![];
+                if self.eat("(") {
+                    while !self.eat(")") {
+                        match self.peek().cloned() {
+                            Some(Tok::Ident(p)) => params.push(p),
+                            _ => {
+                                return Err(format!(
+                                    "function {}: parameters are names {}",
+                                    name,
+                                    self.here()
+                                ))
+                            }
+                        }
+                        self.i += 1;
+                        if !self.eat(",") && !self.is(")") {
+                            return Err(format!("function {}: expected , or ) {}", name, self.here()));
+                        }
+                    }
+                }
+                let (body, _) = self.block(&["end"], "function")?;
+                Ok(Some(Stmt::Function(name, params, out, body)))
+            }
+            "break" if ends => {
+                self.i += 1;
+                Ok(Some(Stmt::Break))
+            }
+            "continue" if ends => {
+                self.i += 1;
+                Ok(Some(Stmt::Continue))
+            }
+            "return" => {
+                self.i += 1;
+                if self.at_separator()
+                    || self.peek().is_none()
+                    || matches!(self.peek(), Some(Tok::Ident(w)) if w == "end")
+                {
+                    return Ok(Some(Stmt::Return(None)));
+                }
+                Ok(Some(Stmt::Return(Some(self.expr()?))))
+            }
+            "end" | "else" | "elseif" if ends || word != "end" => {
+                Err(format!("'{}' without a block to close", word))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn at_separator(&self) -> bool {
+        matches!(
+            self.peek(),
+            None | Some(Tok::Sep) | Some(Tok::Newline) | Some(Tok::Sym(","))
+        )
+    }
+
+    /// statements up to one of the stop words; returns them and the stop word
+    fn block(&mut self, stops: &[&str], what: &str) -> R<(Block, String)> {
+        let mut out = vec![];
+        loop {
+            while matches!(self.peek(), Some(Tok::Sep) | Some(Tok::Newline)) || self.is(",") {
+                self.i += 1;
+            }
+            match self.peek() {
+                None => return Err(format!("{}: missing end", what)),
+                Some(Tok::Ident(w)) if stops.contains(&w.as_str()) => {
+                    let w = w.clone();
+                    self.i += 1;
+                    return Ok((out, w));
+                }
+                _ => {}
+            }
+            let st = self.statement()?;
+            let quiet = self.semi.get(self.i).copied().unwrap_or(false);
+            out.push((st, quiet));
+            match self.peek() {
+                None | Some(Tok::Sep) | Some(Tok::Newline) | Some(Tok::Sym(",")) => {}
+                Some(Tok::Ident(w)) if stops.contains(&w.as_str()) => {}
+                Some(_) => return Err(format!("unexpected input {}", self.here())),
+            }
+        }
+    }
+
+    /// name(i, j) = value or name[i, j] = value
+    fn try_set_index(&mut self, name: &str) -> R<Option<Stmt>> {
+        let open = match self.t.get(self.i + 1) {
+            Some(t) if !t.space_before => match t.tok {
+                Tok::Sym("(") => ")",
+                Tok::Sym("[") => "]",
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        let save = self.i;
+        self.i += 2;
+        let save_m = self.in_matrix;
+        self.in_matrix = 0;
+        let mut idx = vec![];
+        let ok = (|| -> R<bool> {
+            if !self.is(open) {
+                idx.push(self.expr()?);
+                while self.eat(",") {
+                    idx.push(self.expr()?);
+                }
+            }
+            Ok(self.eat(open) && self.eat("="))
+        })();
+        self.in_matrix = save_m;
+        match ok {
+            Ok(true) => Ok(Some(Stmt::SetIndex(
+                name.to_string(),
+                idx,
+                open == "]",
+                self.expr()?,
+            ))),
+            _ => {
+                self.i = save;
+                Ok(None)
+            }
+        }
     }
 
     /// f(x, y) followed by := or = : the parameter names and the position after the =
@@ -411,7 +654,10 @@ impl P {
             "*" => (Op::Mul, 5, false),
             "/" => (Op::Div, 5, false),
             "\\" => (Op::Solve, 5, false),
+            ".*" => (Op::EMul, 5, false),
+            "./" => (Op::EDiv, 5, false),
             "^" => (Op::Pow, 7, true),
+            ".^" => (Op::EPow, 7, true),
             _ => return None,
         })
     }
@@ -423,7 +669,7 @@ impl P {
                 break;
             }
             self.i += 1;
-            let rhs = if op == Op::Pow {
+            let rhs = if op == Op::Pow || op == Op::EPow {
                 self.unary_pow()?
             } else {
                 self.binary(if right { prec } else { prec + 1 })?
@@ -439,12 +685,10 @@ impl P {
             return Ok(Node::Neg(Box::new(self.unary_pow()?)));
         }
         let base = self.postfix()?;
-        if self.eat("^") {
-            return Ok(Node::Bin(
-                Op::Pow,
-                Box::new(base),
-                Box::new(self.unary_pow()?),
-            ));
+        for (s, op) in [("^", Op::Pow), (".^", Op::EPow)] {
+            if self.eat(s) {
+                return Ok(Node::Bin(op, Box::new(base), Box::new(self.unary_pow()?)));
+            }
         }
         Ok(base)
     }
@@ -526,8 +770,52 @@ impl P {
                 Ok(e)
             }
             Tok::Sym("[") => self.matrix(),
+            Tok::Sym("{") => self.list(),
             t => Err(format!("unexpected {}", describe(&t))),
         }
+    }
+
+    /// {a, b, c} or {name: value, ...}
+    fn list(&mut self) -> R<Node> {
+        let save = self.in_matrix;
+        self.in_matrix = 0;
+        let skip = |p: &mut P| {
+            while matches!(p.peek(), Some(Tok::Newline)) {
+                p.i += 1;
+            }
+        };
+        skip(self);
+        let record = matches!(self.peek(), Some(Tok::Ident(_)))
+            && matches!(self.t.get(self.i + 1).map(|t| &t.tok), Some(Tok::Sym(":")));
+        let mut items = vec![];
+        let mut fields = vec![];
+        while !self.eat("}") {
+            if self.peek().is_none() {
+                return Err("missing }".into());
+            }
+            if record {
+                let name = match self.peek().cloned() {
+                    Some(Tok::Ident(n)) => n,
+                    _ => return Err(format!("expected a field name {}", self.here())),
+                };
+                self.i += 1;
+                self.expect(":")?;
+                fields.push((name, self.binary(0)?));
+            } else {
+                items.push(self.expr()?);
+            }
+            skip(self);
+            if !self.eat(",") && !self.is("}") {
+                return Err(format!("expected , or }} {}", self.here()));
+            }
+            skip(self);
+        }
+        self.in_matrix = save;
+        Ok(if record {
+            Node::Record(fields)
+        } else {
+            Node::List(items)
+        })
     }
 
     fn matrix(&mut self) -> R<Node> {
@@ -578,7 +866,79 @@ fn describe(t: &Tok) -> String {
 /// lines while this holds.
 pub fn needs_more(src: &str) -> bool {
     let (depth, cont) = scan(src);
-    depth > 0 || cont
+    depth > 0 || cont || open_blocks(src) > 0
+}
+
+/// how many for/while/if/function blocks are still open (an `if(c, a, b)`
+/// with commas is the function, not a block)
+pub fn open_blocks(src: &str) -> i32 {
+    let c: Vec<char> = src.chars().collect();
+    let (mut i, mut depth, mut blocks) = (0, 0i32, 0i32);
+    while i < c.len() {
+        let ch = c[i];
+        if ch == '"' {
+            i += 1;
+            while i < c.len() && c[i] != '"' && c[i] != '\n' {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == '/' && c.get(i + 1) == Some(&'/') {
+            while i < c.len() && c[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+        if ch.is_alphabetic() || ch == '_' {
+            let start = i;
+            while i < c.len() && (c[i].is_alphanumeric() || c[i] == '_' || c[i] == '.') {
+                i += 1;
+            }
+            let prev_dot = start > 0 && c[start - 1] == '.';
+            let w: String = c[start..i].iter().collect();
+            if depth == 0 && !prev_dot {
+                if w == "end" {
+                    blocks -= 1;
+                } else if OPENERS.contains(&w.as_str()) {
+                    let is_call = w == "if" && {
+                        // if( ... , ... ): the function form
+                        let mut j = i;
+                        let mut d = 0;
+                        let mut comma = false;
+                        if c.get(j) == Some(&'(') {
+                            while j < c.len() {
+                                match c[j] {
+                                    '(' | '[' | '{' => d += 1,
+                                    ')' | ']' | '}' => {
+                                        d -= 1;
+                                        if d == 0 {
+                                            break;
+                                        }
+                                    }
+                                    ',' if d == 1 => comma = true,
+                                    _ => {}
+                                }
+                                j += 1;
+                            }
+                        }
+                        comma
+                    };
+                    if !is_call {
+                        blocks += 1;
+                    }
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    blocks
 }
 
 /// (open brackets, whether the text ends in a continuation `\`)
@@ -600,8 +960,8 @@ fn scan(src: &str) -> (i32, bool) {
                     chars.next();
                 }
             }
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth -= 1,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
             '\\' => cont = true,
             _ => {}
         }
@@ -652,8 +1012,8 @@ pub fn parse_quiet(src: &str) -> Result<Vec<(Stmt, bool)>, String> {
     let mut open: Vec<&str> = vec![];
     for tok in toks {
         match &tok.tok {
-            Tok::Sym(b @ ("(" | "[")) => open.push(b),
-            Tok::Sym(")") | Tok::Sym("]") => {
+            Tok::Sym(b @ ("(" | "[" | "{")) => open.push(b),
+            Tok::Sym(")") | Tok::Sym("]") | Tok::Sym("}") => {
                 open.pop();
             }
             Tok::Newline if open.last() == Some(&"(") => continue,
@@ -673,6 +1033,7 @@ pub fn parse_quiet(src: &str) -> Result<Vec<(Stmt, bool)>, String> {
     }
     let mut p = P {
         t,
+        semi: semi.clone(),
         i: 0,
         in_matrix: 0,
     };
@@ -719,7 +1080,10 @@ fn src_prec(n: &Node) -> (String, u8) {
                 Op::Mul => ("*", 5, false),
                 Op::Div => ("/", 5, false),
                 Op::Solve => ("\\", 5, false),
+                Op::EMul => (".*", 5, false),
+                Op::EDiv => ("./", 5, false),
                 Op::Pow => ("^", 7, true),
+                Op::EPow => (".^", 7, true),
             };
             let (l, mut r) = if right { (p + 1, p) } else { (p, p + 1) };
             // a*(-b) reads better than a*-b
@@ -765,6 +1129,20 @@ fn src_prec(n: &Node) -> (String, u8) {
             9,
         ),
         Node::Transpose(a) => (format!("{}'", wrap(src_prec(a), 9)), 9),
+        Node::List(v) => (
+            format!("{{{}}}", v.iter().map(source).collect::<Vec<_>>().join(", ")),
+            9,
+        ),
+        Node::Record(v) => (
+            format!(
+                "{{{}}}",
+                v.iter()
+                    .map(|(k, x)| format!("{}: {}", k, source(x)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            9,
+        ),
     }
 }
 

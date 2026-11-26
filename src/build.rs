@@ -412,16 +412,46 @@ fn split_root_big(n: &num_bigint::BigInt, q: u32) -> (num_bigint::BigInt, num_bi
 pub fn neg(e: Expr) -> Expr {
     mul(vec![Expr::int(-1), e])
 }
+/// two plain decimals (fast path for large arrays)
+fn floats(a: &Expr, b: &Expr) -> Option<(f64, f64)> {
+    match (a, b) {
+        (Num(Number::Float(x)), Num(Number::Float(y))) => Some((*x, *y)),
+        (Num(Number::Float(x)), Num(n)) | (Num(n), Num(Number::Float(x))) if n.is_exact() => {
+            // keep the order of a and b
+            let (x, y) = (*x, n.to_f64());
+            if matches!(a, Num(Number::Float(_))) {
+                Some((x, y))
+            } else {
+                Some((y, x))
+            }
+        }
+        _ => None,
+    }
+}
 pub fn sub(a: Expr, b: Expr) -> Expr {
+    if let Some((x, y)) = floats(&a, &b) {
+        return Num(Number::Float(x - y));
+    }
     add(vec![a, neg(b)])
 }
 pub fn div(a: Expr, b: Expr) -> Expr {
+    if let Some((x, y)) = floats(&a, &b) {
+        if y != 0.0 {
+            return Num(Number::Float(x / y));
+        }
+    }
     mul(vec![a, pow(b, Expr::int(-1))])
 }
 pub fn add2(a: Expr, b: Expr) -> Expr {
+    if let Some((x, y)) = floats(&a, &b) {
+        return Num(Number::Float(x + y));
+    }
     add(vec![a, b])
 }
 pub fn mul2(a: Expr, b: Expr) -> Expr {
+    if let Some((x, y)) = floats(&a, &b) {
+        return Num(Number::Float(x * y));
+    }
     mul(vec![a, b])
 }
 pub fn exp(x: Expr) -> Expr {

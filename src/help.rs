@@ -52,9 +52,9 @@ pub const ENTRIES: &[Entry] = &[
     e!(
         "eval",
         "Basics",
-        "eval(expr)",
-        "Evaluates an expression numerically, for example a fraction or a constant like pi.",
-        "eval(5/4)"
+        "eval(expr), eval(expr, digits)",
+        "Evaluates an expression numerically, for example a fraction or a constant like pi. eval(expr, digits) gives that many significant digits (up to 100000): eval(pi, 50). The result is a decimal that keeps its digits through + - * / with exact numbers and with other such decimals (the smaller digit count wins); with an ordinary decimal, or inside a function like sin, it becomes an ordinary decimal (about 16 digits). A decimal typed with more than 17 digits keeps them all. Works for numbers, pi, e, + - * / ^, sqrt, exp, log, the trigonometric and hyperbolic functions and their inverses, entry by entry for matrices.",
+        "eval(sqrt(2), 40)"
     ),
     e!(
         "info",
@@ -543,9 +543,72 @@ pub const ENTRIES: &[Entry] = &[
     e!(
         "if",
         "Basics",
-        "if(condition, a, b)",
-        "a when the condition is true, b otherwise; only the chosen branch is computed, so recursive functions stop. When the recursive call is the whole branch, as in count(n, k) := if(k == n, k, count(n, k + 1)), it is run as a loop and may take millions of steps. Conditions use == ~= < > <= >= and && || !.",
+        "if(condition, a, b), or the block if condition ... elseif condition ... else ... end",
+        "As a block, runs the statements of the first branch whose condition is true (a matrix counts as true when all its entries do); elseif and else are optional, and end closes it. Inside a block, statements show their results unless they end in ;. As a function, if(condition, a, b) is a when the condition is true, b otherwise; only the chosen branch is computed, so recursive functions stop. When the recursive call is the whole branch, as in count(n, k) := if(k == n, k, count(n, k + 1)), it is run as a loop and may take millions of steps. Conditions use == ~= < > <= >= and && || !.",
         "fact(n) := if(n == 0, 1, n*fact(n-1)); fact(10)"
+    ),
+    e!(
+        "for",
+        "Language",
+        "for k = values ... end, for x in values ... end",
+        "Runs the statements up to end once for each value: each number of a range (for k = 1:10, for t = 0:0.1:1; walked one at a time, so for k = 1:10^7 builds no list), each entry of a row or column vector, each row of a matrix, each item of a list, each character of a string, or each field name of a record. Statements inside show their results unless they end in ;. break leaves the loop, continue goes to the next value. On one line, separate the parts with commas: for k = 1:3, print(k), end.",
+        "s = 0; for k = 1:100, s = s + k^2; end; s"
+    ),
+    e!(
+        "while",
+        "Language",
+        "while condition ... end",
+        "Runs the statements up to end as long as the condition is true; break leaves the loop, continue goes back to the test. Stops with an error after 100 million rounds.",
+        "n = 27; steps = 0; while n ~= 1, n = if(mod(n, 2) == 0, n/2, 3*n + 1); steps = steps + 1; end; steps"
+    ),
+    e!(
+        "function",
+        "Language",
+        "function name(a, b) ... end, function out = name(a, b) ... end",
+        "Defines a function of several statements. It has its own variables: only the arguments come in, and nothing it sets is seen outside. return value ends it with that value; with function out = name(...), the value of out at the end is the result. A function that gives no value can still be called as a statement (to print, for example). For a one-line formula, f(x) := ... is shorter.",
+        "function r = hyp(a, b), r = sqrt(a^2 + b^2); end; hyp(3, 4)"
+    ),
+    e!(
+        "print",
+        "Language",
+        "print(a, b, ...), disp(a)",
+        "Shows its arguments on one line, separated by spaces; strings without quotes. Useful inside loops and functions. disp is the same.",
+        "for k = 1:3, print(\"k =\", k, \"k^2 =\", k^2), end"
+    ),
+    e!(
+        "strings",
+        "Language",
+        "\"text\", s + t, str(x), num(s), length(s), s(k), upper, lower, trim, split, join, replace, contains, format",
+        "Text in double quotes. + joins text with anything (\"x = \" + 3 is \"x = 3\"). str(x) is x as text, num(s) reads a number from text. s(k) is the k-th character (from 1), s[k] counts from 0. upper(s), lower(s), trim(s) (spaces at the ends removed); split(s) at spaces or split(s, sep), giving a list; join(list, sep); replace(s, old, new); contains(s, part); format(\"{} + {} = {}\", 1, 2, 3) puts values in place of each {}.",
+        "split(\"a,b,c\", \",\")"
+    ),
+    e!(
+        "list",
+        "Language",
+        "{a, b, c}, list(v), L(k), L[k], append(L, x), concat(L1, L2), map(f, L), filter(f, L), reverse(L), length(L)",
+        "A list holds values of any kind, also other lists and matrices. L(k) is item k counting from 1, L[k] counts from 0, and L(end) is the last item. L(k) = x changes an item (and extends the list when k is just past the end). list(v) turns a vector or a string into a list. append adds items at the end, concat joins lists (or strings), map(f, L) applies a function by name to each item, filter(f, L) keeps the items where f is true, contains(L, x) tests membership. for x in L ... end walks it.",
+        "sq(x) := x^2; map(sq, {1, 2, 3})"
+    ),
+    e!(
+        "record",
+        "Language",
+        "{name: value, ...}, r.name, r.name = value, fields(r), has(r, \"name\")",
+        "A record holds named values. Make one with {mass: 3, name: \"ball\"} or field by field: p.mass = 3 creates p when it does not exist yet. Records can hold records: p.pos.x = 1. fields(r) lists the names, has(r, \"name\") tests for one.",
+        "p = {mass: 2, v: 3}; p.mass*p.v^2/2"
+    ),
+    e!(
+        "assignment",
+        "Language",
+        "x(k) = value, A(i, j) = value, A[i, j] = value, x(end + 1) = value",
+        "Changes one entry of a vector, matrix or list: x(k) counts from 1, x[k] from 0. A vector grows when k is past its end (missing entries become 0), so x = []; for k = 1:5, x(k) = k^2; end builds a vector. In positions, end is the last one: x(end), x[end], x(end + 1) = v appends. A(k) = row replaces row k of a matrix.",
+        "x = []; for k = 1:5, x(k) = k^2; end; x"
+    ),
+    e!(
+        "elementwise",
+        "Matrices",
+        "A .* B, A ./ B, A .^ B",
+        "Entry-by-entry product, quotient and power of two matrices of the same size, or of a matrix and a number (1 ./ [1 2 4] is [1, 1/2, 1/4]). * / ^ on matrices are the matrix operations; + and - are entry by entry already.",
+        "[1 2 3] .* [4 5 6]"
     ),
     e!(
         "equations",
@@ -1371,7 +1434,34 @@ const ALIASES: &[(&str, &str)] = &[
     ("rank", "rref"),
     ("null", "rref"),
     ("cols", "rows"),
-    ("length", "rows"),
+    ("break", "for"),
+    ("continue", "for"),
+    ("end", "for"),
+    ("in", "for"),
+    ("return", "function"),
+    ("elseif", "if"),
+    ("else", "if"),
+    ("disp", "print"),
+    ("str", "strings"),
+    ("num", "strings"),
+    ("upper", "strings"),
+    ("lower", "strings"),
+    ("trim", "strings"),
+    ("split", "strings"),
+    ("join", "strings"),
+    ("replace", "strings"),
+    ("contains", "strings"),
+    ("format", "strings"),
+    ("append", "list"),
+    ("concat", "list"),
+    ("map", "list"),
+    ("filter", "list"),
+    ("reverse", "list"),
+    ("fields", "record"),
+    ("has", "record"),
+    (".*", "elementwise"),
+    ("./", "elementwise"),
+    (".^", "elementwise"),
     ("word", "letters"),
     ("decode", "encode"),
     ("whos", "who"),
@@ -1512,7 +1602,7 @@ pub fn help(name: Option<&str>) -> String {
                     es.iter().map(|e| e.name).collect::<Vec<_>>().join(", ")
                 );
             }
-            s + "Operators: + - * / ^ \\ && || == ~= < > <= >=. Constants: pi, e, i (or j). End a line with ; to hide its result."
+            s + "Operators: + - * / ^ \\ .* ./ .^ && || == ~= < > <= >=. Constants: pi, e, i (or j). End a line with ; to hide its result."
         }
         Some(n) => match entry(n) {
             Some(e) => plain(e),
