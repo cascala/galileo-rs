@@ -670,14 +670,14 @@ pub const ENTRIES: &[Entry] = &[
         "semiprime",
         "Factoring lab",
         "semiprime(digits), semiprime(digits, seed), semifactors(digits, seed)",
-        "A balanced semiprime N = p q with exactly that many digits, p and q primes of the same size drawn at random from the seed (default 0); the same seed always gives the same number. semifactors gives [p q] with p < q. These are the test numbers of the factoring lab.",
+        "A balanced semiprime N = p q with exactly that many digits, p and q primes of the same size drawn at random from the seed (default 0); the same seed always gives the same number. semifactors gives the factorization like factor: [p, 1; q, 1] with p < q. These are the test numbers of the factoring lab.",
         "semiprime(30, 7)"
     ),
     e!(
         "labrun",
         "Factoring lab",
         "labrun(method, N), labrun(method, N, seconds)",
-        "Runs one factoring method on N with a time limit (default 5 s) and reports the factor and the work it took. Work is counted in multiplications modulo N, the same on every computer. A method is a built-in name in quotes: \"trial\", \"fermat\", \"hart\", \"rho\", \"pm1\", \"squfof\", \"ecm\", \"qs\"; a lab program like \"iter(x^2 + 1, x - y, 2)\" or \"rel(rti, 64)\" (see help(algosearch)); or the name of your own function f(n) := ... that returns a factor (its work is counted in evaluation steps, so compare user functions by time). r[0] is the factor.",
+        "Runs one factoring method on N with a time limit (default 5 s) and reports the factor and the work it took. Work is counted in multiplications modulo N, the same on every computer. A method is a built-in name in quotes: \"trial\", \"fermat\", \"hart\", \"rho\", \"pm1\", \"squfof\", \"ecm\", \"qs\"; a lab program like \"iter(x^2 + 1, x - y, 2)\" or \"rel(rti, 64)\" (see help(algosearch)); or the name of your own function f(n) := ... that returns a factor (its work is counted in evaluation steps, so compare user functions by time). The result is a factorization like factor's: rows [p, e], here [p, 1; q, 1] for the split N = p q ([] when no factor is found).",
         "labrun(\"qs\", semiprime(40, 1))"
     ),
     e!(
@@ -712,7 +712,7 @@ pub const ENTRIES: &[Entry] = &[
         "gnfs",
         "Factoring lab",
         "gnfs(N), gnfs(N, seconds), gnfs(N, f, m), gnfs(N, f, m, seconds)",
-        "Factors N with the number field sieve and prints every step: the polynomial f with f(m) divisible by N (base m, or a special form when N divides b^k +- 1: that is the special number field sieve), the factor bases, the line sieve over pairs (a, b) where both a - b m and the norm b^d f(a/b) are smooth, the linear algebra mod 2 (with quadratic characters), the square root in the number field (Hensel lifting at a prime where f splits) and gcd(X - Y, N). Give your own f (a polynomial in x, made monic if needed) and m to try a polynomial. Default limit 60 s. This is a teaching version: below about 60 digits the quadratic sieve is faster. r[0] is the factor.",
+        "Factors N with the number field sieve and prints every step: the polynomial f with f(m) divisible by N (base m, or a special form when N divides b^k +- 1: that is the special number field sieve), the factor bases, the line sieve over pairs (a, b) where both a - b m and the norm b^d f(a/b) are smooth, the linear algebra mod 2 (with quadratic characters), the square root in the number field (Hensel lifting at a prime where f splits) and gcd(X - Y, N). Give your own f (a polynomial in x, made monic if needed) and m to try a polynomial. Default limit 60 s. This is a teaching version: below about 60 digits the quadratic sieve is faster. The result is a factorization like factor's: rows [p, e], here [p, 1; q, 1] for the split N = p q ([] when no factor is found).",
         "gnfs(2^128 + 1)"
     ),
     e!(
@@ -740,7 +740,7 @@ pub const ENTRIES: &[Entry] = &[
         "algfactor",
         "Number theory",
         "algfactor(n), algfactor(n, effort), algfactor(n, f), algfactor(n, f, effort)",
-        "Searches for an algebraic form of the whole number n and factors along it, one row per piece with its size, its prime factors and the composite parts that did not split. It tests, in order: a form typed as a^k +- b^k; n = a^k + 1 or a^k - 1 for every base a (by k-th roots); n = a^k +- b^k for b up to 12*effort; Sophie Germain's a^4 + 4b^4; n dividing b^k +- 1 (a cofactor from a factor table) for b up to 12*effort and k up to 3000*effort; and finally n = f(x) for every polynomial family in families() (built in, plus any added with addfamily); then the same families with a second variable, n = y^d f(x/y) for y up to 50*effort (so x^6 + 27 also finds x^6 + 27y^6); the list includes 81 Aurifeuillean-type families g(c x^2) and g(c x^3) found by search (like x^6 + 8x^2 - 1 = (x^3 + 2x^2 + 2x - 1)(x^3 - 2x^2 + 2x + 1)), and every family is first checked modulo small numbers so most are ruled out without big arithmetic; then Fermat's method (n = a^2 - b^2 with a near sqrt(n), 20000*effort steps), which splits n at once when two factors are close; and last, for every degree d and every base x near the d-th root of n (and of n/c for small leading digits c), it writes n in base x with balanced digits, and when only a few digits are nonzero and all are at most 8*effort, it factors that polynomial. With a polynomial f in one variable, only n = f(x) is tested. Pieces are values of cyclotomic polynomials (split again by Aurifeuillean factors) or of the factors of f. effort (default 1, about a second; up to 10000) also gives Pollard rho and p - 1 that many times more work on each piece. r[k] is the value of piece k.",
+        "Searches for an algebraic form of the whole number n and factors along it, one row per piece with its size, its prime factors and the composite parts that did not split. It tests, in order: a form typed as a^k +- b^k; n = a^k + 1 or a^k - 1 for every base a (by k-th roots); n = a^k +- b^k for b up to 12*effort; Sophie Germain's a^4 + 4b^4; n dividing b^k +- 1 (a cofactor from a factor table) for b up to 12*effort and k up to 3000*effort; and finally n = f(x) for every polynomial family in families() (built in, plus any added with addfamily); then the same families with a second variable, n = y^d f(x/y) for y up to 50*effort (so x^6 + 27 also finds x^6 + 27y^6); the list includes 81 Aurifeuillean-type families g(c x^2) and g(c x^3) found by search (like x^6 + 8x^2 - 1 = (x^3 + 2x^2 + 2x - 1)(x^3 - 2x^2 + 2x + 1)), and every family is first checked modulo small numbers so most are ruled out without big arithmetic; then Fermat's method (n = a^2 - b^2 with a near sqrt(n), 20000*effort steps), which splits n at once when two factors are close; and last, for every degree d and every base x near the d-th root of n (and of n/c for small leading digits c), it writes n in base x with balanced digits, and when only a few digits are nonzero and all are at most 8*effort, it factors that polynomial. With a polynomial f in one variable, only n = f(x) is tested. Pieces are values of cyclotomic polynomials (split again by Aurifeuillean factors) or of the factors of f. effort (default 1, about a second; up to 10000) also gives Pollard rho and p - 1 that many times more work on each piece. The result has one row per factor found, like factor: [p, e], with a composite part that did not split in a row of its own.",
         "algfactor((2^1062 + 1)/5)"
     ),
     e!(
@@ -761,21 +761,21 @@ pub const ENTRIES: &[Entry] = &[
         "pm1",
         "Number theory",
         "pm1(n), pm1(n, B)",
-        "Pollard's p - 1 method with bound B (default 100000): computes 3^E mod n for E = lcm(1, ..., B). A prime p of n with every prime power of p - 1 at most B has 3^E = 1 mod p, because (Z/p)* has order p - 1, so gcd(3^E - 1, n) finds p. It says which case happened and shows p - 1.",
+        "Pollard's p - 1 method with bound B (default 100000): computes 3^E mod n for E = lcm(1, ..., B). A prime p of n with every prime power of p - 1 at most B has 3^E = 1 mod p, because (Z/p)* has order p - 1, so gcd(3^E - 1, n) finds p. It says which case happened and shows p - 1. The result is a factorization like factor's: rows [p, e], here [p, 1; q, 1] for the split n = p q ([] when no factor is found).",
         "pm1(2^67 - 1)"
     ),
     e!(
         "ecm",
         "Number theory",
         "ecm(n), ecm(n, curves), ecm(n, curves, B1)",
-        "Lenstra's elliptic curve method: like p - 1, but in the group of points of a random elliptic curve mod p, whose order varies between p + 1 - 2 sqrt(p) and p + 1 + 2 sqrt(p) from curve to curve. Each curve is a new chance for a smooth group order. Defaults: 50 curves, B1 = 11000 (good for factors of about 20 digits; 50000 for 25, 250000 for 30). algfactor and factor also try a few curves after rho, more with a larger effort.",
+        "Lenstra's elliptic curve method: like p - 1, but in the group of points of a random elliptic curve mod p, whose order varies between p + 1 - 2 sqrt(p) and p + 1 + 2 sqrt(p) from curve to curve. Each curve is a new chance for a smooth group order. Defaults: 50 curves, B1 = 11000 (good for factors of about 20 digits; 50000 for 25, 250000 for 30). algfactor and factor also try a few curves after rho, more with a larger effort. The result is a factorization like factor's: rows [p, e], here [p, 1; q, 1] for the split n = p q ([] when no factor is found).",
         "ecm(nextprime(7*10^15)*nextprime(10^45))"
     ),
     e!(
         "squfof",
         "Number theory",
         "squfof(n)",
-        "Shanks' square forms factorization (SQUFOF): walks the continued fraction of sqrt(k n) until a square appears among the denominators, then walks back from the square form to a factor. It takes about n^(1/4) steps, so it is for n up to about 30 digits.",
+        "Shanks' square forms factorization (SQUFOF): walks the continued fraction of sqrt(k n) until a square appears among the denominators, then walks back from the square form to a factor. It takes about n^(1/4) steps, so it is for n up to about 30 digits. The result is a factorization like factor's: rows [p, e], here [p, 1; q, 1] for the split n = p q ([] when no factor is found).",
         "squfof(1000000000039 * 10000000000037)"
     ),
     e!(
@@ -796,7 +796,7 @@ pub const ENTRIES: &[Entry] = &[
         "classfactor",
         "Number theory",
         "classfactor(n), classfactor(n, B)",
-        "Factoring with the class group (after Schnorr and Lenstra): raises a form of discriminant -4kn to the product of the odd prime powers up to B (default 50000), then squares until the identity appears; the form just before has order 2, so it is ambiguous and splits n. Works when the odd part of the class number is B-smooth; for n up to about 25 digits.",
+        "Factoring with the class group (after Schnorr and Lenstra): raises a form of discriminant -4kn to the product of the odd prime powers up to B (default 50000), then squares until the identity appears; the form just before has order 2, so it is ambiguous and splits n. Works when the odd part of the class number is B-smooth; for n up to about 25 digits. The result is a factorization like factor's: rows [p, e], here [p, 1; q, 1] for the split n = p q ([] when no factor is found).",
         "classfactor(nextprime(10^8)*nextprime(3*10^8))"
     ),
     e!(

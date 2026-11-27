@@ -144,7 +144,7 @@ impl Session {
         Ok(if f == "semiprime" {
             bnum(n)
         } else {
-            Expr::Matrix(vec![vec![bnum(p), bnum(q)]])
+            crate::factor_cmd::factor_rows(vec![p, q])
         })
     }
 
@@ -272,19 +272,8 @@ impl Session {
             )
         };
         let formulas: Vec<Expr> = run.factor.iter().map(|f| bnum(f.clone())).collect();
-        // the value: both factors, smaller first ([] when none)
-        let value = match &run.factor {
-            Some(f) => {
-                let g = &n / f;
-                let (a, b) = if f < &g {
-                    (f.clone(), g)
-                } else {
-                    (g, f.clone())
-                };
-                Expr::Matrix(vec![vec![bnum(a), bnum(b)]])
-            }
-            None => Expr::Matrix(vec![]),
-        };
+        // the value: the split as factorization rows, like factor ([] when none)
+        let value = crate::factor_cmd::split_rows(&n, run.factor.as_ref());
         Ok(with_value(report("NFS", text, md, formulas, vec![]), value))
     }
 
@@ -394,7 +383,11 @@ impl Session {
                     fmt_units(w),
                     fmt_secs(t)
                 );
-                Ok(report("LabRun", text.clone(), text, vec![bnum(f)], vec![]))
+                let value = crate::factor_cmd::split_rows(&n, Some(&f));
+                Ok(with_value(
+                    report("LabRun", text.clone(), text, vec![bnum(f)], vec![]),
+                    value,
+                ))
             }
             None => {
                 let text = format!(
@@ -1005,7 +998,7 @@ mod tests {
     #[test]
     fn lab_commands() {
         let mut s = Session::new();
-        let out = s.run_to_string("N = semiprime(20, 1); f = semifactors(20, 1); f(1)*f(2) == N");
+        let out = s.run_to_string("N = semiprime(20, 1); f = semifactors(20, 1); f(1, 1)*f(2, 1) == N");
         assert!(out.trim().ends_with("true"), "{}", out);
         let out = s.run_to_string("labrun(\"rho\", semiprime(20, 3))");
         assert!(out.contains("found"), "{}", out);

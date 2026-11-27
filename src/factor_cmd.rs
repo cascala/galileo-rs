@@ -38,6 +38,42 @@ fn int(n: i128) -> Expr {
     Expr::int(n)
 }
 
+/// A factorization as Galileo returns it everywhere: rows [p, e], smallest
+/// first, equal parts merged into an exponent. Parts need not be prime (a
+/// composite part that did not split gets a row of its own); a negative part
+/// becomes a row [-1, 1] in front. No parts gives [].
+pub(crate) fn factor_rows(parts: Vec<BigInt>) -> Expr {
+    let mut sign = false;
+    let mut m: BTreeMap<BigInt, u32> = BTreeMap::new();
+    for p in parts {
+        if p.is_negative() {
+            sign = !sign;
+        }
+        let a = p.abs();
+        if !a.is_one() {
+            *m.entry(a).or_insert(0) += 1;
+        }
+    }
+    let mut rows = vec![];
+    if sign {
+        rows.push(vec![Expr::int(-1), Expr::int(1)]);
+    }
+    for (p, e) in m {
+        rows.push(vec![bnum(p), Expr::int(e as i128)]);
+    }
+    Expr::Matrix(rows)
+}
+
+/// The split n = f * (n / f) as factorization rows; [] when there is no split
+pub(crate) fn split_rows(n: &BigInt, f: Option<&BigInt>) -> Expr {
+    match f {
+        Some(f) if !f.is_zero() && !f.abs().is_one() && f.abs() != n.abs() => {
+            factor_rows(vec![f.abs(), (n / f).abs()])
+        }
+        _ => Expr::Matrix(vec![]),
+    }
+}
+
 fn bnum(n: BigInt) -> Expr {
     Expr::Num(Number::from_bigint(n))
 }
@@ -847,8 +883,8 @@ impl Session {
         tx.push(summary);
         allf.sort();
         md.push(String::new());
-        md.push("The value lists the factors found (primes, and any composite part left), smallest first; r[k] is piece k.".into());
-        let value = Expr::Matrix(vec![allf.into_iter().map(bnum).collect()]);
+        md.push("The value has one row per factor found, like `factor`: the prime (or a composite part left over) and its exponent.".into());
+        let value = factor_rows(allf);
         Ok(crate::discover::with_value(
             report("Algebraic factors", tx.join("\n"), md.join("\n"), formulas),
             value,

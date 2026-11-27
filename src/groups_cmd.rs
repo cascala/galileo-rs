@@ -102,7 +102,7 @@ impl Session {
                     _ => return Err("usage: pm1(n) or pm1(n, B): Pollard's p - 1 method with bound B (default 100000)".into()),
                 };
                 let (f, gg) = g::pm1(&n, b);
-                let value = f.clone().map_or(Expr::int(1), bnum);
+                let value = crate::factor_cmd::split_rows(&n, f.as_ref());
                 let text = match f {
                     Some(p) => format!(
                         "found the factor {}: for this prime p, p - 1 has no prime factor above {} (p - 1 = {}), so 3^E = 1 mod p for E = lcm(1..{}), and gcd(3^E - 1, n) = p",
@@ -136,9 +136,7 @@ impl Session {
                     );
                 }
                 let found = g::ecm(&n, curves, b1);
-                let value = found
-                    .as_ref()
-                    .map_or(Expr::int(1), |(p, _)| bnum(p.clone()));
+                let value = crate::factor_cmd::split_rows(&n, found.as_ref().map(|(p, _)| p));
                 let text = match found {
                     Some((p, c)) => format!(
                         "found the factor {} on curve {} of {}: the group of that elliptic curve mod {} has an order made of primes up to {}, plus at most one prime up to {}",
@@ -166,15 +164,13 @@ impl Session {
                     return Err("squfof: n has more than 100 bits; SQUFOF takes about n^(1/4) steps, which is too many".into());
                 }
                 let found = g::squfof(&n);
-                let value = found
-                    .as_ref()
-                    .map_or(Expr::int(1), |(p, _, _)| bnum(p.clone()));
+                let value = crate::factor_cmd::split_rows(&n, found.as_ref().map(|(p, _, _)| p));
                 self.note(match found {
                     Some((p, k, steps)) => format!(
                         "found the factor {} after {} steps of the continued fraction of sqrt({}·n)",
                         p, steps, k
                     ),
-                    None => "no factor found (the value is 1)".into(),
+                    None => "no factor found (the value is [])".into(),
                 });
                 Ok(value)
             })(),
@@ -188,9 +184,7 @@ impl Session {
                     return Err("classfactor: n has more than 140 bits; the class group is too large for this method".into());
                 }
                 let found = g::class_factor(&n, b, 3);
-                let value = found
-                    .as_ref()
-                    .map_or(Expr::int(1), |(p, _, _)| bnum(p.clone()));
+                let value = crate::factor_cmd::split_rows(&n, found.as_ref().map(|(p, _, _)| p));
                 let text = match found {
                     Some((p, k, f)) => format!(
                         "found the factor {}: the form {} of discriminant -4·{}·n has order 2 (it is ambiguous), and ambiguous forms are factorizations",
