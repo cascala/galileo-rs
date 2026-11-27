@@ -780,7 +780,95 @@ impl Session {
         }
     }
 
+    /// gcd of two polynomials in one variable over Q, or mod a prime p: monic
+    fn poly_gcd(&mut self, a: &Expr, b: &Expr, p: Option<num_bigint::BigInt>) -> R<Expr> {
+        use num_rational::BigRational;
+        let mut vars: Vec<String> = a.symbols();
+        for v in b.symbols() {
+            if !vars.contains(&v) {
+                vars.push(v);
+            }
+        }
+        if vars.len() > 1 {
+            return Err(format!("gcd: polynomials in one variable only, got {}", vars.join(", ")));
+        }
+        let x = vars.pop().unwrap_or_else(|| "x".to_string());
+        let coeffs = |e: &Expr| -> R<Vec<BigRational>> {
+            let c = cas::poly_coeffs(&calc::expand(e), &x)
+                .ok_or_else(|| format!("gcd: {} is not a polynomial", show(e)))?;
+            c.iter()
+                .map(|c| simplify(c).num().and_then(|n| n.rational()).ok_or_else(|| "gcd: the coefficients must be rational numbers".to_string()))
+                .collect()
+        };
+        let (ca, cb) = (coeffs(a)?, coeffs(b)?);
+        let trim = |mut v: Vec<BigRational>| {
+            while v.last().is_some_and(|c| c.is_zero()) {
+                v.pop();
+            }
+            v
+        };
+        let g: Vec<BigRational> = if let Some(p) = p {
+            let ints = |v: &[BigRational]| -> R<Vec<num_bigint::BigInt>> {
+                v.iter()
+                    .map(|c| {
+                        let d = c.denom().clone();
+                        let inv = crate::numtheory::modinv(&num_integer::Integer::mod_floor(&d, &p), &p)
+                            .ok_or("gcd: a denominator is divisible by p")?;
+                        Ok(num_integer::Integer::mod_floor(&(c.numer() * inv), &p))
+                    })
+                    .collect()
+            };
+            crate::modsolve::gcd(&ints(&ca)?, &ints(&cb)?, &p)
+                .into_iter()
+                .map(BigRational::from_integer)
+                .collect()
+        } else {
+            let (mut u, mut v) = (trim(ca), trim(cb));
+            while !v.is_empty() {
+                // u mod v
+                let mut r = u.clone();
+                let m = v.len() - 1;
+                while r.len() > m && !r.is_empty() {
+                    let lead = r[r.len() - 1].clone() / v[m].clone();
+                    let k = r.len() - 1 - m;
+                    for j in 0..=m {
+                        r[k + j] = r[k + j].clone() - lead.clone() * v[j].clone();
+                    }
+                    r.pop();
+                    r = trim(r);
+                }
+                u = v;
+                v = r;
+            }
+            match u.last().cloned() {
+                Some(l) => u.into_iter().map(|c| c / l.clone()).collect(),
+                None => u,
+            }
+        };
+        let xs = Expr::sym(&x);
+        let terms: Vec<Expr> = g
+            .into_iter()
+            .enumerate()
+            .filter(|(_, c)| !c.is_zero())
+            .map(|(k, c)| mul2(crate::qring::qnum(c), pow(xs.clone(), Expr::int(k as i128))))
+            .collect();
+        let note = match &terms[..] {
+            [] => "gcd: both polynomials are 0.".to_string(),
+            _ => "gcd of polynomials: Euclid's algorithm (divide, keep the remainder, repeat until it is 0), made monic.".to_string(),
+        };
+        self.note(note);
+        Ok(simplify(&add(terms)))
+    }
+
     fn binary(&mut self, f: &str, args: &[Node]) -> R<Expr> {
+        if f == "gcd" && args.len() == 3 {
+            let (a, b) = (self.eval(&args[0])?, self.eval(&args[1])?);
+            let p = big_integer(&self.eval(&args[2])?, "gcd")?;
+            if p < num_bigint::BigInt::from(2) || !crate::numtheory::is_prime(&p) {
+                return Err("gcd(f, g, p): p must be a prime".into());
+            }
+            return self.poly_gcd(&a, &b, Some(p));
+        }
         let [a, b] = args else {
             return Err(format!("{} takes 2 arguments", f));
         };
@@ -801,6 +889,9 @@ impl Session {
         match f {
             "binomial" => Ok(cas::binomial(integer(&va, f)?, integer(&vb, f)?)),
             "gcd" | "lcm" => {
+                if f == "gcd" && !(va.num().is_some_and(|n| n.is_integer()) && vb.num().is_some_and(|n| n.is_integer())) {
+                    return self.poly_gcd(&va, &vb, None);
+                }
                 let (x, y) = (big_integer(&va, f)?, big_integer(&vb, f)?);
                 let g = num_integer::Integer::gcd(&x, &y);
                 Ok(crate::extra_cmd::bnum(if f == "gcd" {

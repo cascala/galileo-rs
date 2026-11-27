@@ -89,3 +89,12 @@ fn helpers() {
     assert_eq!(one("cross([1 0 0], [0 1 0])"), one("[0 0 1]"));
     assert_eq!(one("coeff((x+1)^3, x, 2)"), "3");
 }
+
+#[test]
+fn polynomial_gcd() {
+    assert_eq!(one("gcd(x^4 - 1, x^6 - 1)"), "x^2-1");
+    assert_eq!(one("gcd(2*x^2 - 2, 4*x - 4)"), "x-1");
+    assert_eq!(one("gcd(x^4 + 1, x^17 - x, 17)"), "x^4+1");
+    assert_eq!(one("gcd(x^4 + 1, x^3 - x, 3)"), "1");
+    assert_eq!(one("gcd(12, 18)"), "6");
+}

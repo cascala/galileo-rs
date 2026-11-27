@@ -207,8 +207,8 @@ pub const ENTRIES: &[Entry] = &[
     e!(
         "mod",
         "Functions",
-        "mod(a, b), gcd(a, b), lcm(a, b)",
-        "Remainder of a / b (with the sign of b), greatest common divisor, least common multiple.",
+        "mod(a, b), gcd(a, b), lcm(a, b), gcd(f, g, p)",
+        "Remainder of a / b (with the sign of b), greatest common divisor, least common multiple. gcd of two polynomials in one variable gives their monic greatest common divisor over the rationals (Euclid's algorithm), or modulo a prime p with gcd(f, g, p).",
         "mod(17, 5)"
     ),
     e!(
