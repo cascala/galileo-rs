@@ -1,5 +1,7 @@
 # galileo-rs
 
+> **This repository has moved to [cascala/galileo](https://github.com/cascala/galileo).** All Galileo engine development continues there; this repository is archived.
+
 The [Galileo](https://github.com/cascala/galileo) computer algebra system, rewritten in Rust.
 
 **▶ [Try Galileo in your browser](https://cascala.github.io/igalileo/)**: nothing to install. Open the [playground](https://cascala.github.io/igalileo/playground/), start the [first lesson](https://cascala.github.io/igalileo/playground/#lesson/foundations/01-numbers), or use [notebooks in JupyterLite](https://cascala.github.io/igalileo/lab/lab/index.html).
