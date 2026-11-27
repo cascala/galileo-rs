@@ -4,7 +4,7 @@
 
 Every built-in command, by topic. Inside Galileo, `help` lists them and `help(name)` shows the same text as here. How statements, operators, functions, matrices, strings, lists and blocks are written is described in the [language reference](language.md).
 
-[Basics](#basics) · [Functions](#functions) · [Algebra](#algebra) · [Calculus](#calculus) · [Matrices](#matrices) · [Plotting](#plotting) · [Language](#language) · [Complex numbers](#complex-numbers) · [Number theory](#number-theory) · [Factoring lab](#factoring-lab) · [Groups](#groups) · [Rings and fields](#rings-and-fields) · [Statistics](#statistics) · [Complex analysis](#complex-analysis) · [Differential equations](#differential-equations) · [Differential geometry](#differential-geometry) · [Discovery](#discovery) · [Multivariable calculus](#multivariable-calculus) · [Special functions](#special-functions) · [Units](#units) · [Signals](#signals) · [Graphs](#graphs) · [Random processes](#random-processes)
+[Basics](#basics) · [Functions](#functions) · [Algebra](#algebra) · [Calculus](#calculus) · [Matrices](#matrices) · [Plotting](#plotting) · [Language](#language) · [Complex numbers](#complex-numbers) · [Number theory](#number-theory) · [Factoring lab](#factoring-lab) · [Groups](#groups) · [Rings and fields](#rings-and-fields) · [Statistics](#statistics) · [Complex analysis](#complex-analysis) · [Differential equations](#differential-equations) · [Differential geometry](#differential-geometry) · [Discovery](#discovery) · [Multivariable calculus](#multivariable-calculus) · [Special functions](#special-functions) · [Units](#units) · [Signals](#signals) · [Graphs](#graphs) · [Random processes](#random-processes) · [Partial differential equations](#partial-differential-equations)
 
 ## Basics
 
@@ -1526,7 +1526,7 @@ Example: `seriessolve(y'' == x*y, y, x, 8)`
 
 `laplace(f, t, s) or laplace(f)`
 
-Laplace transform F(s) = ∫₀^∞ f(t) e^(-s t) dt from the table and its rules: powers, exponentials, sines and cosines, sinh, cosh, shifts by e^(a t), products with t^n, heaviside(t - a) and dirac(t - a), and derivatives y(t), y'(t), y''(t) with y(0), y'(0).
+Laplace transform F(s) = ∫₀^∞ f(t) e^(-s t) dt from the table and its rules: powers, exponentials, sines and cosines, sinh, cosh, shifts by e^(a t), products with t^n, heaviside(t - a) and dirac(t - a), and derivatives y(t), y'(t), y''(t) with y(0), y'(0). With 7 or 8 arguments, laplace(g, x, a, b, y, c, d) solves Laplace's equation instead (see poisson).
 
 Example: `laplace(exp(-t)*cos(2*t), t, s)`
 
@@ -2099,3 +2099,37 @@ Black-Scholes prices of a European call and put option: stock price S, strike pr
 Example: `bscall(100, 100, 0.05, 0.2, 1)`
 
 Also found as `bsput`.
+
+## Partial differential equations
+
+### heat
+
+`heat(f, x, a, b, T) or heat(f, x, a, b, T, {k: ..., left: ..., right: ..., source: ..., n: 100, frames: 50})`
+
+Solves the heat equation u_t = k u_xx on a <= x <= b up to time T, starting from u = f(x), by Crank-Nicolson. The ends hold u = 0 unless left or right give a value, an expression in t, or "insulated" (no heat flows through); source adds a heat source in x and t. Returns a record {x, t, u} with one row of u per snapshot; show it with pdeplot.
+
+Example: `s = heat(sin(pi*x), x, 0, 1, 0.1); pdeplot(s, "lines")`
+
+### wave
+
+`wave(f, g, x, a, b, T) or wave(f, g, x, a, b, T, {c: ..., left: ..., right: ..., damping: ..., n: 200, frames: 50})`
+
+Solves the wave equation u_tt = c^2 u_xx on a <= x <= b up to time T, starting from u = f(x) and u_t = g(x), by the leapfrog scheme (Courant number 0.9 or less). The ends are held at 0 unless left or right give a value, an expression in t, or "free"; damping adds - damping u_t. Returns a record {x, t, u}; show it with pdeplot.
+
+Example: `s = wave(exp(-100*(x - 1/2)^2), 0, x, 0, 1, 1); pdeplot(s)`
+
+### poisson
+
+`poisson(f, g, x, a, b, y, c, d) or laplace(g, x, a, b, y, c, d), with a last record {left: ..., right: ..., bottom: ..., top: ..., n: 40}`
+
+Solves u_xx + u_yy = f (poisson) or = 0 (laplace with 7 or 8 arguments) on the rectangle a <= x <= b, c <= y <= d with u = g(x, y) on its edge, by the five-point formula and successive over-relaxation. left and right (expressions in y) or bottom and top (in x) set single edges. Returns a record {x, y, u} with u(j, i) the value at (x(i), y(j)); show it with pdeplot.
+
+Example: `s = laplace(0, x, 0, 1, y, 0, 1, {top: sin(pi*x)}); pdeplot(s)`
+
+### pdeplot
+
+`pdeplot(s) or pdeplot(s, "animate" | "lines" | "map" | "surface")`
+
+Shows a result of heat, wave, laplace or poisson: an animation in time (the default for heat and wave), snapshots side by side, a color map (the default for laplace and poisson, with level curves) or a surface.
+
+Example: `pdeplot(heat(x*(1 - x), x, 0, 1, 0.2), "map")`
