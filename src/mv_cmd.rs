@@ -1007,7 +1007,7 @@ fn special_teach(f: &str, args: &[Expr], r: &Expr) -> Option<String> {
 }
 
 /// Nice round levels strictly inside the range of values
-fn auto_levels(sorted: &[f64], k: usize) -> Vec<f64> {
+pub(crate) fn auto_levels(sorted: &[f64], k: usize) -> Vec<f64> {
     let q = |p: f64| sorted[((p * (sorted.len() - 1) as f64).round() as usize).min(sorted.len() - 1)];
     let (lo, hi) = (q(0.02), q(0.98));
     if hi - lo <= 0.0 {
@@ -1019,7 +1019,7 @@ fn auto_levels(sorted: &[f64], k: usize) -> Vec<f64> {
 }
 
 /// Blue to red through light grey, for t in [0, 1]
-fn ramp(t: f64) -> String {
+pub(crate) fn ramp(t: f64) -> String {
     let stops = [
         (59.0, 76.0, 192.0),
         (124.0, 159.0, 249.0),
@@ -1036,7 +1036,7 @@ fn ramp(t: f64) -> String {
 }
 
 /// Marching squares: the level curve z = lvl as polylines separated by NaN
-fn march(xs: &[f64], ys: &[f64], z: &[Vec<f64>], lvl: f64) -> Vec<(f64, f64)> {
+pub(crate) fn march(xs: &[f64], ys: &[f64], z: &[Vec<f64>], lvl: f64) -> Vec<(f64, f64)> {
     let mut segs: Vec<((f64, f64), (f64, f64))> = vec![];
     let lerp = |p: (f64, f64, f64), q: (f64, f64, f64)| {
         let t = (lvl - p.2) / (q.2 - p.2);
